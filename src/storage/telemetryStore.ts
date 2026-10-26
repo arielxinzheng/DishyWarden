@@ -17,7 +17,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { app } from 'electron';
+import { createRequire } from 'node:module';
 import type { TelemetryData } from '../core/dishClient';
 import {
   DDL,
@@ -83,6 +83,13 @@ function pickBucketMs(spanMs: number, maxPoints: number, minBucketMs: number): n
   return Math.ceil(ideal / 1000) * 1000;
 }
 
+/**
+ * 解析数据库路径。
+ *
+ * `app` 用动态 require 拿 —— 顶层 import 'electron' 会让这个模块在
+ * Node 环境(测试脚本、CLI)里直接炸掉, 而 electron 只是个可选项:
+ * 只有在没给显式路径时才需要它。
+ */
 function resolveDbPath(explicit?: string): string {
   if (explicit) {
     if (explicit !== ':memory:') {
@@ -90,6 +97,10 @@ function resolveDbPath(explicit?: string): string {
     }
     return explicit;
   }
+
+  // 延迟加载: 只有走到默认路径才需要 electron
+  const nodeRequire = createRequire(import.meta.url);
+  const { app } = nodeRequire('electron') as typeof import('electron');
   const dir = path.join(app.getPath('userData'), 'data');
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'telemetry.db');

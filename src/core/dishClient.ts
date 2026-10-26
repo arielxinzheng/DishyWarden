@@ -1,11 +1,12 @@
 /**
  * Starlink Dish gRPC 客户端
- * 
+ *
  * 基于 @connectrpc/connect-web 实现与 Starlink 终端的 gRPC-Web 通信
  * 参考 dishylink 的实现，处理 CORS 和 Referer 头限制
  */
 
 import { createConnectTransport } from '@connectrpc/connect-web';
+import { DishGrpcClient } from './dishGrpc';
 
 export interface DishConfig {
   address: string;      // dish 地址，默认 192.168.100.1
@@ -13,6 +14,13 @@ export interface DishConfig {
   timeout?: number;     // 请求超时（毫秒），默认 10000
   useProxy?: boolean;   // 是否使用代理绕过 CORS
   proxyUrl?: string;    // 代理服务器地址
+  /**
+   * 设备不可达时是否回落到模拟数据。
+   *
+   * 默认 false —— 监控软件宁可报"采不到数", 也不能把随机数当成设备实测值。
+   * 打开后 mock 数据会带 obstructionMapSource:'mock', 界面会明确标注。
+   */
+  fallbackToMock?: boolean;
 }
 
 export interface TelemetryData {
@@ -38,6 +46,18 @@ export interface TelemetryData {
   
   // 障碍图 (123x123 网格)
   obstructionMap?: number[][];
+  /**
+   * 遮挡图的数据来源标记。
+   *
+   * 'real'  —— 来自 dish 的 dishGetObstructionMap(1015) 真实星历
+   * 'mock'  —— 本地模拟生成(径向渐变), 只用于开发演示
+   *
+   * 存在的意义: mock 图和真实图在视觉上几乎一样, 不标记的话用户无法分辨,
+   * 会把演示数据当成设备实测结果 —— 这是监控软件最不该有的误导。
+   */
+  obstructionMapSource?: 'real' | 'mock';
+  /** 遮挡图的采集时刻(epoch ms), 用于显示数据新鲜度 */
+  obstructionMapTimestamp?: number;
   
   // 校准/对齐状态
   boresightAzimuthDeg?: number;      // 波束指向方位角（度）
@@ -97,7 +117,13 @@ export function createDishTransport(config: Required<DishConfig>) {
 export class DishClient {
   private config: Required<DishConfig>;
   // private client: PromiseClient<DishService>; // 等 protobuf 生成后启用
-  
+
+  /** 真实 gRPC 通道 (reflection 取 proto, 见 dishGrpc.ts) */
+  private grpc: DishGrpcClient | null = null;
+
+  /** 遥测里没有的字段, 保留上一帧的值, 避免指标跳成 0 */
+  private lastTelemetry: TelemetryData | null = null;
+
   constructor(config: Partial<DishConfig> = {}) {
     this.config = {
       address: config.address || '127.0.0.1',
@@ -105,6 +131,7 @@ export class DishClient {
       timeout: config.timeout || 10000,
       useProxy: config.useProxy || false,
       proxyUrl: config.proxyUrl || 'http://localhost:8080',
+      fallbackToMock: config.fallbackToMock ?? false,
     };
     
     // const transport = createDishTransport(this.config);
@@ -115,18 +142,16 @@ export class DishClient {
    * 测试连接
    */
   async testConnection(): Promise<boolean> {
+    // 真实 gRPC 通道探活 —— 比 /healthz 更贴近实际数据通路
+    // (dish 的 9200 端口只讲 gRPC, 拿 HTTP 打过去必然失败)
+    if (!this.grpc) {
+      this.grpc = new DishGrpcClient(this.config.address, this.config.grpcPort);
+    }
     try {
-      // 暂时使用简单的 HTTP 请求测试连接
-      const response = await fetch(
-        `http://${this.config.address}:${this.config.grpcPort}/healthz`,
-        { 
-          method: 'GET',
-          signal: AbortSignal.timeout(this.config.timeout),
-        }
-      );
-      return response.ok;
+      await this.grpc.getStatus(this.config.timeout);
+      return true;
     } catch (error) {
-      console.error('Connection test failed:', error);
+      console.error('[dishClient] 连接测试失败:', error instanceof Error ? error.message : error);
       return false;
     }
   }
@@ -134,16 +159,42 @@ export class DishClient {
   /**
    * 获取遥测数据
    * 
-   * 调用 dish 的 getStatus 方法获取完整遥测数据
+   * 走真实 gRPC: dishGetStatus(1000) + dishGetObstructionMap(1015)。
+   * 遮挡图失败不拖垮整帧 —— 遥测仍然可用, 只是没有遮挡图。
    */
   async getTelemetry(): Promise<TelemetryData> {
-    // TODO: 实现真实的 gRPC 调用
-    // const request = new GetStatusRequest();
-    // const response = await this.client.handle(request);
-    // return this.parseTelemetry(response);
-    
-    // 暂时返回模拟数据
-    return this.getMockTelemetry();
+    if (!this.grpc) {
+      this.grpc = new DishGrpcClient(this.config.address, this.config.grpcPort);
+    }
+
+    try {
+      const status = await this.grpc.getStatus(this.config.timeout);
+      const telemetry = this.parseStatus(status);
+
+      // 遮挡图单独取 —— 失败只丢遮挡图, 不影响其它遥测
+      try {
+        const map = await this.grpc.getObstructionMap(this.config.timeout);
+        telemetry.obstructionMap = map.data;
+        telemetry.obstructionMapSource = 'real';
+        telemetry.obstructionMapTimestamp = Date.now();
+        // SNR 的真实值在遮挡图的 snr 数组里 (dishGetStatus 只给布尔量)
+        if (map.avgSnr !== null) telemetry.snr = map.avgSnr;
+      } catch (error) {
+        console.warn('[dishClient] 遮挡图获取失败, 本帧不带遮挡图:', error);
+        telemetry.obstructionMap = undefined;
+        telemetry.obstructionMapSource = undefined;
+        telemetry.obstructionMapTimestamp = undefined;
+      }
+
+      this.lastTelemetry = telemetry;
+      return telemetry;
+    } catch (error) {
+      if (!this.config.fallbackToMock) throw error;
+      console.warn('[dishClient] 设备不可达, 回落模拟数据 (fallbackToMock):', error);
+      const mock = this.getMockTelemetry();
+      this.lastTelemetry = mock;
+      return mock;
+    }
   }
   
   /**
@@ -154,6 +205,151 @@ export class DishClient {
   async getHistory(_seconds: number = 3600): Promise<TelemetryData[]> {
     // TODO: 实现历史数据查询
     return [];
+  }
+
+  /**
+   * 把 dishGetStatus 响应映射成 TelemetryData。
+   *
+   * 字段名来自 DishyMock 的 proto (keepCase:false ⇒ camelCase)。
+   * 响应里没有的字段用上一帧的值兜底, 缺省 0。
+   */
+  private parseStatus(status: Record<string, unknown>): TelemetryData {
+    const prev = this.lastTelemetry;
+    // int64 字段在 proto 里是 string (loader 用 longs:String) —— 这里统一转数字
+    const num = (v: unknown, fallback = 0): number => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim() !== '') {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+      return fallback;
+    };
+
+    const deviceInfo = (status.deviceInfo ?? {}) as Record<string, unknown>;
+    const deviceState = (status.deviceState ?? {}) as Record<string, unknown>;
+    const obstructionStats = (status.obstructionStats ?? {}) as Record<string, unknown>;
+    const alignment = (status.alignmentStats ?? {}) as Record<string, unknown>;
+
+    // dishGetStatus 不带 snr 数值, 只给 isSnrAboveNoiseFloor;
+    // SNR 真实值在遮挡图的 snr 数组里 (见 getObstructionMap 的 avgSnr)
+    const snr = num(status.snr, prev?.snr ?? 0);
+
+    // 遮挡统计
+    const currentlyObstructed = obstructionStats.currentlyObstructed === true;
+    const fractionObstructed = num(obstructionStats.fractionObstructed, 0);
+
+    // 告警列表: dish 用 alerts 结构体, 这里摊平成字符串数组
+    const alertObj = (status.alerts ?? {}) as Record<string, unknown>;
+    const alerts: string[] = [];
+    for (const [k, v] of Object.entries(alertObj)) {
+      if (v === true) alerts.push(k);
+    }
+
+    const telemetry: TelemetryData = {
+      // 协议里没有 state 枚举 (DishyMock proto 明确注明"被测方全程不读"),
+      // 所以连接状态只能从实际链路指标推导 —— 见 deriveState()
+      state: 'SEARCHING',
+      uptime: num(deviceState.uptimeS, prev?.uptime ?? 0),
+
+      popPingLatencyMs: num(status.popPingLatencyMs, 0),
+      popPingDropRate: num(status.popPingDropRate, prev?.popPingDropRate ?? 0),
+      downlinkThroughputBps: num(status.downlinkThroughputBps, 0),
+      uplinkThroughputBps: num(status.uplinkThroughputBps, 0),
+
+      snr,
+      secondsObstructed: num(obstructionStats.secondsObstructed, prev?.secondsObstructed ?? 0),
+      fractionObstructed,
+      currentlyObstructed,
+
+      satelliteId: num(status.satelliteId, prev?.satelliteId ?? 0),
+      secondsToFirstNonemptySlot: num(status.secondsToFirstNonemptySlot, 0),
+
+      obstructionMap: prev?.obstructionMap,
+      obstructionMapSource: prev?.obstructionMapSource,
+      obstructionMapTimestamp: prev?.obstructionMapTimestamp,
+
+      boresightAzimuthDeg: num(status.boresightAzimuthDeg, prev?.boresightAzimuthDeg ?? 0),
+      boresightElevationDeg: num(status.boresightElevationDeg, prev?.boresightElevationDeg ?? 0),
+      attitudeEstimationState:
+        typeof alignment.attitudeEstimationState === 'string'
+          ? alignment.attitudeEstimationState
+          : prev?.attitudeEstimationState,
+      tiltAngleDeg: num(alignment.tiltAngleDeg, prev?.tiltAngleDeg ?? 0),
+      alignmentStats: {
+        validS: alignment.hasActuators !== undefined
+          ? alignment.hasActuators === 'HAS_ACTUATORS_YES'
+          : prev?.alignmentStats?.validS,
+        attitudeUncertaintyDeg: num(
+          alignment.attitudeUncertaintyDeg,
+          prev?.alignmentStats?.attitudeUncertaintyDeg ?? 0
+        ),
+        desiredBoresightAzimuthDeg: num(
+          alignment.desiredBoresightAzimuthDeg,
+          prev?.alignmentStats?.desiredBoresightAzimuthDeg ?? 0
+        ),
+        desiredBoresightElevationDeg: num(
+          alignment.desiredBoresightElevationDeg,
+          prev?.alignmentStats?.desiredBoresightElevationDeg ?? 0
+        ),
+      },
+
+      dishTemperature: num(deviceInfo.dishTemperature, prev?.dishTemperature ?? 0),
+      powerSupplyTemperature: num(deviceInfo.powerSupplyTemperature, prev?.powerSupplyTemperature ?? 0),
+      hardwareVersion:
+        typeof deviceInfo.hardwareVersion === 'string'
+          ? deviceInfo.hardwareVersion
+          : prev?.hardwareVersion ?? '',
+      softwareVersion:
+        typeof deviceInfo.softwareVersion === 'string'
+          ? deviceInfo.softwareVersion
+          : prev?.softwareVersion ?? '',
+      alerts,
+    };
+
+    telemetry.state = this.deriveState(status, telemetry);
+    return telemetry;
+  }
+
+  /**
+   * 推导连接状态。
+   *
+   * 协议里没有 state 枚举 —— dish 的 gRPC 只给底层指标,
+   * 状态得自己判。判据按"能连上卫星"到"链路正常"的顺序:
+   *
+   *  - BOOTING   : 设备刚启动 (uptime 很小), 还没进入正常状态
+   *  - OFFLINE   : 设备不可达 (这一层不会走到, 不可达时调用已经抛错了)
+   *  - SEARCHING : 设备活着, 但没有有效链路 (无带宽 / 无 SNR / 无路由器)
+   *  - ONLINE    : 有下行带宽, 且 SNR 高于噪声底
+   *
+   * 遮挡本身不算断线 —— dish 被遮挡时仍然有带宽, 只是吞吐下降。
+   * 把"遮挡"直接判成 OFFLINE 会让在线率指标失真。
+   */
+  private deriveState(
+    status: Record<string, unknown>,
+    telemetry: TelemetryData
+  ): TelemetryData['state'] {
+    // 设备刚起来
+    if (telemetry.uptime > 0 && telemetry.uptime < 60) {
+      return 'BOOTING';
+    }
+
+    // 有下行带宽说明链路是通的
+    const hasDownlink = telemetry.downlinkThroughputBps > 0;
+    const hasRouter = Array.isArray(status.connectedRouters)
+      ? (status.connectedRouters as unknown[]).length > 0
+      : false;
+
+    if (!hasDownlink && !hasRouter) {
+      return 'SEARCHING';
+    }
+
+    // SNR 高于噪声底 (isSnrAboveNoiseFloor 是设备直接给的布尔量)
+    const snrOk = status.isSnrAboveNoiseFloor === true;
+    if (snrOk || telemetry.snr > 0) {
+      return 'ONLINE';
+    }
+
+    return 'SEARCHING';
   }
   
   /**
@@ -183,6 +379,7 @@ export class DishClient {
       satelliteId: this.nextMockSatelliteId(),
       secondsToFirstNonemptySlot: 0,
       obstructionMap: this.generateMockObstructionMap(),
+      obstructionMapSource: 'mock',
       // 校准数据
       boresightAzimuthDeg: 28.3 + (Math.random() - 0.5) * 2,
       boresightElevationDeg: 76.2 + (Math.random() - 0.5) * 2,
@@ -236,6 +433,11 @@ export class DishClient {
    */
   updateConfig(config: Partial<DishConfig>) {
     this.config = { ...this.config, ...config };
+    // 地址或端口变了, 旧连接作废
+    if (config.address !== undefined || config.grpcPort !== undefined) {
+      this.grpc?.close();
+      this.grpc = null;
+    }
   }
   
   /**
