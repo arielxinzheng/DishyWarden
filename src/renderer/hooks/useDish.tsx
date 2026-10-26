@@ -11,12 +11,29 @@ import type { TelemetryData } from '@/core/dishClient';
 import { calculateSummary, type NetworkAnomaly } from '@/core/telemetry';
 import type { HistorySample, HistorySummary } from '@/storage/types';
 
+/**
+ * 遮挡图数据 + 它的来源与新鲜度
+ *
+ * source 存在的理由: 模拟图和真实图在视觉上几乎一样, 不标记的话
+ * 用户会把演示数据当成设备实测结果 —— 这是监控软件最不该有的误导。
+ */
+export interface ObstructionData {
+  /** 123x123 网格, 值域 0-255, 越高遮挡越严重 */
+  data: number[][];
+  /** 采集时刻 epoch ms */
+  timestamp: number;
+  /** 'real' = 设备实测, 'mock' = 本地模拟 */
+  source: 'real' | 'mock';
+}
+
 interface DishContextValue {
   telemetry: TelemetryData | null;
   anomalies: NetworkAnomaly[];
   isConnected: boolean;
   isLoading: boolean;
   error: string | null;
+  /** 最新遮挡图(含来源与时间), 无数据时为 null */
+  obstruction: ObstructionData | null;
   refresh: () => Promise<void>;
 }
 
@@ -49,6 +66,7 @@ function generateMockTelemetry(): TelemetryData {
     secondsToFirstNonemptySlot: Math.floor(Math.random() * 30),
 
     obstructionMap: generateMockObstructionMap(), // 添加障碍图
+    obstructionMapSource: 'mock',
 
     // 校准数据
     boresightAzimuthDeg: 28.3 + (Math.random() - 0.5) * 2,
@@ -104,6 +122,8 @@ export function DishProvider({ children }: DishProviderProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 遮挡图独立于遥测刷新: 它有自己的采集时刻和来源标记
+  const [obstruction, setObstruction] = useState<ObstructionData | null>(null);
 
   // 检测是否在 Electron 环境
   const isElectron = typeof window !== 'undefined' && window.electronAPI;
@@ -124,6 +144,11 @@ export function DishProvider({ children }: DishProviderProps) {
       await new Promise(resolve => setTimeout(resolve, 500));
       
       setTelemetry(generateMockTelemetry());
+      setObstruction({
+        data: generateMockObstructionMap(),
+        timestamp: Date.now(),
+        source: 'mock',
+      });
       setIsConnected(true);
       setIsLoading(false);
       console.log('[useDish] Mock data loaded successfully');
@@ -155,6 +180,21 @@ export function DishProvider({ children }: DishProviderProps) {
       } else {
         setError('无法获取遥测数据，请检查 Starlink 设备是否已连接');
         setIsConnected(false);
+      }
+
+      // 遮挡图单独取: 失败不影响遥测, 也不能让整页报错
+      try {
+        const obs = await window.electronAPI.getLatestObstruction();
+        if (obs && Array.isArray(obs.data) && obs.data.length > 0) {
+          setObstruction({
+            data: obs.data,
+            timestamp: obs.ts,
+            // 来源由主进程给出 —— 不能在这里假定是真实数据
+            source: obs.source === 'real' ? 'real' : 'mock',
+          });
+        }
+      } catch (err) {
+        console.warn('[useDish] 获取遮挡图失败:', err);
       }
     } catch (err) {
       console.error('Failed to fetch telemetry:', err);
@@ -215,6 +255,7 @@ export function DishProvider({ children }: DishProviderProps) {
     isConnected,
     isLoading,
     error,
+    obstruction,
     refresh,
   };
 

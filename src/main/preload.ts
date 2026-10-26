@@ -11,9 +11,12 @@ import type { HistorySample, HistorySummary, PruneResult, StorageStats } from '.
  * Electron API 接口定义
  */
 export interface ElectronAPI {
-  // 获取最新遥测数据
+  // 获取实时遥测数据
   getLatestTelemetry: () => Promise<TelemetryData | null>;
-  
+
+  // 获取最新一份遮挡图及其采集时刻
+  getLatestObstruction: () => Promise<{ data: number[][]; ts: number; source: 'real' | 'mock' } | null>;
+
   // 获取历史数据（来自 SQLite 历史库）
   getHistory: (seconds: number) => Promise<HistorySample[]>;
 
@@ -85,7 +88,9 @@ export interface ElectronAPI {
  */
 contextBridge.exposeInMainWorld('electronAPI', {
   getLatestTelemetry: () => ipcRenderer.invoke('get-latest-telemetry'),
-  
+
+  getLatestObstruction: () => ipcRenderer.invoke('get-latest-obstruction'),
+
   getHistory: (seconds: number) => ipcRenderer.invoke('get-history', seconds),
 
   getHistorySummary: (seconds: number) => ipcRenderer.invoke('get-history-summary', seconds),

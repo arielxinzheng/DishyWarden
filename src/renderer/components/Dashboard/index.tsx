@@ -12,7 +12,12 @@ import {
   Globe,
   ChevronDown,
 } from 'lucide-react';
-import { useDish, useDishHistory, useHistorySummary } from '../../hooks/useDish';
+import { useDish, useDishHistory, useHistorySummary, type ObstructionData } from '../../hooks/useDish';
+import {
+  analyzeObstructionMap,
+  assessObstructionImpact,
+  describeObstructionAge,
+} from '../../lib/obstructionAnalysis';
 import {
   formatLatency,
   formatBandwidth,
@@ -46,7 +51,7 @@ const TIME_RANGE_SECONDS: Record<TimeRange, number> = {
 const toGb = (bytes: number) => (bytes / 1024 ** 3).toFixed(2);
 
 export default function Dashboard() {
-  const { telemetry, isConnected, isLoading, error, refresh } = useDish();
+  const { telemetry, isConnected, isLoading, error, refresh, obstruction } = useDish();
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
   const summary24h = useHistorySummary(86400);
   const [timeRange, setTimeRange] = useState<TimeRange>('1h');
@@ -505,7 +510,7 @@ export default function Dashboard() {
         
         {/* 右侧：遮挡概览 - 占 3/10 宽度 */}
         <div className="lg:col-span-3">
-          <ObstructionInsightCard telemetry={telemetry} />
+          <ObstructionInsightCard telemetry={telemetry} obstruction={obstruction} />
         </div>
       </div>
 
@@ -566,12 +571,34 @@ function getDotColorFromSeverity(severity: string): string {
 // 遮挡概览卡片
 interface ObstructionInsightCardProps {
   telemetry: any;
+  /** 真实遮挡图(含来源与采集时刻); 没有时降级用 mock */
+  obstruction: ObstructionData | null;
 }
 
-function ObstructionInsightCard({ telemetry }: ObstructionInsightCardProps) {
-  const obstructionRate = telemetry?.fractionObstructed || 0;
-  const obstructionPct = (obstructionRate * 100).toFixed(1);
-  
+function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCardProps) {
+  // 数据来源决定一切:
+  //   real -> 设备实测, 可以给方向/影响/遮挡率
+  //   mock -> 本地模拟, 只能画个样子, 且必须明确标出来
+  //
+  // 关键: 没有数据时**不生成随机 mock 顶替** —— 那样用户会把随机噪声
+  // 当成设备实测的视野图。宁可显示"暂无数据"。
+  const isReal = obstruction?.source === 'real';
+  const obstructionMapData = obstruction?.data ?? null;
+
+  // 统计只在有图时算
+  const stats = useMemo(
+    () => (obstructionMapData ? analyzeObstructionMap(obstructionMapData) : null),
+    [obstructionMapData]
+  );
+
+  // 遮挡率: 真实图用图上算出的比例; 模拟图不显示(数字是编的)
+  const obstructionRate = isReal && stats
+    ? stats.obstructionPercentage
+    : (telemetry?.fractionObstructed || 0);
+  const obstructionPct = isReal && stats
+    ? (obstructionRate * 100).toFixed(1)
+    : null;
+
   // 根据遮挡率确定严重程度
   const getSeverityInfo = (rate: number) => {
     if (rate < 0.02) return { label: '无遮挡', color: 'text-accent-green' };
@@ -581,9 +608,11 @@ function ObstructionInsightCard({ telemetry }: ObstructionInsightCardProps) {
   };
 
   const severity = getSeverityInfo(obstructionRate);
+  const impact = assessObstructionImpact(obstructionRate);
 
-  // 使用真实遮挡图数据，如果不存在则生成模拟数据
-  const obstructionMapData = telemetry?.obstructionMap || generateMockObstructionMap();
+  // 方向只在真实数据上给 —— mock 图的方向是随机生成的, 展示它就是误导
+  const showDirection = isReal && stats?.dominantDirection;
+  const ageText = obstruction ? describeObstructionAge(obstruction.timestamp) : null;
 
   return (
     <Card>
@@ -594,19 +623,30 @@ function ObstructionInsightCard({ telemetry }: ObstructionInsightCardProps) {
           </h3>
         </div>
 
-        {/* 3D 半球形天空遮挡图 */}
-        <div className="relative mx-auto mt-1">
-          <ObstructionHemisphere 
-            data={obstructionMapData}
-            width={360}
-            height={280}
-          />
-        </div>
+        {/* 3D 半球形天空遮挡图 —— 没有数据时不画随机图顶替 */}
+        {obstructionMapData ? (
+          <div className="relative mx-auto mt-1">
+            <ObstructionHemisphere
+              data={obstructionMapData}
+              width={360}
+              height={280}
+            />
+          </div>
+        ) : (
+          <div className="mx-auto mt-1 flex items-center justify-center rounded border border-dashed border-slate-700 text-xs text-muted-foreground"
+               style={{ width: 360, height: 280 }}>
+            暂无遮挡图数据
+          </div>
+        )}
 
-        <div className="mt-2 text-center">
-          <span className={`font-mono text-2xl font-bold ${severity.color}`}>{obstructionPct}%</span>
-          <span className="text-sm text-slate-400 ml-1">{severity.label}</span>
-        </div>
+        {obstructionPct !== null ? (
+          <div className="mt-2 text-center">
+            <span className={`font-mono text-2xl font-bold ${severity.color}`}>{obstructionPct}%</span>
+            <span className="text-sm text-slate-400 ml-1">{severity.label}</span>
+          </div>
+        ) : (
+          <div className="mt-2 text-center text-sm text-muted-foreground">—</div>
+        )}
 
         <div className="my-3 border-t border-slate-700/40" />
 
@@ -614,14 +654,41 @@ function ObstructionInsightCard({ telemetry }: ObstructionInsightCardProps) {
           <div className="flex items-center justify-between">
             <span className="text-slate-400">主遮挡方向</span>
             <span className="text-slate-200">
-              <Activity className="w-3 h-3 inline mr-1 text-sky-blue" />
-              西南
+              {showDirection ? (
+                <>
+                  <Activity className="w-3 h-3 inline mr-1 text-sky-blue" />
+                  {stats?.dominantDirection}
+                  {stats?.dominantAzimuth != null && (
+                    <span className="text-xs text-muted-foreground ml-1 font-mono">
+                      {stats.dominantAzimuth.toFixed(0)}°
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-muted-foreground text-xs">无实测数据</span>
+              )}
             </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-slate-400">影响</span>
-            <span className="text-accent-green">低</span>
+            <span className={impact.color}>{impact.label}</span>
           </div>
+          {ageText && (
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">数据时间</span>
+              <span className="text-xs text-muted-foreground">{ageText}</span>
+            </div>
+          )}
+          {obstruction && !isReal && (
+            <div className="text-xs text-warning-orange bg-warning-orange/10 border border-warning-orange/30 rounded px-2 py-1">
+              当前显示模拟数据（非设备实测）。设备返回遮挡图后会自动切换。
+            </div>
+          )}
+          {!obstruction && (
+            <div className="text-xs text-muted-foreground bg-ink-800/50 border border-border/50 rounded px-2 py-1">
+              设备尚未返回视野遮挡图。
+            </div>
+          )}
           <div className="text-xs text-center text-slate-500 mt-2 cursor-pointer hover:text-sky-blue transition-colors">
             点击可查看详细障碍图
           </div>
@@ -629,53 +696,6 @@ function ObstructionInsightCard({ telemetry }: ObstructionInsightCardProps) {
       </CardContent>
     </Card>
   );
-}
-
-// 生成模拟遮挡图数据（123x123）
-function generateMockObstructionMap(): number[][] {
-  const size = 123;
-  const center = (size - 1) / 2;
-  const map: number[][] = [];
-  
-  for (let y = 0; y < size; y++) {
-    const row: number[] = [];
-    for (let x = 0; x < size; x++) {
-      const dx = x - center;
-      const dy = y - center;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const normalizedDist = distance / center;
-      
-      // 超出圆形范围设为0（未映射）
-      if (normalizedDist > 1) {
-        row.push(0);
-        continue;
-      }
-      
-      // 模拟一些随机遮挡点
-      const angle = Math.atan2(dy, dx);
-      const noise = Math.random();
-      
-      // 在西南方向（角度 180-270度）制造一些障碍
-      const isSouthWest = angle > Math.PI * 0.5 && angle < Math.PI * 1.2;
-      
-      if (isSouthWest && normalizedDist > 0.6 && noise < 0.15) {
-        // 严重遮挡
-        row.push(250 + Math.floor(Math.random() * 50));
-      } else if (isSouthWest && normalizedDist > 0.5 && noise < 0.25) {
-        // 部分遮挡
-        row.push(100 + Math.floor(Math.random() * 100));
-      } else if (noise < 0.03) {
-        // 随机轻度遮挡
-        row.push(60 + Math.floor(Math.random() * 40));
-      } else {
-        // 清晰视野
-        row.push(10 + Math.floor(Math.random() * 30));
-      }
-    }
-    map.push(row);
-  }
-  
-  return map;
 }
 
 // 路由跟踪卡片

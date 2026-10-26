@@ -213,6 +213,17 @@ ipcMain.handle('get-latest-telemetry', () => {
 });
 
 /**
+ * IPC 处理器：获取最新一份遮挡图及其采集时刻
+ *
+ * 单独开一个通道而不是塞进 get-latest-telemetry, 是因为遮挡图
+ * 需要独立标注数据时间和来源(真实/模拟) —— 用户必须能分辨
+ * 看到的是设备实测还是演示数据。
+ */
+ipcMain.handle('get-latest-obstruction', () => {
+  return collector?.getLatestObstruction() || null;
+});
+
+/**
  * IPC 处理器：获取历史数据
  */
 ipcMain.handle('get-history', (_event, seconds: number) => {

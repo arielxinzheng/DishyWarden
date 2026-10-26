@@ -15,8 +15,13 @@
  *   索引扫描 / 范围查询 / 分桶聚合都直接走整数比较, 没有时区解析成本。
  */
 
-/** 库结构版本, 后续迁移时用于判断是否需要 ALTER */
-export const SCHEMA_VERSION = 1;
+/**
+ * 库结构版本, 后续迁移时用于判断是否需要 ALTER
+ *
+ * v1: 初始表结构
+ * v2: latest_obstruction_map 增加 source 列(标记遮挡图是实测还是模拟)
+ */
+export const SCHEMA_VERSION = 2;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
@@ -70,6 +75,10 @@ export const DDL = `
     id   INTEGER PRIMARY KEY CHECK (id = 1),
     ts   INTEGER NOT NULL,
     size INTEGER NOT NULL,
-    data TEXT    NOT NULL      -- number[][] 的 JSON
+    data TEXT    NOT NULL,     -- number[][] 的 JSON
+    -- 数据来源: 'real'=设备实测, 'mock'=本地模拟
+    -- 存在的理由: 模拟图和实测图视觉几乎一样, 不存来源就无法在界面上
+    -- 区分, 用户会把演示数据当成设备实测结果。
+    source TEXT NOT NULL DEFAULT 'real'
   );
 `;

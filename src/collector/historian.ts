@@ -223,6 +223,16 @@ export class DataCollector extends EventEmitter {
   }
 
   /**
+   * 获取最新一份遮挡图及其采集时刻。
+   *
+   * 遮挡图存在历史库的最新一行里(只保留最新一份), 所以即使
+   * 内存缓冲为空(应用刚启动)也能拿到上一次采集的视野。
+   */
+  getLatestObstruction(): { data: number[][]; ts: number; source: 'real' | 'mock' } | null {
+    return this.store?.readLatestObstruction() ?? null;
+  }
+
+  /**
    * 获取指定时间范围的历史数据
    *
    * 优先走 SQLite(可跨重启、可超出一小时), 库不可用时回落到内存缓冲区。

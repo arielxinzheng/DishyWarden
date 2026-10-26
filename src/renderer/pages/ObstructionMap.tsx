@@ -1,6 +1,11 @@
 import { useDish } from '../hooks/useDish';
 import { useMemo } from 'react';
 import { ObstructionHemisphere } from '../components/Dashboard/ObstructionHemisphere';
+import {
+  analyzeObstructionMap,
+  assessObstructionImpact,
+  describeObstructionAge,
+} from '../lib/obstructionAnalysis';
 
 /**
  * 障碍图页面
@@ -8,34 +13,23 @@ import { ObstructionHemisphere } from '../components/Dashboard/ObstructionHemisp
  * 123x123 网格，使用 Canvas 渲染热力图
  */
 export default function ObstructionMap() {
-  const { telemetry, isLoading, error } = useDish();
+  const { telemetry, isLoading, error, obstruction } = useDish();
+
+  // 优先用主进程存的实测遮挡图, 拿不到才降级到遥测里带的
+  // 注意: 两者都可能是模拟数据, 所以 source 必须跟着走 —— 不能假定是真实
+  const mapData = obstruction?.data ?? telemetry?.obstructionMap ?? null;
+  const isReal = obstruction?.source === 'real';
+  // 遥测里带的图没有独立来源标记, 保守当作 mock
+  const source: 'real' | 'mock' = obstruction ? (obstruction.source === 'real' ? 'real' : 'mock') : 'mock';
 
   // 计算障碍统计信息
   const stats = useMemo(() => {
-    if (!telemetry?.obstructionMap) return null;
+    if (!mapData) return null;
+    return analyzeObstructionMap(mapData);
+  }, [mapData]);
 
-    const map = telemetry.obstructionMap;
-    let totalPixels = 0;
-    let obstructedPixels = 0;
-    let maxObstruction = 0;
-
-    for (const row of map) {
-      for (const value of row) {
-        totalPixels++;
-        if (value > 50) obstructedPixels++; // 阈值: 50
-        maxObstruction = Math.max(maxObstruction, value);
-      }
-    }
-
-    const obstructionPercentage = (obstructedPixels / totalPixels) * 100;
-
-    return {
-      totalPixels,
-      obstructedPixels,
-      obstructionPercentage,
-      maxObstruction,
-    };
-  }, [telemetry?.obstructionMap]);
+  const impact = stats ? assessObstructionImpact(stats.obstructionPercentage) : null;
+  const ageText = obstruction ? describeObstructionAge(obstruction.timestamp) : null;
 
   if (isLoading) {
     return (
@@ -58,11 +52,14 @@ export default function ObstructionMap() {
     );
   }
 
-  if (!telemetry?.obstructionMap) {
+  if (!mapData) {
     return (
       <div className="p-8">
         <div className="bg-yellow-900/20 border border-yellow-500 rounded-lg p-4">
           <p className="text-yellow-400">暂无障碍图数据</p>
+          <p className="text-gray-400 text-sm mt-2">
+            设备尚未返回视野遮挡图。恢复连接后会自动显示。
+          </p>
         </div>
       </div>
     );
@@ -76,6 +73,19 @@ export default function ObstructionMap() {
         <p className="text-gray-400">
           3D 半球形透视投影 - 中心为天顶，边缘为地平线
         </p>
+      </div>
+
+      {/* 数据来源与新鲜度 —— 模拟图和实测图视觉几乎一样, 必须标出来 */}
+      <div className={`rounded-lg border px-4 py-3 text-sm ${
+        isReal
+          ? 'border-green-500/40 bg-green-900/20 text-green-300'
+          : 'border-yellow-500/40 bg-yellow-900/20 text-yellow-300'
+      }`}>
+        {source === 'real' ? (
+          <>设备实测遮挡图{ageText ? ` · ${ageText}` : ''}</>
+        ) : (
+          <>当前显示模拟数据（非设备实测）。设备返回遮挡图后会自动切换。</>
+        )}
       </div>
 
       {/* 统计卡片 */}
@@ -93,8 +103,8 @@ export default function ObstructionMap() {
           />
           <StatCard
             label="障碍率"
-            value={`${stats.obstructionPercentage.toFixed(2)}%`}
-            color={stats.obstructionPercentage > 10 ? 'red' : 'green'}
+            value={`${(stats.obstructionPercentage * 100).toFixed(2)}%`}
+            color={stats.obstructionPercentage > 0.10 ? 'red' : 'green'}
           />
           <StatCard
             label="最大障碍值"
@@ -104,10 +114,26 @@ export default function ObstructionMap() {
         </div>
       )}
 
+      {/* 方向与影响 —— 只在真实数据上给 */}
+      {stats && source === 'real' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <StatCard
+            label="主遮挡方向"
+            value={stats.dominantDirection ?? '无明显遮挡'}
+            color="blue"
+          />
+          <StatCard
+            label="影响评估"
+            value={impact?.label ?? '—'}
+            color={impact?.color === 'text-danger-red' ? 'red' : impact?.color === 'text-warning-orange' ? 'orange' : 'green'}
+          />
+        </div>
+      )}
+
       {/* 障碍图可视化 */}
       <div className="bg-gray-800 rounded-lg overflow-hidden flex justify-center py-6">
-        <ObstructionHemisphere 
-          data={telemetry.obstructionMap}
+        <ObstructionHemisphere
+          data={mapData}
           width={700}
           height={550}
           showLegend={true}

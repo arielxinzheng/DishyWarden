@@ -122,6 +122,7 @@ export class TelemetryStore {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.exec(DDL);
+    this.migrate();
 
     const columns = SAMPLE_FIELDS.map((f) => f.column).join(', ');
     const placeholders = SAMPLE_FIELDS.map(() => '?').join(', ');
@@ -163,12 +164,17 @@ export class TelemetryStore {
     `);
 
     this.upsertObstruction = this.db.prepare(`
-      INSERT INTO latest_obstruction_map (id, ts, size, data) VALUES (1, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET ts = excluded.ts, size = excluded.size, data = excluded.data
+      INSERT INTO latest_obstruction_map (id, ts, size, data, source)
+      VALUES (1, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        ts = excluded.ts,
+        size = excluded.size,
+        data = excluded.data,
+        source = excluded.source
     `);
 
     this.selectSnapshot = this.db.prepare('SELECT ts, payload FROM latest_snapshot WHERE id = 1');
-    this.selectObstruction = this.db.prepare('SELECT ts, data FROM latest_obstruction_map WHERE id = 1');
+    this.selectObstruction = this.db.prepare('SELECT ts, data, source FROM latest_obstruction_map WHERE id = 1');
 
     // 三个查询都返回同名列(ts/latency_ms/...), 共用同一个 mapper。
     // 注意 satellite_id 只有明细表有, 分桶/小时聚合不 select, 因此保持 null。
@@ -249,6 +255,37 @@ export class TelemetryStore {
 
   // ---------------------------------------------------------------- 写入
 
+  /**
+   * 轻量迁移: 给已存在的库补上新增的列。
+   *
+   * CREATE TABLE IF NOT EXISTS 对已存在的表不会改结构, 所以新增列
+   * 必须靠 ALTER TABLE 补。这里只做"缺什么补什么"式的幂等迁移 ——
+   * 每次启动都跑一遍, 已有列就跳过。
+   *
+   * 迁移历史:
+   *   v2: latest_obstruction_map.source —— 标记遮挡图是实测还是模拟
+   */
+  private migrate(): void {
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info(latest_obstruction_map)")
+        .all() as { name: string }[];
+      const names = cols.map((c) => c.name);
+
+      if (!names.includes('source')) {
+        // 存量行的来源未知 —— 保守标成 'mock'。
+        // 理由: 宁可提示"这是模拟数据"让用户去查, 也不能把未知数据显示成
+        // 设备实测。真实数据写入时会带上自己的 source 覆盖它。
+        this.db.exec(
+          "ALTER TABLE latest_obstruction_map ADD COLUMN source TEXT NOT NULL DEFAULT 'mock'"
+        );
+        console.log('[TelemetryStore] 迁移: latest_obstruction_map 增加 source 列(存量行标为 mock)');
+      }
+    } catch (error) {
+      console.warn('[TelemetryStore] 迁移失败(不影响使用):', error);
+    }
+  }
+
   /** 追加一条采样。同一时刻重复写入会覆盖。 */
   append(point: TimestampedTelemetry): void {
     this.appendTx(point);
@@ -282,16 +319,21 @@ export class TelemetryStore {
 
   private writeSnapshot(point: TimestampedTelemetry): void {
     const ts = toEpochMs(point.timestamp);
-    const { obstructionMap, ...rest } = point;
+    const { obstructionMap, obstructionMapSource, ...rest } = point;
 
     this.upsertSnapshot.run(ts, JSON.stringify(rest));
 
     // 遮挡图单行覆盖: 只有"当前视野"有意义
     if (Array.isArray(obstructionMap) && obstructionMap.length > 0) {
-      this.upsertObstruction.run(ts, obstructionMap.length, JSON.stringify(obstructionMap));
+      // 来源标记必须一起存: 模拟图和实测图视觉几乎一样, 界面上要能区分
+      this.upsertObstruction.run(
+        ts,
+        obstructionMap.length,
+        JSON.stringify(obstructionMap),
+        obstructionMapSource === 'real' ? 'real' : 'mock'
+      );
     }
   }
-
   // ---------------------------------------------------------------- 读取
 
   /**
@@ -314,6 +356,32 @@ export class TelemetryStore {
       return payload;
     } catch (error) {
       console.warn('[TelemetryStore] 解析最新快照失败:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 读取最新一份遮挡图及其采集时刻。
+   *
+   * 与 readLatest() 分开的原因: 遮挡图是"独立刷新"的视角数据
+   * (dishGetObstructionMap 单独拉取, 频率与遥测不同), 单独取才能
+   * 准确告诉用户"这张图是什么时候的" —— 监控软件里数据新鲜度
+   * 和数据本身同等重要。
+   */
+  readLatestObstruction(): { data: number[][]; ts: number; source: 'real' | 'mock' } | null {
+    const row = this.selectObstruction.get() as { ts: number; data: string; source?: string } | undefined;
+    if (!row) return null;
+
+    try {
+      const parsed = JSON.parse(row.data) as number[][];
+      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      return {
+        data: parsed,
+        ts: row.ts,
+        source: row.source === 'real' ? 'real' : 'mock',
+      };
+    } catch (error) {
+      console.warn('[TelemetryStore] 解析遮挡图失败:', error);
       return null;
     }
   }
