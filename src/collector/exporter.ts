@@ -1,0 +1,196 @@
+/**
+ * Prometheus Exporter
+ * 
+ * 将 Starlink 遥测数据导出为 Prometheus metrics 格式
+ * 在端口 9817 提供 /metrics 端点
+ */
+
+import { createServer, IncomingMessage, ServerResponse } from 'http';
+import type { TelemetryData } from '../core/dishClient';
+import type { DataCollector } from './historian';
+
+export interface ExporterConfig {
+  port: number;              // HTTP 监听端口
+  host?: string;             // 监听地址
+  metricsPath?: string;      // metrics 端点路径
+}
+
+/**
+ * Prometheus Exporter
+ */
+export class PrometheusExporter {
+  private config: Required<ExporterConfig>;
+  private collector: DataCollector;
+  private server: ReturnType<typeof createServer> | null = null;
+
+  constructor(collector: DataCollector, config: Partial<ExporterConfig> = {}) {
+    this.collector = collector;
+    this.config = {
+      port: config.port || 9817,
+      host: config.host || '0.0.0.0',
+      metricsPath: config.metricsPath || '/metrics',
+    };
+  }
+
+  /**
+   * 启动 HTTP 服务器
+   */
+  start(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.server) {
+        console.warn('[Exporter] Already running');
+        resolve();
+        return;
+      }
+
+      this.server = createServer((req, res) => {
+        this.handleRequest(req, res);
+      });
+
+      this.server.on('error', (error) => {
+        console.error('[Exporter] Server error:', error);
+        reject(error);
+      });
+
+      this.server.listen(this.config.port, this.config.host, () => {
+        console.log(`[Exporter] Listening on http://${this.config.host}:${this.config.port}${this.config.metricsPath}`);
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * 停止 HTTP 服务器
+   */
+  stop(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.server) {
+        resolve();
+        return;
+      }
+
+      this.server.close(() => {
+        console.log('[Exporter] Stopped');
+        this.server = null;
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * 处理 HTTP 请求
+   */
+  private handleRequest(req: IncomingMessage, res: ServerResponse) {
+    const { url } = req;
+
+    if (url === this.config.metricsPath) {
+      this.serveMetrics(req, res);
+    } else if (url === '/health' || url === '/healthz') {
+      this.serveHealth(req, res);
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+    }
+  }
+
+  /**
+   * 提供 /metrics 端点
+   */
+  private serveMetrics(_req: IncomingMessage, res: ServerResponse) {
+    const telemetry = this.collector.getLatest();
+    
+    if (!telemetry) {
+      res.writeHead(503, { 'Content-Type': 'text/plain' });
+      res.end('# No data available\n');
+      return;
+    }
+
+    const metrics = this.generateMetrics(telemetry);
+    
+    res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4' });
+    res.end(metrics);
+  }
+
+  /**
+   * 提供 /health 端点
+   */
+  private serveHealth(_req: IncomingMessage, res: ServerResponse) {
+    const stats = this.collector.getStats();
+    const isHealthy = this.collector.isActive() && stats.lastSuccessTime !== null;
+
+    res.writeHead(isHealthy ? 200 : 503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: isHealthy ? 'healthy' : 'unhealthy',
+      collector: {
+        active: this.collector.isActive(),
+        totalSamples: stats.totalSamples,
+        failedSamples: stats.failedSamples,
+        lastSuccess: stats.lastSuccessTime?.toISOString(),
+        uptime: stats.uptime,
+      },
+    }));
+  }
+
+  /**
+   * 生成 Prometheus metrics 文本
+   */
+  private generateMetrics(telemetry: TelemetryData): string {
+    const lines: string[] = [];
+
+    // Helper function to add metric
+    const addMetric = (name: string, value: number | string, help: string, type: string = 'gauge', labels?: Record<string, string>) => {
+      lines.push(`# HELP ${name} ${help}`);
+      lines.push(`# TYPE ${name} ${type}`);
+      
+      const labelStr = labels 
+        ? '{' + Object.entries(labels).map(([k, v]) => `${k}="${v}"`).join(',') + '}'
+        : '';
+      
+      lines.push(`${name}${labelStr} ${value}`);
+    };
+
+    // 连接状态
+    const stateValue = telemetry.state === 'ONLINE' ? 1 : 0;
+    addMetric('starlink_dish_up', stateValue, 'Dish online status (1=online, 0=offline)');
+    addMetric('starlink_dish_uptime_seconds', telemetry.uptime, 'Dish uptime in seconds', 'counter');
+
+    // 网络性能指标
+    addMetric('starlink_ping_latency_ms', telemetry.popPingLatencyMs, 'Ping latency to Starlink PoP in milliseconds');
+    addMetric('starlink_ping_drop_rate', telemetry.popPingDropRate, 'Ping packet drop rate (0.0-1.0)');
+    
+    addMetric('starlink_downlink_throughput_bps', telemetry.downlinkThroughputBps, 'Downlink throughput in bits per second');
+    addMetric('starlink_uplink_throughput_bps', telemetry.uplinkThroughputBps, 'Uplink throughput in bits per second');
+
+    // 信号质量
+    addMetric('starlink_snr', telemetry.snr, 'Signal-to-Noise Ratio');
+    addMetric('starlink_currently_obstructed', telemetry.currentlyObstructed ? 1 : 0, 'Currently obstructed status');
+    addMetric('starlink_fraction_obstructed', telemetry.fractionObstructed, 'Fraction of sky obstructed (0.0-1.0)');
+    addMetric('starlink_seconds_obstructed', telemetry.secondsObstructed, 'Total seconds obstructed', 'counter');
+
+    // 卫星信息
+    addMetric('starlink_satellite_id', telemetry.satelliteId, 'Current satellite ID');
+    addMetric('starlink_seconds_to_first_nonempty_slot', telemetry.secondsToFirstNonemptySlot, 'Seconds to first non-empty slot');
+
+    // 硬件状态
+    addMetric('starlink_dish_temperature_celsius', telemetry.dishTemperature, 'Dish temperature in Celsius');
+    addMetric('starlink_power_supply_temperature_celsius', telemetry.powerSupplyTemperature, 'Power supply temperature in Celsius');
+
+    // 版本信息（作为 label）
+    addMetric('starlink_info', 1, 'Starlink device information', 'gauge', {
+      hardware_version: telemetry.hardwareVersion,
+      software_version: telemetry.softwareVersion,
+    });
+
+    // 告警计数
+    addMetric('starlink_alerts_total', telemetry.alerts.length, 'Total number of active alerts');
+
+    return lines.join('\n') + '\n';
+  }
+}
+
+/**
+ * 创建 Prometheus exporter
+ */
+export function createExporter(collector: DataCollector, config?: Partial<ExporterConfig>): PrometheusExporter {
+  return new PrometheusExporter(collector, config);
+}

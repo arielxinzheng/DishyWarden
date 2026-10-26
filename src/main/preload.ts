@@ -1,0 +1,161 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import type { TelemetryData } from '../core/dishClient';
+import type { CollectorStats } from '../collector/historian';
+import type { NetworkAnomaly } from '../core/telemetry';
+import type { AlertRecord } from '../alerting/database';
+import type { NotificationConfig } from '../alerting/notifier';
+import type { AppConfig, CollectorConfig, PrometheusConfig, GrafanaConfig } from '../config/manager';
+import type { HistorySample, HistorySummary, PruneResult, StorageStats } from '../storage/types';
+
+/**
+ * Electron API 接口定义
+ */
+export interface ElectronAPI {
+  // 获取最新遥测数据
+  getLatestTelemetry: () => Promise<TelemetryData | null>;
+  
+  // 获取历史数据（来自 SQLite 历史库）
+  getHistory: (seconds: number) => Promise<HistorySample[]>;
+
+  // 获取区间统计摘要（概览带用）
+  getHistorySummary: (seconds: number) => Promise<HistorySummary | null>;
+
+  // 获取历史库物理状态
+  getStorageStats: () => Promise<StorageStats | null>;
+
+  // 手动清理过期数据
+  pruneStorage: () => Promise<PruneResult | null>;
+  
+  // 获取采集器统计信息
+  getCollectorStats: () => Promise<CollectorStats | null>;
+  
+  // 更新采集器配置
+  updateCollectorConfig: (config: any) => Promise<{ success: boolean }>;
+  
+  // 监听遥测数据更新
+  onTelemetryUpdate: (callback: (data: TelemetryData) => void) => () => void;
+  
+  // 监听异常检测
+  onAnomaliesDetected: (callback: (anomalies: NetworkAnomaly[]) => void) => () => void;
+
+  // 获取活跃告警列表
+  getActiveAlerts: () => Promise<AlertRecord[]>;
+
+  // 监听新告警
+  onAlertNew: (callback: (alert: AlertRecord) => void) => () => void;
+
+  // 监听告警恢复
+  onAlertResolved: (callback: (alert: AlertRecord) => void) => () => void;
+
+  // 更新通知配置
+  updateNotificationConfig: (config: NotificationConfig) => Promise<{ success: boolean }>;
+
+  // 获取完整配置
+  getConfig: () => Promise<AppConfig>;
+
+  // 更新采集器配置(设置页面用)
+  updateCollectorConfigSettings: (config: Partial<CollectorConfig>) => Promise<{ success: boolean }>;
+
+  // 更新 Prometheus 配置
+  updatePrometheusConfig: (config: Partial<PrometheusConfig>) => Promise<{ success: boolean; requiresRestart?: boolean }>;
+
+  // 重置配置
+  resetConfig: () => Promise<{ success: boolean; requiresRestart?: boolean }>;
+
+  // 更新 Grafana 配置
+  updateGrafanaConfig: (config: Partial<GrafanaConfig>) => Promise<{ success: boolean }>;
+
+  // 配置 Grafana (一键配置)
+  provisionGrafana: () => Promise<{ success: boolean; dataSourceId?: number; dashboardUrl?: string; error?: string }>;
+
+  // 检查 Grafana 连接
+  checkGrafanaConnection: () => Promise<{ connected: boolean; error?: string }>;
+
+  // 获取内置 TLE 种子（断网兜底用）
+  getTLESeed: () => Promise<{
+    fetchedAt: number;
+    source: string;
+    shells: { inclination: number; periodMin: number; count: number }[];
+    data: { name: string; line1: string; line2: string }[];
+  } | null>;
+}
+
+/**
+ * 暴露安全的 Electron API 到渲染进程
+ */
+contextBridge.exposeInMainWorld('electronAPI', {
+  getLatestTelemetry: () => ipcRenderer.invoke('get-latest-telemetry'),
+  
+  getHistory: (seconds: number) => ipcRenderer.invoke('get-history', seconds),
+
+  getHistorySummary: (seconds: number) => ipcRenderer.invoke('get-history-summary', seconds),
+
+  getStorageStats: () => ipcRenderer.invoke('get-storage-stats'),
+
+  pruneStorage: () => ipcRenderer.invoke('prune-storage'),
+  
+  getCollectorStats: () => ipcRenderer.invoke('get-collector-stats'),
+  
+  updateCollectorConfig: (config: any) => ipcRenderer.invoke('update-collector-config', config),
+  
+  onTelemetryUpdate: (callback: (data: TelemetryData) => void) => {
+    const listener = (_event: any, data: TelemetryData) => callback(data);
+    ipcRenderer.on('telemetry-update', listener);
+    
+    // 返回取消订阅函数
+    return () => {
+      ipcRenderer.removeListener('telemetry-update', listener);
+    };
+  },
+  
+  onAnomaliesDetected: (callback: (anomalies: NetworkAnomaly[]) => void) => {
+    const listener = (_event: any, anomalies: NetworkAnomaly[]) => callback(anomalies);
+    ipcRenderer.on('anomalies-detected', listener);
+    
+    return () => {
+      ipcRenderer.removeListener('anomalies-detected', listener);
+    };
+  },
+
+  getActiveAlerts: () => ipcRenderer.invoke('get-active-alerts'),
+
+  onAlertNew: (callback: (alert: AlertRecord) => void) => {
+    const listener = (_event: any, alert: AlertRecord) => callback(alert);
+    ipcRenderer.on('alert-new', listener);
+
+    return () => {
+      ipcRenderer.removeListener('alert-new', listener);
+    };
+  },
+
+  onAlertResolved: (callback: (alert: AlertRecord) => void) => {
+    const listener = (_event: any, alert: AlertRecord) => callback(alert);
+    ipcRenderer.on('alert-resolved', listener);
+
+    return () => {
+      ipcRenderer.removeListener('alert-resolved', listener);
+    };
+  },
+
+  updateNotificationConfig: (config: NotificationConfig) =>
+    ipcRenderer.invoke('update-notification-config', config),
+
+  getConfig: () => ipcRenderer.invoke('get-config'),
+
+  updateCollectorConfigSettings: (config: Partial<CollectorConfig>) =>
+    ipcRenderer.invoke('update-collector-config-settings', config),
+
+  updatePrometheusConfig: (config: Partial<PrometheusConfig>) =>
+    ipcRenderer.invoke('update-prometheus-config', config),
+
+  resetConfig: () => ipcRenderer.invoke('reset-config'),
+
+  updateGrafanaConfig: (config: Partial<GrafanaConfig>) =>
+    ipcRenderer.invoke('update-grafana-config', config),
+
+  provisionGrafana: () => ipcRenderer.invoke('provision-grafana'),
+
+  checkGrafanaConnection: () => ipcRenderer.invoke('check-grafana-connection'),
+
+  getTLESeed: () => ipcRenderer.invoke('get-tle-seed'),
+} as ElectronAPI);

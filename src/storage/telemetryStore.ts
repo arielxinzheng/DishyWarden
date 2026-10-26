@@ -1,0 +1,498 @@
+/**
+ * TelemetryStore —— 遥测历史持久化仓储
+ *
+ * 职责(且只有这些):
+ *   1. 建库/迁移
+ *   2. 追加一条采样(原始明细 + 小时聚合 + 最新快照, 单事务)
+ *   3. 按时间范围查历史(自动在 明细/分桶/小时聚合 之间选源)
+ *   4. 区间统计摘要 / 库容量统计 / 过期清理
+ *
+ * 不负责: 采集、调度、告警判定、单位转换 —— 那些属于各自的模块。
+ *
+ * 写入策略选择「同步直写」而不是内存队列:
+ *   采样间隔 30s, 一周也才 2 万行, 单次写入 <1ms。
+ *   队列带来的复杂度(丢失窗口、崩溃回放)远大于收益。
+ */
+
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
+import { app } from 'electron';
+import type { TelemetryData } from '../core/dishClient';
+import {
+  DDL,
+  SAMPLE_INTERVAL_MS,
+  SAMPLE_RETENTION_DAYS,
+  HOURLY_RETENTION_DAYS,
+} from './schema';
+import type {
+  HistoryQuery,
+  HistorySample,
+  HistorySummary,
+  PruneResult,
+  StorageStats,
+  TimestampedTelemetry,
+} from './types';
+
+const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+
+/**
+ * 采样字段映射表: 数据库列名 ⇄ TelemetryData 字段名。
+ * 新增一个指标只改这一处, INSERT / SELECT / 建表列名都从这里派生。
+ */
+const SAMPLE_FIELDS = [
+  { column: 'state', key: 'state' },
+  { column: 'latency_ms', key: 'popPingLatencyMs' },
+  { column: 'drop_rate', key: 'popPingDropRate' },
+  { column: 'down_bps', key: 'downlinkThroughputBps' },
+  { column: 'up_bps', key: 'uplinkThroughputBps' },
+  { column: 'snr', key: 'snr' },
+  { column: 'fraction_obstructed', key: 'fractionObstructed' },
+  { column: 'currently_obstructed', key: 'currentlyObstructed' },
+  { column: 'satellite_id', key: 'satelliteId' },
+  { column: 'uptime_s', key: 'uptime' },
+  { column: 'dish_temp_c', key: 'dishTemperature' },
+  { column: 'psu_temp_c', key: 'powerSupplyTemperature' },
+] as const;
+
+/** better-sqlite3 不接受 boolean/undefined, 统一归一化 */
+function toSqlValue(value: unknown): string | number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+/** 任意时间表示 -> epoch ms */
+function toEpochMs(value: Date | number | string | undefined): number {
+  if (value === undefined) return Date.now();
+  if (typeof value === 'number') return value;
+  const parsed = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+/**
+ * 决定分桶粒度。返回 0 表示不分桶(直接返回原始点)。
+ * 对齐到整秒, 让图表 X 轴刻度干净。
+ */
+function pickBucketMs(spanMs: number, maxPoints: number, minBucketMs: number): number {
+  const ideal = Math.ceil(spanMs / Math.max(1, maxPoints));
+  if (ideal <= minBucketMs) return 0;
+  return Math.ceil(ideal / 1000) * 1000;
+}
+
+function resolveDbPath(explicit?: string): string {
+  if (explicit) {
+    if (explicit !== ':memory:') {
+      fs.mkdirSync(path.dirname(explicit), { recursive: true });
+    }
+    return explicit;
+  }
+  const dir = path.join(app.getPath('userData'), 'data');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'telemetry.db');
+}
+
+export class TelemetryStore {
+  private db: Database.Database;
+  private readonly dbPath: string;
+
+  private readonly insertSample: Database.Statement;
+  private readonly upsertHourly: Database.Statement;
+  private readonly upsertSnapshot: Database.Statement;
+  private readonly upsertObstruction: Database.Statement;
+  private readonly selectSnapshot: Database.Statement;
+  private readonly selectObstruction: Database.Statement;
+
+  private readonly selectRaw: Database.Statement;
+  private readonly selectBucketed: Database.Statement;
+  private readonly selectHourly: Database.Statement;
+  private readonly selectSummary: Database.Statement;
+  private readonly selectOutages: Database.Statement;
+
+  private readonly appendTx: (point: TimestampedTelemetry) => void;
+
+  constructor(dbPath?: string) {
+    this.dbPath = resolveDbPath(dbPath);
+    this.db = new Database(this.dbPath);
+
+    // WAL: 读写不互相阻塞; NORMAL: 断电最多丢最后一个事务, 对监控数据足够
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL');
+    this.db.exec(DDL);
+
+    const columns = SAMPLE_FIELDS.map((f) => f.column).join(', ');
+    const placeholders = SAMPLE_FIELDS.map(() => '?').join(', ');
+
+    this.insertSample = this.db.prepare(`
+      INSERT OR REPLACE INTO telemetry_samples (ts, ${columns})
+      VALUES (?, ${placeholders})
+    `);
+
+    // 增量维护小时聚合: 用旧 sample_count 做滑动平均, MAX/MIN 直接比较。
+    // SQLite 的 SET 表达式全部基于赋值前的旧行值求值, 所以这里安全。
+    this.upsertHourly = this.db.prepare(`
+      INSERT INTO telemetry_hourly (
+        bucket_ts, sample_count,
+        latency_avg, latency_max, latency_min,
+        drop_avg, drop_max,
+        down_avg, down_max,
+        up_avg, up_max,
+        obstructed_avg, snr_avg
+      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(bucket_ts) DO UPDATE SET
+        latency_avg    = (latency_avg * sample_count + excluded.latency_avg) / (sample_count + 1),
+        latency_max    = MAX(latency_max, excluded.latency_max),
+        latency_min    = MIN(latency_min, excluded.latency_min),
+        drop_avg       = (drop_avg * sample_count + excluded.drop_avg) / (sample_count + 1),
+        drop_max       = MAX(drop_max, excluded.drop_max),
+        down_avg       = (down_avg * sample_count + excluded.down_avg) / (sample_count + 1),
+        down_max       = MAX(down_max, excluded.down_max),
+        up_avg         = (up_avg * sample_count + excluded.up_avg) / (sample_count + 1),
+        up_max         = MAX(up_max, excluded.up_max),
+        obstructed_avg = (obstructed_avg * sample_count + excluded.obstructed_avg) / (sample_count + 1),
+        snr_avg        = (snr_avg * sample_count + excluded.snr_avg) / (sample_count + 1),
+        sample_count   = sample_count + 1
+    `);
+
+    this.upsertSnapshot = this.db.prepare(`
+      INSERT INTO latest_snapshot (id, ts, payload) VALUES (1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET ts = excluded.ts, payload = excluded.payload
+    `);
+
+    this.upsertObstruction = this.db.prepare(`
+      INSERT INTO latest_obstruction_map (id, ts, size, data) VALUES (1, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET ts = excluded.ts, size = excluded.size, data = excluded.data
+    `);
+
+    this.selectSnapshot = this.db.prepare('SELECT ts, payload FROM latest_snapshot WHERE id = 1');
+    this.selectObstruction = this.db.prepare('SELECT ts, data FROM latest_obstruction_map WHERE id = 1');
+
+    // 三个查询都返回同名列(ts/latency_ms/...), 共用同一个 mapper。
+    // 注意 satellite_id 只有明细表有, 分桶/小时聚合不 select, 因此保持 null。
+    //
+    // state 的三种粒度语义:
+    //   明细: 真实状态字符串(ONLINE/OFFLINE/...)
+    //   分桶: state 不 select, 改用 online_ratio(桶内 ONLINE 采样占比)
+    //   小时聚合: 无此数据(表里没存 state), 两者都是 undefined
+    this.selectRaw = this.db.prepare(`
+      SELECT ts, state, latency_ms, drop_rate, down_bps, up_bps, snr, fraction_obstructed, satellite_id
+      FROM telemetry_samples
+      WHERE ts >= ? AND ts < ?
+      ORDER BY ts
+    `);
+
+    this.selectBucketed = this.db.prepare(`
+      SELECT (ts / ?) * ? AS bucket,
+             AVG(latency_ms)          AS latency_ms,
+             AVG(drop_rate)           AS drop_rate,
+             AVG(down_bps)            AS down_bps,
+             AVG(up_bps)              AS up_bps,
+             AVG(snr)                 AS snr,
+             AVG(fraction_obstructed) AS fraction_obstructed,
+             AVG(CASE WHEN state = 'ONLINE' THEN 1.0 ELSE 0.0 END) AS online_ratio
+      FROM telemetry_samples
+      WHERE ts >= ? AND ts < ?
+      GROUP BY bucket
+      ORDER BY bucket
+    `);
+
+    this.selectHourly = this.db.prepare(`
+      SELECT (bucket_ts / ?) * ? AS bucket,
+             AVG(latency_avg)    AS latency_ms,
+             AVG(drop_avg)       AS drop_rate,
+             AVG(down_avg)       AS down_bps,
+             AVG(up_avg)         AS up_bps,
+             AVG(snr_avg)        AS snr,
+             AVG(obstructed_avg) AS fraction_obstructed
+      FROM telemetry_hourly
+      WHERE bucket_ts >= ? AND bucket_ts < ?
+      GROUP BY bucket
+      ORDER BY bucket
+    `);
+
+    this.selectSummary = this.db.prepare(`
+      SELECT
+        COUNT(*)                                        AS n,
+        COALESCE(AVG(latency_ms), 0)                    AS latency_avg,
+        COALESCE(MAX(latency_ms), 0)                    AS latency_max,
+        COALESCE(MIN(latency_ms), 0)                    AS latency_min,
+        COALESCE(AVG(drop_rate), 0)                     AS drop_avg,
+        COALESCE(AVG(down_bps), 0)                      AS down_avg,
+        COALESCE(AVG(up_bps), 0)                        AS up_avg,
+        COALESCE(SUM(CASE WHEN state = 'ONLINE' THEN 1 ELSE 0 END), 0) AS online_n,
+        COALESCE(SUM(down_bps), 0)                      AS down_sum,
+        COALESCE(SUM(up_bps), 0)                        AS up_sum,
+        MIN(ts)                                         AS first_ts,
+        MAX(ts)                                         AS last_ts
+      FROM telemetry_samples
+      WHERE ts >= ? AND ts <= ?
+    `);
+
+    this.selectOutages = this.db.prepare(`
+      SELECT COUNT(*) AS outages FROM (
+        SELECT state, LAG(state) OVER (ORDER BY ts) AS prev_state
+        FROM telemetry_samples
+        WHERE ts >= ? AND ts <= ?
+      )
+      WHERE prev_state = 'ONLINE' AND state <> 'ONLINE'
+    `);
+
+    this.appendTx = this.db.transaction((point: TimestampedTelemetry) => {
+      this.writeSample(point);
+      this.writeHourly(point, toEpochMs(point.timestamp));
+      this.writeSnapshot(point);
+    });
+  }
+
+  // ---------------------------------------------------------------- 写入
+
+  /** 追加一条采样。同一时刻重复写入会覆盖。 */
+  append(point: TimestampedTelemetry): void {
+    this.appendTx(point);
+  }
+
+  private writeSample(point: TimestampedTelemetry): void {
+    const ts = toEpochMs(point.timestamp);
+    const values = SAMPLE_FIELDS.map((f) =>
+      toSqlValue((point as unknown as Record<string, unknown>)[f.key]),
+    );
+    this.insertSample.run(ts, ...values);
+  }
+
+  private writeHourly(point: TimestampedTelemetry, ts: number): void {
+    const bucketTs = Math.floor(ts / HOUR_MS) * HOUR_MS;
+    this.upsertHourly.run(
+      bucketTs,
+      point.popPingLatencyMs,
+      point.popPingLatencyMs,
+      point.popPingLatencyMs,
+      point.popPingDropRate,
+      point.popPingDropRate,
+      point.downlinkThroughputBps,
+      point.downlinkThroughputBps,
+      point.uplinkThroughputBps,
+      point.uplinkThroughputBps,
+      point.fractionObstructed,
+      point.snr,
+    );
+  }
+
+  private writeSnapshot(point: TimestampedTelemetry): void {
+    const ts = toEpochMs(point.timestamp);
+    const { obstructionMap, ...rest } = point;
+
+    this.upsertSnapshot.run(ts, JSON.stringify(rest));
+
+    // 遮挡图单行覆盖: 只有"当前视野"有意义
+    if (Array.isArray(obstructionMap) && obstructionMap.length > 0) {
+      this.upsertObstruction.run(ts, obstructionMap.length, JSON.stringify(obstructionMap));
+    }
+  }
+
+  // ---------------------------------------------------------------- 读取
+
+  /**
+   * 读取最新一条完整遥测(含遮挡图)。
+   * 应用重启后用它做首屏, 不必等第一次采集。
+   */
+  readLatest(): TelemetryData | null {
+    const snapshot = this.selectSnapshot.get() as { ts: number; payload: string } | undefined;
+    if (!snapshot) return null;
+
+    try {
+      const payload = JSON.parse(snapshot.payload) as TelemetryData;
+      const map = this.selectObstruction.get() as { ts: number; data: string } | undefined;
+
+      // 遮挡图只在比快照更新或同刻时才附带, 避免把旧视野贴到新状态上
+      if (map && map.ts >= snapshot.ts) {
+        payload.obstructionMap = JSON.parse(map.data) as number[][];
+      }
+
+      return payload;
+    } catch (error) {
+      console.warn('[TelemetryStore] 解析最新快照失败:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 按时间范围查历史。
+   *
+   * 数据源选择:
+   *   范围 <= 原始保留期(7天)  -> telemetry_samples(必要时按需分桶)
+   *   范围 >  原始保留期       -> telemetry_hourly(按小时聚合)
+   */
+  queryHistory(query: HistoryQuery): HistorySample[] {
+    const { fromMs, toMs } = query;
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return [];
+
+    const maxPoints = query.maxPoints ?? 600;
+    const span = toMs - fromMs;
+
+    if (span > SAMPLE_RETENTION_DAYS * DAY_MS) {
+      const bucketMs = pickBucketMs(span, maxPoints, HOUR_MS) || HOUR_MS;
+      const rows = this.selectHourly.all(bucketMs, bucketMs, fromMs, toMs);
+      return rows.map(mapRow);
+    }
+
+    const bucketMs = pickBucketMs(span, maxPoints, SAMPLE_INTERVAL_MS);
+    if (bucketMs === 0) {
+      return this.selectRaw.all(fromMs, toMs).map(mapRow);
+    }
+
+    const rows = this.selectBucketed.all(bucketMs, bucketMs, fromMs, toMs);
+    return rows.map(mapRow);
+  }
+
+  /**
+   * 区间统计摘要。
+   * 流量按实际采样跨度反推平均间隔估算, 比写死 30s 更贴近真实。
+   */
+  summarize(fromMs: number, toMs: number = Date.now()): HistorySummary {
+    const row = this.selectSummary.get(fromMs, toMs) as {
+      n: number;
+      latency_avg: number;
+      latency_max: number;
+      latency_min: number;
+      drop_avg: number;
+      down_avg: number;
+      up_avg: number;
+      online_n: number;
+      down_sum: number;
+      up_sum: number;
+      first_ts: number | null;
+      last_ts: number | null;
+    };
+
+    const empty: HistorySummary = {
+      sampleCount: 0,
+      avgLatencyMs: 0,
+      maxLatencyMs: 0,
+      minLatencyMs: 0,
+      avgDropRate: 0,
+      avgDownBps: 0,
+      avgUpBps: 0,
+      availability: 0,
+      outageCount: 0,
+      estimatedDownBytes: 0,
+      estimatedUpBytes: 0,
+      firstTs: null,
+      lastTs: null,
+    };
+
+    if (!row || row.n === 0) return empty;
+
+    const intervalSec = resolveIntervalSec(row.n, row.first_ts, row.last_ts);
+    const outages = this.selectOutages.get(fromMs, toMs) as { outages: number } | undefined;
+
+    return {
+      sampleCount: row.n,
+      avgLatencyMs: row.latency_avg,
+      maxLatencyMs: row.latency_max,
+      minLatencyMs: row.latency_min,
+      avgDropRate: row.drop_avg,
+      avgDownBps: row.down_avg,
+      avgUpBps: row.up_avg,
+      availability: row.online_n / row.n,
+      outageCount: outages?.outages ?? 0,
+      estimatedDownBytes: (row.down_sum * intervalSec) / 8,
+      estimatedUpBytes: (row.up_sum * intervalSec) / 8,
+      firstTs: row.first_ts,
+      lastTs: row.last_ts,
+    };
+  }
+
+  // ---------------------------------------------------------------- 运维
+
+  stats(): StorageStats {
+    const samples = this.db
+      .prepare('SELECT COUNT(*) AS n, MIN(ts) AS oldest, MAX(ts) AS newest FROM telemetry_samples')
+      .get() as { n: number; oldest: number | null; newest: number | null };
+
+    const hourly = this.db.prepare('SELECT COUNT(*) AS n FROM telemetry_hourly').get() as { n: number };
+
+    let fileSizeBytes = 0;
+    try {
+      fileSizeBytes = fs.statSync(this.dbPath).size;
+    } catch {
+      /* 文件可能尚未落盘, 忽略 */
+    }
+
+    return {
+      dbPath: this.dbPath,
+      fileSizeBytes,
+      sampleCount: samples.n,
+      oldestSampleTs: samples.oldest,
+      newestSampleTs: samples.newest,
+      hourlyCount: hourly.n,
+      retention: { sampleDays: SAMPLE_RETENTION_DAYS, hourlyDays: HOURLY_RETENTION_DAYS },
+    };
+  }
+
+  /** 按保留策略删除过期数据, 并回收 WAL。 */
+  prune(now: number = Date.now()): PruneResult {
+    const sampleCutoff = now - SAMPLE_RETENTION_DAYS * DAY_MS;
+    const hourlyCutoff = now - HOURLY_RETENTION_DAYS * DAY_MS;
+
+    const samples = this.db.prepare('DELETE FROM telemetry_samples WHERE ts < ?').run(sampleCutoff);
+    const hourly = this.db.prepare('DELETE FROM telemetry_hourly WHERE bucket_ts < ?').run(hourlyCutoff);
+
+    this.db.pragma('wal_checkpoint(TRUNCATE)');
+    this.db.pragma('optimize');
+
+    return { samples: samples.changes, hourly: hourly.changes };
+  }
+
+  close(): void {
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+      this.db.close();
+    } catch (error) {
+      console.warn('[TelemetryStore] 关闭数据库时出错:', error);
+    }
+  }
+}
+
+/**
+ * 三个查询共用: 列名一致, 映射成 CamelCase 的 HistorySample
+ *
+ * state / onlineRatio 的产出规则:
+ *   明细(selectRaw)      -> state='ONLINE', onlineRatio=1; 其他状态 onlineRatio=0
+ *   分桶(selectBucketed) -> state=undefined, onlineRatio=桶内 ONLINE 占比
+ *   小时聚合(selectHourly) -> 两者都 undefined(表里没存 state)
+ */
+function mapRow(row: unknown): HistorySample {
+  const r = row as Record<string, number | string | null | undefined>;
+  const state = typeof r.state === 'string' ? r.state : undefined;
+
+  // 优先用查询直接给出的 online_ratio; 没有则由明细 state 推导
+  let onlineRatio: number | undefined;
+  if (typeof r.online_ratio === 'number' && Number.isFinite(r.online_ratio)) {
+    onlineRatio = r.online_ratio;
+  } else if (state !== undefined) {
+    onlineRatio = state === 'ONLINE' ? 1 : 0;
+  }
+
+  return {
+    timestamp: (r.bucket ?? r.ts) as number,
+    state,
+    onlineRatio,
+    popPingLatencyMs: r.latency_ms as number,
+    popPingDropRate: r.drop_rate as number,
+    downlinkThroughputBps: r.down_bps as number,
+    uplinkThroughputBps: r.up_bps as number,
+    snr: r.snr as number,
+    fractionObstructed: r.fraction_obstructed as number,
+    satelliteId: typeof r.satellite_id === 'number' ? r.satellite_id : undefined,
+  };
+}
+
+function resolveIntervalSec(count: number, firstTs: number | null, lastTs: number | null): number {
+  if (count > 1 && firstTs !== null && lastTs !== null && lastTs > firstTs) {
+    return (lastTs - firstTs) / (count - 1) / 1000;
+  }
+  return SAMPLE_INTERVAL_MS / 1000;
+}

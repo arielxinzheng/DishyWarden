@@ -1,0 +1,207 @@
+/**
+ * 告警状态数据库
+ * 使用 SQLite 持久化告警状态,支持去重和历史查询
+ */
+
+import Database from 'better-sqlite3';
+import { app } from 'electron';
+import path from 'path';
+import fs from 'fs';
+
+export interface AlertRecord {
+  id?: number;
+  alert_key: string;
+  alert_type: string;
+  severity: 'critical' | 'warning' | 'info';
+  status: 'new' | 'ongoing' | 'resolved';
+  first_seen: string;
+  last_seen: string;
+  occurrence_count: number;
+  last_notified_at: string | null;
+  notification_count: number;
+  summary: string;
+  description: string;
+  evidence: string; // JSON string
+  recommendations: string; // JSON string
+}
+
+export class AlertDatabase {
+  private db: Database.Database;
+
+  constructor(dbPath?: string) {
+    const dataDir = path.join(app.getPath('userData'), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    const finalPath = dbPath || path.join(dataDir, 'alerts.db');
+    this.db = new Database(finalPath);
+    this.initializeSchema();
+  }
+
+  private initializeSchema(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_key TEXT UNIQUE NOT NULL,
+        alert_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        status TEXT NOT NULL,
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        occurrence_count INTEGER DEFAULT 1,
+        last_notified_at TEXT,
+        notification_count INTEGER DEFAULT 0,
+        summary TEXT NOT NULL,
+        description TEXT NOT NULL,
+        evidence TEXT,
+        recommendations TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_alert_key ON alerts(alert_key);
+      CREATE INDEX IF NOT EXISTS idx_status ON alerts(status);
+      CREATE INDEX IF NOT EXISTS idx_severity ON alerts(severity);
+      CREATE INDEX IF NOT EXISTS idx_first_seen ON alerts(first_seen);
+    `);
+  }
+
+  /**
+   * 记录或更新告警
+   * @returns 'new' | 'ongoing' | 'resolved'
+   */
+  upsertAlert(alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'>): 'new' | 'ongoing' | 'resolved' {
+    const existing = this.getAlertByKey(alert.alert_key);
+
+    if (!existing) {
+      // 新告警
+      const stmt = this.db.prepare(`
+        INSERT INTO alerts (
+          alert_key, alert_type, severity, status,
+          first_seen, last_seen, occurrence_count,
+          last_notified_at, notification_count,
+          summary, description, evidence, recommendations
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      stmt.run(
+        alert.alert_key,
+        alert.alert_type,
+        alert.severity,
+        alert.status,
+        alert.first_seen,
+        alert.last_seen,
+        alert.occurrence_count,
+        alert.last_notified_at,
+        alert.notification_count,
+        alert.summary,
+        alert.description,
+        alert.evidence,
+        alert.recommendations
+      );
+
+      return 'new';
+    } else if (existing.status === 'ongoing' && alert.status === 'resolved') {
+      // 告警恢复
+      const stmt = this.db.prepare(`
+        UPDATE alerts
+        SET status = ?, last_seen = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE alert_key = ?
+      `);
+
+      stmt.run(alert.status, alert.last_seen, alert.alert_key);
+      return 'resolved';
+    } else {
+      // 持续触发
+      const stmt = this.db.prepare(`
+        UPDATE alerts
+        SET occurrence_count = occurrence_count + 1,
+            last_seen = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE alert_key = ?
+      `);
+
+      stmt.run(alert.last_seen, alert.alert_key);
+      return 'ongoing';
+    }
+  }
+
+  /**
+   * 记录通知发送
+   */
+  markNotified(alertKey: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE alerts
+      SET last_notified_at = CURRENT_TIMESTAMP,
+          notification_count = notification_count + 1
+      WHERE alert_key = ?
+    `);
+
+    stmt.run(alertKey);
+  }
+
+  /**
+   * 获取告警记录
+   */
+  getAlertByKey(alertKey: string): AlertRecord | undefined {
+    const stmt = this.db.prepare('SELECT * FROM alerts WHERE alert_key = ?');
+    return stmt.get(alertKey) as AlertRecord | undefined;
+  }
+
+  /**
+   * 获取活跃告警列表
+   */
+  getActiveAlerts(): AlertRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM alerts
+      WHERE status IN ('new', 'ongoing')
+      ORDER BY severity DESC, first_seen DESC
+    `);
+
+    return stmt.all() as AlertRecord[];
+  }
+
+  /**
+   * 获取需要更新通知的告警
+   * 规则: 每10次触发或每3小时发送一次更新
+   */
+  getAlertsNeedingUpdate(): AlertRecord[] {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM alerts
+      WHERE status = 'ongoing'
+        AND (
+          (occurrence_count % 10 = 0 AND occurrence_count > notification_count * 10)
+          OR last_notified_at IS NULL
+          OR last_notified_at < ?
+        )
+    `);
+
+    return stmt.all(threeHoursAgo) as AlertRecord[];
+  }
+
+  /**
+   * 清理已恢复的历史告警
+   * @param daysToKeep 保留天数
+   */
+  cleanupResolvedAlerts(daysToKeep = 30): number {
+    const cutoffDate = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000).toISOString();
+
+    const stmt = this.db.prepare(`
+      DELETE FROM alerts
+      WHERE status = 'resolved' AND last_seen < ?
+    `);
+
+    const result = stmt.run(cutoffDate);
+    return result.changes;
+  }
+
+  /**
+   * 关闭数据库连接
+   */
+  close(): void {
+    this.db.close();
+  }
+}

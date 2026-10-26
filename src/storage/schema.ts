@@ -1,0 +1,75 @@
+/**
+ * 遥测历史库的表结构定义（DDL 的唯一来源）
+ *
+ * 分层设计:
+ *   telemetry_samples  —— 原始采样(默认 30s 一条), 只保留短期(7 天)
+ *   telemetry_hourly   —— 按小时预聚合, 保留长期(400 天)
+ *   latest_snapshot    —— 最新一条完整遥测(重启后立刻有数据, 不用等第一次采样)
+ *   latest_obstruction_map —— 最新一份遮挡图
+ *
+ * 为什么遮挡图单独放:
+ *   123x123 = 15129 个数值, 每 30s 存一份一周就是 3 亿个数字。
+ *   只有"当前画面"有意义, 所以只保留最新一份。
+ *
+ * 时间统一用 INTEGER(epoch 毫秒) 而不是 ISO 字符串:
+ *   索引扫描 / 范围查询 / 分桶聚合都直接走整数比较, 没有时区解析成本。
+ */
+
+/** 库结构版本, 后续迁移时用于判断是否需要 ALTER */
+export const SCHEMA_VERSION = 1;
+
+/** 原始采样保留天数 */
+export const SAMPLE_RETENTION_DAYS = 7;
+
+/** 小时聚合保留天数 */
+export const HOURLY_RETENTION_DAYS = 400;
+
+/** 采样间隔假设(毫秒), 用于估算流量与判断是否需要分桶 */
+export const SAMPLE_INTERVAL_MS = 30_000;
+
+export const DDL = `
+  CREATE TABLE IF NOT EXISTS telemetry_samples (
+    ts                  INTEGER PRIMARY KEY,  -- epoch ms, 同刻重复采集时覆盖
+    state               TEXT    NOT NULL,
+    latency_ms          REAL    NOT NULL,
+    drop_rate           REAL    NOT NULL,
+    down_bps            REAL    NOT NULL,
+    up_bps              REAL    NOT NULL,
+    snr                 REAL    NOT NULL,
+    fraction_obstructed REAL    NOT NULL,
+    currently_obstructed INTEGER NOT NULL,
+    satellite_id        INTEGER,
+    uptime_s            INTEGER,
+    dish_temp_c         REAL,
+    psu_temp_c          REAL
+  );
+
+  CREATE TABLE IF NOT EXISTS telemetry_hourly (
+    bucket_ts      INTEGER PRIMARY KEY,  -- 所在小时的起点 epoch ms
+    sample_count   INTEGER NOT NULL,
+    latency_avg    REAL NOT NULL,
+    latency_max    REAL NOT NULL,
+    latency_min    REAL NOT NULL,
+    drop_avg       REAL NOT NULL,
+    drop_max       REAL NOT NULL,
+    down_avg       REAL NOT NULL,
+    down_max       REAL NOT NULL,
+    up_avg         REAL NOT NULL,
+    up_max         REAL NOT NULL,
+    obstructed_avg REAL NOT NULL,
+    snr_avg        REAL NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS latest_snapshot (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    ts      INTEGER NOT NULL,
+    payload TEXT    NOT NULL   -- TelemetryData 的 JSON(剔除 obstructionMap)
+  );
+
+  CREATE TABLE IF NOT EXISTS latest_obstruction_map (
+    id   INTEGER PRIMARY KEY CHECK (id = 1),
+    ts   INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    data TEXT    NOT NULL      -- number[][] 的 JSON
+  );
+`;

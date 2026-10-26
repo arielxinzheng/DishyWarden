@@ -1,0 +1,21 @@
+node_modules
+dist
+dist-electron
+release
+*.log
+.DS_Store
+data/prometheus
+data/alerts.db
+.env
+.env.local
+
+# 工具产物
+.playwright-mcp/
+
+# Office 临时锁文件（~$ 开头）
+~$*
+
+# 本地运行时数据
+*.db
+*.db-wal
+*.db-shm
