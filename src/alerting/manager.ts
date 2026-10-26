@@ -105,7 +105,7 @@ export class AlertManager extends EventEmitter {
         condition: (data) => data.currentlyObstructed || false,
         summary: () => '检测到天线遮挡',
         description: (data) =>
-          `遮挡率: ${((data.fractionObstructed || 0) * 100).toFixed(1)}%, 影响网络性能`,
+          `累计遮挡率: ${((data.fractionObstructed || 0) * 100).toFixed(1)}%, 影响网络性能`,
         evidence: (data) => ({
           obstructed: data.currentlyObstructed,
           obstruction_percentage: data.fractionObstructed,

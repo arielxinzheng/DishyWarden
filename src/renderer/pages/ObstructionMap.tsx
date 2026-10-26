@@ -102,7 +102,7 @@ export default function ObstructionMap() {
             color="orange"
           />
           <StatCard
-            label="障碍率"
+            label="视野遮挡占比"
             value={`${(stats.obstructionPercentage * 100).toFixed(2)}%`}
             color={stats.obstructionPercentage > 0.10 ? 'red' : 'green'}
           />

@@ -488,7 +488,7 @@ export default function Dashboard() {
         />
         
         <MetricCard
-          title="遮挡率"
+          title="累计遮挡率"
           value={formatPercentage(telemetry.fractionObstructed)}
           subtitle={getObstructionSeverityLabel(getObstructionSeverity(telemetry.fractionObstructed))}
           dotColor={getDotColorFromSeverity(getObstructionSeverity(telemetry.fractionObstructed))}
@@ -577,7 +577,7 @@ interface ObstructionInsightCardProps {
 
 function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCardProps) {
   // 数据来源决定一切:
-  //   real -> 设备实测, 可以给方向/影响/遮挡率
+  //   real -> 设备实测, 可以给方向/影响/视野遮挡占比
   //   mock -> 本地模拟, 只能画个样子, 且必须明确标出来
   //
   // 关键: 没有数据时**不生成随机 mock 顶替** —— 那样用户会把随机噪声
@@ -591,15 +591,18 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
     [obstructionMapData]
   );
 
-  // 遮挡率: 真实图用图上算出的比例; 模拟图不显示(数字是编的)
-  const obstructionRate = isReal && stats
+  // 遮挡指标：两个口径，优先级不同
+  //   1. obstructionPercentage（从图计算）→ 视野遮挡占比，瞬时精确
+  //   2. fractionObstructed（实时遥测）→ 累计遮挡率，设备统计
+  // 有图时用图，没图回退到实时值。
+  const obstructionRate = stats
     ? stats.obstructionPercentage
     : (telemetry?.fractionObstructed || 0);
-  const obstructionPct = isReal && stats
+  const obstructionPct = stats
     ? (obstructionRate * 100).toFixed(1)
     : null;
 
-  // 根据遮挡率确定严重程度
+  // 根据遮挡比例确定严重程度
   const getSeverityInfo = (rate: number) => {
     if (rate < 0.02) return { label: '无遮挡', color: 'text-accent-green' };
     if (rate < 0.05) return { label: '轻度遮挡', color: 'text-warning-orange' };

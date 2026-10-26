@@ -2,9 +2,9 @@
  * 遮挡图分析工具
  *
  * 从 123x123 的遮挡矩阵里算出用户真正关心的三件事:
- *   1. 遮挡率 —— 多少比例的视野被挡住
+ *   1. 视野遮挡占比 —— 多少比例的视野被挡住
  *   2. 主遮挡方向 —— 障碍集中在哪个方位(而不是硬编码"西南")
- *   3. 影响评估 —— 按遮挡率给出定性结论
+ *   3. 影响评估 —— 按视野遮挡占比给出定性结论
  *
  * 坐标系: 矩阵行=y(从上到下), 列=x(从左到右), 中心为天顶。
  * Starlink 的遮挡图以天线朝向为基准, 所以这里的方位是
@@ -37,7 +37,7 @@ export function azimuthToDirection(azimuthDeg: number): string {
  * 分析遮挡图。
  *
  * 只统计圆形视野内的像素 —— 矩阵四角是"未映射"区域(值为 0),
- * 把它们算进去会稀释遮挡率。
+ * 把它们算进去会稀释视野遮挡占比。
  */
 export function analyzeObstructionMap(map: number[][]): ObstructionStats | null {
   if (!Array.isArray(map) || map.length === 0) return null;
@@ -103,7 +103,7 @@ export function analyzeObstructionMap(map: number[][]): ObstructionStats | null 
 }
 
 /**
- * 按遮挡率给出定性影响评估。
+ * 按视野遮挡占比给出定性影响评估。
  * 阈值与 Dashboard 的 getSeverityInfo 保持一致。
  */
 export function assessObstructionImpact(
