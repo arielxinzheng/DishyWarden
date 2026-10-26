@@ -1,7 +1,7 @@
 # 变更记录：真实 dish gRPC 接入
 
 **日期**: 2026-10-26
-**提交**: `02cb87d`
+**提交**: `02cb87d`（功能）、`777bf06`（本文档）、`0768948`（状态同步）
 **范围**: `src/core/dishGrpc.ts`（新增）、`src/core/dishClient.ts`、`src/storage/telemetryStore.ts`、`package.json`
 **状态**: 端到端已验证
 
