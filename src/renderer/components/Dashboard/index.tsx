@@ -706,22 +706,52 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
 
 // 路由跟踪卡片
 function RouteTraceCard() {
-  // 模拟路由跳数据
-  const routeHops = [
-    { ip: '192.168.100.1', name: '本地网关 · Local gateway', ms: 1.2 },
-    { ip: '100.64.0.1', name: 'CGNAT 网关 · CGNAT gateway', ms: 2.1 },
-    { ip: '100.64.1.1', name: 'Carrier 级 NAT · Carrier NAT', ms: 2.8 },
-    { ip: '172.16.0.1', name: 'Starlink POP - Los Angeles, US', ms: 12.3 },
-    { ip: '198.51.100.1', name: 'Starlink 骨干网络 - US', ms: 28.1 },
-    { ip: '203.0.113.5', name: 'Telia 骨干 - Frankfurt, DE', ms: 36.4 },
-    { ip: '93.184.216.34', name: '目标服务器 - example.com', ms: 36.5 },
-  ];
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<{
+    target: string;
+    hops: Array<{ hop: number; ip: string | null; hostname: string; rtt: number | null }>;
+    completed: boolean;
+    duration: number;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const getLatencyColor = (ms: number) => {
+  // 组件挂载时执行一次 traceroute
+  useEffect(() => {
+    runTrace();
+  }, []);
+
+  const runTrace = async () => {
+    if (!window.electronAPI?.runTraceroute) {
+      setError('Traceroute 仅在 Electron 环境可用');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await window.electronAPI.runTraceroute('8.8.8.8');
+      setData(result);
+    } catch (err: any) {
+      setError(err.message || '执行失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getLatencyColor = (ms: number | null) => {
+    if (ms === null) return '#64748b'; // slate-500 (超时)
     if (ms > 30) return '#f59e0b'; // warning
     if (ms > 10) return '#38bdf8'; // sky-blue
     return '#4ade80'; // accent-green
   };
+
+  const avgLatency = data?.hops && data.hops.length > 0
+    ? data.hops
+        .filter(h => h.rtt !== null)
+        .reduce((sum, h) => sum + (h.rtt || 0), 0) / 
+        (data.hops.filter(h => h.rtt !== null).length || 1)
+    : 0;
 
   return (
     <Card>
@@ -731,49 +761,85 @@ function RouteTraceCard() {
             <Activity className="w-4 h-4 inline mr-2 text-accent-green" />
             路由跟踪
           </h3>
+          <button
+            onClick={runTrace}
+            disabled={loading}
+            className="text-xs text-accent-green hover:text-accent-green/80 disabled:opacity-50"
+          >
+            {loading ? '执行中...' : '刷新'}
+          </button>
         </div>
 
-        <div className="space-y-0">
-          {routeHops.map((hop, i) => (
-            <div key={i} className="flex items-center gap-3 py-1.5">
-              <div className="relative flex flex-col items-center shrink-0" style={{ width: '14px' }}>
-                <span className="w-2.5 h-2.5 rounded-full bg-accent-green shadow-[0_0_8px_rgba(74,222,128,0.4)] z-10" />
-                {i < routeHops.length - 1 && (
-                  <span className="absolute top-2.5 w-px h-full bg-accent-green/40" />
-                )}
-              </div>
-              <div className="w-6 text-[11px] font-mono text-slate-500 shrink-0">{i + 1}</div>
-              <div className="w-28 shrink-0">
-                <div className="font-mono text-xs text-slate-200 truncate">{hop.ip}</div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs text-slate-400 truncate">{hop.name}</div>
-                <div className="mt-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+        {error && (
+          <div className="text-xs text-warning-orange mb-2">
+            {error}
+          </div>
+        )}
+
+        {loading && !data && (
+          <div className="text-xs text-slate-400 py-8 text-center">
+            正在追踪路由...
+          </div>
+        )}
+
+        {data && data.hops.length > 0 && (
+          <>
+            <div className="space-y-0">
+              {data.hops.map((hop, i) => (
+                <div key={i} className="flex items-center gap-3 py-1.5">
+                  <div className="relative flex flex-col items-center shrink-0" style={{ width: '14px' }}>
+                    <span className="w-2.5 h-2.5 rounded-full bg-accent-green shadow-[0_0_8px_rgba(74,222,128,0.4)] z-10" />
+                    {i < data.hops.length - 1 && (
+                      <span className="absolute top-2.5 w-px h-full bg-accent-green/40" />
+                    )}
+                  </div>
+                  <div className="w-6 text-[11px] font-mono text-slate-500 shrink-0">{hop.hop}</div>
+                  <div className="w-28 shrink-0">
+                    <div className="font-mono text-xs text-slate-200 truncate">
+                      {hop.ip || '*'}
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-slate-400 truncate">{hop.hostname}</div>
+                    {hop.rtt !== null && (
+                      <div className="mt-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(100, (hop.rtt / 40) * 100)}%`,
+                            background: getLatencyColor(hop.rtt)
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
                   <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${Math.min(100, (hop.ms / 40) * 100)}%`,
-                      background: getLatencyColor(hop.ms)
-                    }}
-                  />
+                    className={`w-16 text-right font-mono text-xs shrink-0 ${
+                      hop.rtt === null ? 'text-slate-500' : hop.rtt > 30 ? 'text-warning-orange' : 'text-slate-300'
+                    }`}
+                  >
+                    {hop.rtt !== null ? `${hop.rtt.toFixed(1)} ms` : '* * *'}
+                  </div>
                 </div>
-              </div>
-              <div
-                className={`w-16 text-right font-mono text-xs shrink-0 ${
-                  hop.ms > 30 ? 'text-warning-orange' : 'text-slate-300'
-                }`}
-              >
-                {hop.ms} ms
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <div className="mt-3 border-t border-slate-700/40 pt-2 text-[11px] text-slate-500 font-mono flex flex-wrap gap-x-4 gap-y-1">
-          <span>目标: example.com (93.184.216.34)</span>
-          <span>跳数: 7</span>
-          <span>平均延迟: 19.2 ms</span>
-        </div>
+            <div className="mt-3 border-t border-slate-700/40 pt-2 text-[11px] text-slate-500 font-mono flex flex-wrap gap-x-4 gap-y-1">
+              <span>目标: {data.target}</span>
+              <span>跳数: {data.hops.length}</span>
+              <span>平均延迟: {avgLatency.toFixed(1)} ms</span>
+              <span className={data.completed ? 'text-accent-green' : 'text-warning-orange'}>
+                {data.completed ? '已到达' : '未到达'}
+              </span>
+            </div>
+          </>
+        )}
+
+        {data && data.hops.length === 0 && (
+          <div className="text-xs text-slate-400 py-8 text-center">
+            无法获取路由信息
+          </div>
+        )}
       </CardContent>
     </Card>
   );

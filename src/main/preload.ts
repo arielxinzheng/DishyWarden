@@ -93,6 +93,19 @@ export interface ElectronAPI {
     shells: { inclination: number; periodMin: number; count: number }[];
     data: { name: string; line1: string; line2: string }[];
   } | null>;
+
+  // 执行 traceroute
+  runTraceroute: (target?: string) => Promise<{
+    target: string;
+    hops: Array<{
+      hop: number;
+      ip: string | null;
+      hostname: string;
+      rtt: number | null;
+    }>;
+    completed: boolean;
+    duration: number;
+  }>;
 }
 
 /**
@@ -184,4 +197,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkGrafanaConnection: () => ipcRenderer.invoke('check-grafana-connection'),
 
   getTLESeed: () => ipcRenderer.invoke('get-tle-seed'),
+
+  runTraceroute: (target?: string) => ipcRenderer.invoke('run-traceroute', target),
 } as ElectronAPI);

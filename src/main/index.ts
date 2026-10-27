@@ -480,6 +480,21 @@ ipcMain.handle('get-router-probe', () => {
   return collector?.getRouterProbeResult() ?? null;
 });
 
+/**
+ * 执行 traceroute
+ * 
+ * 默认目标: 8.8.8.8 (Google DNS，全球可达性好)
+ * 可通过参数指定其他目标
+ */
+ipcMain.handle('run-traceroute', async (_event, target?: string) => {
+  const { traceroute } = await import('../core/traceroute');
+  return traceroute(target ?? '8.8.8.8', {
+    maxHops: 15,        // 限制跳数，Starlink 通常 5-10 跳
+    timeout: 30000,     // 30s 总超时
+    hopTimeout: 2,      // 2s 单跳超时
+  });
+});
+
 app.whenReady().then(async () => {
   // 后台预热种子数据, 不阻塞窗口显示
   warmupTLESeed();
