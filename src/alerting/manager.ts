@@ -269,6 +269,28 @@ export class AlertManager extends EventEmitter {
   }
 
   /**
+   * 获取告警历史（包括已恢复）
+   */
+  getAlertHistory(
+    limit = 100,
+    offset = 0,
+    severityFilter?: import('./database').Severity,
+    statusFilter?: import('./database').Status
+  ): AlertRecord[] {
+    return this.db.getAlertHistory(limit, offset, severityFilter, statusFilter);
+  }
+
+  /**
+   * 获取告警总数（用于分页）
+   */
+  getAlertCount(
+    severityFilter?: import('./database').Severity,
+    statusFilter?: import('./database').Status
+  ): number {
+    return this.db.getAlertCount(severityFilter, statusFilter);
+  }
+
+  /**
    * 添加自定义规则
    */
   addRule(rule: AlertRule): void {

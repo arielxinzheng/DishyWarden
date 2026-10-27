@@ -12,6 +12,8 @@ import {
   Info,
   RefreshCw,
   ShieldAlert,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
@@ -28,6 +30,7 @@ type Severity = AlertRecord['severity'];
 type Status = AlertRecord['status'];
 
 type Filter = 'all' | Severity;
+type ViewMode = 'active' | 'history';
 
 const SEVERITY_META: Record<Severity, { label: string; icon: typeof AlertTriangle; className: string }> = {
   critical: { label: '严重', icon: AlertTriangle, className: 'text-red-500' },
@@ -139,8 +142,14 @@ function AlertCard({ alert }: { alert: AlertRecord }) {
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>('active');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // 历史视图分页
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const pageSize = 50;
 
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
@@ -152,19 +161,33 @@ export default function AlertsPage() {
     }
     try {
       setError(null);
-      const data = await window.electronAPI.getActiveAlerts();
-      setAlerts(data ?? []);
+      if (viewMode === 'active') {
+        const data = await window.electronAPI.getActiveAlerts();
+        setAlerts(data ?? []);
+        setTotal(data?.length ?? 0);
+      } else {
+        const severityFilter = filter === 'all' ? undefined : filter;
+        const result = await window.electronAPI.getAlertHistory({
+          limit: pageSize,
+          offset: page * pageSize,
+          severity: severityFilter,
+        });
+        setAlerts(result.alerts ?? []);
+        setTotal(result.total ?? 0);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载告警失败');
     } finally {
       setIsLoading(false);
     }
-  }, [isElectron]);
+  }, [isElectron, viewMode, filter, page]);
 
   useEffect(() => {
+    setIsLoading(true);
     load();
 
-    if (!isElectron) return;
+    // 只在活跃视图时监听实时更新
+    if (!isElectron || viewMode !== 'active') return;
 
     // 实时跟随: 新告警插入, 恢复后移除
     const unsubNew = window.electronAPI.onAlertNew((alert) => {
@@ -178,21 +201,21 @@ export default function AlertsPage() {
       unsubNew();
       unsubResolved();
     };
-  }, [load, isElectron]);
+  }, [load, isElectron, viewMode]);
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? alerts : alerts.filter((a) => a.severity === filter)),
-    [alerts, filter]
-  );
+  // 历史视图时不需要客户端筛选，已在服务端完成
+  const filtered = viewMode === 'active'
+    ? (filter === 'all' ? alerts : alerts.filter((a) => a.severity === filter))
+    : alerts;
 
   const counts = useMemo(
     () => ({
-      all: alerts.length,
+      all: viewMode === 'active' ? alerts.length : total,
       critical: alerts.filter((a) => a.severity === 'critical').length,
       warning: alerts.filter((a) => a.severity === 'warning').length,
       info: alerts.filter((a) => a.severity === 'info').length,
     }),
-    [alerts]
+    [alerts, total, viewMode]
   );
 
   const FILTERS: { key: Filter; label: string }[] = [
@@ -202,25 +225,59 @@ export default function AlertsPage() {
     { key: 'info', label: `提示 ${counts.info}` },
   ];
 
+  const totalPages = Math.ceil(total / pageSize);
+  const hasNextPage = page < totalPages - 1;
+  const hasPrevPage = page > 0;
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">告警</h1>
           <p className="text-sm text-muted-foreground">
-            天线异常与网络质量告警，实时更新
+            天线异常与网络质量告警
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => { setIsLoading(true); load(); }}
-          disabled={isLoading || !isElectron}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50"
-        >
-          <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-          刷新
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 视图切换 */}
+          <div className="flex rounded-md border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => { setViewMode('active'); setPage(0); setFilter('all'); }}
+              className={cn(
+                'px-3 py-1.5 text-sm transition-colors',
+                viewMode === 'active'
+                  ? 'bg-accent-green/10 text-accent-green'
+                  : 'text-muted-foreground hover:bg-ink-800'
+              )}
+            >
+              活跃告警
+            </button>
+            <button
+              type="button"
+              onClick={() => { setViewMode('history'); setPage(0); setFilter('all'); }}
+              className={cn(
+                'px-3 py-1.5 text-sm transition-colors border-l border-border',
+                viewMode === 'history'
+                  ? 'bg-accent-green/10 text-accent-green'
+                  : 'text-muted-foreground hover:bg-ink-800'
+              )}
+            >
+              历史记录
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => { setIsLoading(true); load(); }}
+            disabled={isLoading || !isElectron}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+            刷新
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -228,7 +285,7 @@ export default function AlertsPage() {
           <button
             key={f.key}
             type="button"
-            onClick={() => setFilter(f.key)}
+            onClick={() => { setFilter(f.key); setPage(0); }}
             className={cn(
               'rounded-full border px-3 py-1 text-xs transition-colors',
               filter === f.key
@@ -265,11 +322,42 @@ export default function AlertsPage() {
       )}
 
       {filtered.length > 0 && (
-        <div className="space-y-3">
-          {filtered.map((alert) => (
-            <AlertCard key={alert.id ?? alert.alert_key} alert={alert} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {filtered.map((alert) => (
+              <AlertCard key={alert.id ?? alert.alert_key} alert={alert} />
+            ))}
+          </div>
+
+          {/* 历史视图分页 */}
+          {viewMode === 'history' && totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-border pt-4">
+              <div className="text-sm text-muted-foreground">
+                第 {page + 1} / {totalPages} 页，共 {total} 条
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={!hasPrevPage}
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={!hasNextPage}
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  下一页
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

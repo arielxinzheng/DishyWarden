@@ -281,6 +281,32 @@ ipcMain.handle('get-active-alerts', () => {
 });
 
 /**
+ * IPC 处理器：获取告警历史
+ */
+ipcMain.handle('get-alert-history', (_event, params: {
+  limit?: number;
+  offset?: number;
+  severity?: string;
+  status?: string;
+}) => {
+  if (!alertManager) return { alerts: [], total: 0 };
+  
+  const { limit = 100, offset = 0, severity, status } = params;
+  const alerts = alertManager.getAlertHistory(
+    limit,
+    offset,
+    severity as any,
+    status as any
+  );
+  const total = alertManager.getAlertCount(
+    severity as any,
+    status as any
+  );
+  
+  return { alerts, total };
+});
+
+/**
  * IPC 处理器：更新告警通知配置
  */
 ipcMain.handle('update-notification-config', (_event, config) => {

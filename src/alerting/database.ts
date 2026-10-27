@@ -25,6 +25,9 @@ export interface AlertRecord {
   recommendations: string; // JSON string
 }
 
+export type Severity = AlertRecord['severity'];
+export type Status = AlertRecord['status'];
+
 export class AlertDatabase {
   private db: Database.Database;
 
@@ -196,6 +199,72 @@ export class AlertDatabase {
 
     const result = stmt.run(cutoffDate);
     return result.changes;
+  }
+
+  /**
+   * 获取告警历史（包括已恢复）
+   * @param limit 最多返回条数
+   * @param offset 偏移量（分页）
+   * @param severityFilter 可选的严重程度筛选
+   * @param statusFilter 可选的状态筛选
+   */
+  getAlertHistory(
+    limit = 100,
+    offset = 0,
+    severityFilter?: Severity,
+    statusFilter?: Status
+  ): AlertRecord[] {
+    let sql = `
+      SELECT * FROM alerts
+      WHERE 1=1
+    `;
+    const params: (string | number)[] = [];
+
+    if (severityFilter) {
+      sql += ` AND severity = ?`;
+      params.push(severityFilter);
+    }
+
+    if (statusFilter) {
+      sql += ` AND status = ?`;
+      params.push(statusFilter);
+    }
+
+    sql += `
+      ORDER BY last_seen DESC, first_seen DESC
+      LIMIT ? OFFSET ?
+    `;
+    params.push(limit, offset);
+
+    const stmt = this.db.prepare(sql);
+    return stmt.all(...params) as AlertRecord[];
+  }
+
+  /**
+   * 获取告警总数（用于分页）
+   * @param severityFilter 可选的严重程度筛选
+   * @param statusFilter 可选的状态筛选
+   */
+  getAlertCount(
+    severityFilter?: Severity,
+    statusFilter?: Status
+  ): number {
+    let sql = `SELECT COUNT(*) as count FROM alerts WHERE 1=1`;
+    const params: string[] = [];
+
+    if (severityFilter) {
+      sql += ` AND severity = ?`;
+      params.push(severityFilter);
+    }
+
+    if (statusFilter) {
+      sql += ` AND status = ?`;
+      params.push(statusFilter);
+    }
+
+    const stmt = this.db.prepare(sql);
+    const result = stmt.get(...params) as { count: number };
+    return result.count;
   }
 
   /**

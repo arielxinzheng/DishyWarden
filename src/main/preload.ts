@@ -44,6 +44,14 @@ export interface ElectronAPI {
   // 获取活跃告警列表
   getActiveAlerts: () => Promise<AlertRecord[]>;
 
+  // 获取告警历史（包括已恢复）
+  getAlertHistory: (params: {
+    limit?: number;
+    offset?: number;
+    severity?: string;
+    status?: string;
+  }) => Promise<{ alerts: AlertRecord[]; total: number }>;
+
   // 监听新告警
   onAlertNew: (callback: (alert: AlertRecord) => void) => () => void;
 
@@ -123,6 +131,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   getActiveAlerts: () => ipcRenderer.invoke('get-active-alerts'),
+
+  getAlertHistory: (params: {
+    limit?: number;
+    offset?: number;
+    severity?: string;
+    status?: string;
+  }) => ipcRenderer.invoke('get-alert-history', params),
 
   onAlertNew: (callback: (alert: AlertRecord) => void) => {
     const listener = (_event: any, alert: AlertRecord) => callback(alert);
