@@ -92,20 +92,25 @@ export async function traceroute(
 
 /**
  * 解析 Unix (macOS/Linux) traceroute 输出
- * 
+ *
  * 格式示例:
  *   1  192.168.100.1 (192.168.100.1)  1.234 ms  1.456 ms  1.789 ms
  *   2  * * *
  *   3  example.com (93.184.216.34)  12.345 ms  12.456 ms  12.567 ms
+ *
+ * ⚠️ **不能 slice(1) 跳过标题行** —— macOS 的 traceroute 把标题
+ * (`traceroute to ... hops max ...`) 写到 **stderr**, stdout 里只有 hop 行。
+ * slice(1) 会把唯一的数据行当标题丢掉, 结果 0 hops。
+ * 标题行本来就能被 hopMatch 过滤掉, 所以不过滤。
  */
-function parseUnixTraceroute(output: string): TraceHop[] {
-  const lines = output.split('\n').slice(1); // 跳过第一行标题
+export function parseUnixTraceroute(output: string): TraceHop[] {
+  const lines = output.split('\n');
   const hops: TraceHop[] = [];
 
   for (const line of lines) {
     if (!line.trim()) continue;
 
-    // 匹配跳数
+    // 匹配跳数 (标题行没有开头的数字, 会被这里过滤掉)
     const hopMatch = line.match(/^\s*(\d+)/);
     if (!hopMatch) continue;
 
@@ -124,12 +129,16 @@ function parseUnixTraceroute(output: string): TraceHop[] {
 
     // 匹配 IP 和主机名
     // 格式: hostname (ip) time ms 或 ip time ms
-    const ipMatch = line.match(/\(?([\d.]+)\)?/);
+    //
+    // ⚠️ IP 正则不能写成 /\(?([\d.]+)\)?/ —— 那会先匹配到**行首的跳号**
+    // (如 "1  localhost (127.0.0.1)" 里的 "1"), 把跳号当成 IP。
+    // 正确: 优先取括号里的 IP, 没有括号才取「跳号之后的第一个 token」。
+    const ipMatch = line.match(/\(([\d.]+)\)|^\s*\d+\s+([\d.]+)/);
     const hostnameMatch = line.match(/^\s*\d+\s+([^\s(]+)/);
     const timeMatch = line.match(/([\d.]+)\s*ms/);
 
     if (ipMatch) {
-      const ip = ipMatch[1];
+      const ip = ipMatch[1] ?? ipMatch[2];
       const hostname = hostnameMatch?.[1] !== ip ? (hostnameMatch?.[1] ?? ip) : ip;
       const rtt = timeMatch ? parseFloat(timeMatch[1]) : null;
 
@@ -147,14 +156,18 @@ function parseUnixTraceroute(output: string): TraceHop[] {
 
 /**
  * 解析 Windows tracert 输出
- * 
+ *
  * 格式示例:
  *   1    <1 ms    <1 ms    <1 ms  192.168.100.1
  *   2     *        *        *     请求超时。
  *   3    12 ms    12 ms    12 ms  example.com [93.184.216.34]
+ *
+ * ⚠️ **不要 slice(4) 跳过前 4 行** —— 标题行数不固定(本地化、语言版本、
+ * 是否输出统计段都会变), 硬编码行数会随机吃掉数据行。
+ * 标题行没有开头的数字, 会被 hopMatch 过滤掉, 所以不过滤。
  */
-function parseWindowsTraceroute(output: string): TraceHop[] {
-  const lines = output.split('\n').slice(4); // 跳过前4行标题
+export function parseWindowsTraceroute(output: string): TraceHop[] {
+  const lines = output.split('\n');
   const hops: TraceHop[] = [];
 
   for (const line of lines) {
@@ -180,11 +193,26 @@ function parseWindowsTraceroute(output: string): TraceHop[] {
     // 匹配时间和 IP
     const timeMatch = line.match(/<?\s*(\d+)\s*ms/);
     const ipMatch = line.match(/\[?([\d.]+)\]?$/);
-    const hostnameMatch = line.match(/ms\s+([^\s\[]+)/);
+
+    // 主机名: 剥掉行尾的 IP 之后, 取**最后一个** token。
+    //
+    // ⚠️ 不能用 /ms\s+(\S+)/ —— Windows 格式里 "ms" 后面紧跟的是**下一个时间值**
+    // ("12 ms    12 ms    12 ms  example.com"), 不是主机名。
+    const withoutIp = ipMatch ? line.slice(0, line.lastIndexOf(ipMatch[0])).trim() : line;
+    const tokens = withoutIp.split(/\s+/).filter(Boolean);
+    // 剥掉末尾的时间 token 们("12", "ms", "<1", ...)
+    while (
+      tokens.length > 0 &&
+      (tokens[tokens.length - 1] === 'ms' || /^<?\d+$/.test(tokens[tokens.length - 1]))
+    ) {
+      tokens.pop();
+    }
+    const hostnameCandidate = tokens[tokens.length - 1];
 
     if (ipMatch) {
       const ip = ipMatch[1];
-      const hostname = hostnameMatch?.[1] ?? ip;
+      const hostname =
+        hostnameCandidate && hostnameCandidate !== ip ? hostnameCandidate : ip;
       const rtt = timeMatch ? parseFloat(timeMatch[1]) : null;
 
       hops.push({
