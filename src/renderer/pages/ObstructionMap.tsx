@@ -1,6 +1,7 @@
 import { useDish } from '../hooks/useDish';
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { ObstructionHemisphere } from '../components/Dashboard/ObstructionHemisphere';
+import type { ObstructionEvent } from '../../storage/types';
 import {
   analyzeObstructionMap,
   assessObstructionImpact,
@@ -14,6 +15,31 @@ import {
  */
 export default function ObstructionMap() {
   const { telemetry, isLoading, error, obstruction } = useDish();
+  const [obstructionEvents, setObstructionEvents] = useState<ObstructionEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  // 加载过去 7 天的遮挡事件历史（最小持续时长 60 秒）
+  useEffect(() => {
+    const loadEvents = async () => {
+      if (typeof window === 'undefined' || !window.electronAPI) {
+        return; // 浏览器环境降级，不显示历史
+      }
+
+      setEventsLoading(true);
+      try {
+        const now = Date.now();
+        const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+        const events = await window.electronAPI.getObstructionEvents(sevenDaysAgo, now, 20);
+        setObstructionEvents(events);
+      } catch (err) {
+        console.error('Failed to load obstruction events:', err);
+      } finally {
+        setEventsLoading(false);
+      }
+    };
+
+    loadEvents();
+  }, []);
 
   // 优先用主进程存的实测遮挡图, 拿不到才降级到遥测里带的
   // 注意: 两者都可能是模拟数据, 所以 source 必须跟着走 —— 不能假定是真实
@@ -148,6 +174,27 @@ export default function ObstructionMap() {
           颜色分类对应不同的信号质量：浅灰色表示无遮挡，红色表示障碍物。
         </p>
       </div>
+
+      {/* 遮挡历史时间轴 */}
+      {window.electronAPI && (
+        <div className="bg-gray-800 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">遮挡事件历史（最近 7 天）</h3>
+          
+          {eventsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            </div>
+          ) : obstructionEvents.length === 0 ? (
+            <p className="text-gray-400 text-sm">过去 7 天无遮挡事件记录</p>
+          ) : (
+            <div className="space-y-3">
+              {obstructionEvents.map((event, idx) => (
+                <ObstructionEventCard key={idx} event={event} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -172,6 +219,67 @@ function StatCard({ label, value, color }: StatCardProps) {
     <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
       <p className="text-sm opacity-80 mb-1">{label}</p>
       <p className="text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
+// 遮挡事件卡片组件
+interface ObstructionEventCardProps {
+  event: ObstructionEvent;
+}
+
+function ObstructionEventCard({ event }: ObstructionEventCardProps) {
+  const formatDate = (ts: number) => {
+    const date = new Date(ts);
+    return date.toLocaleString('zh-CN', {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const formatDuration = (seconds: number) => {
+    if (seconds < 60) return `${seconds}秒`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return mins > 0 ? `${hours}小时${mins}分钟` : `${hours}小时`;
+  };
+
+  // 根据严重程度选择颜色
+  const getSeverityColor = () => {
+    if (event.avgFractionObstructed > 0.5 || event.durationSec > 3600) {
+      return 'border-red-500 bg-red-900/20';
+    }
+    if (event.avgFractionObstructed > 0.2 || event.durationSec > 600) {
+      return 'border-orange-500 bg-orange-900/20';
+    }
+    return 'border-yellow-500 bg-yellow-900/20';
+  };
+
+  return (
+    <div className={`rounded-lg border p-4 ${getSeverityColor()}`}>
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-white font-medium">
+              {formatDate(event.startTs)} - {formatDate(event.endTs)}
+            </span>
+            <span className="text-sm text-gray-400">
+              持续 {formatDuration(event.durationSec)}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-gray-400">
+              平均遮挡率: <span className="text-white font-medium">{(event.avgFractionObstructed * 100).toFixed(1)}%</span>
+            </span>
+            <span className="text-gray-400">
+              峰值: <span className="text-white font-medium">{(event.maxFractionObstructed * 100).toFixed(1)}%</span>
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

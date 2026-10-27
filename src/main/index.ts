@@ -252,6 +252,19 @@ ipcMain.handle('prune-storage', () => {
 });
 
 /**
+ * IPC 处理器：获取遮挡事件历史
+ * 
+ * @param fromMs 起始时间 epoch ms
+ * @param toMs 结束时间 epoch ms
+ * @param limit 最多返回多少条事件
+ */
+ipcMain.handle('get-obstruction-events', (_event, fromMs: number, toMs: number, limit?: number) => {
+  const store = (collector as any)?.store; // 访问 collector 的 private store
+  if (!store) return [];
+  return store.queryObstructionEvents(fromMs, toMs, limit);
+});
+
+/**
  * IPC 处理器：获取采集器统计信息
  */
 ipcMain.handle('get-collector-stats', () => {

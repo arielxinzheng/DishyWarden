@@ -32,6 +32,7 @@ import type {
   PruneResult,
   StorageStats,
   TimestampedTelemetry,
+  ObstructionEvent,
 } from './types';
 
 const DAY_MS = 86_400_000;
@@ -576,6 +577,74 @@ export class TelemetryStore {
       console.warn('[TelemetryStore] 关闭数据库时出错:', error);
     }
   }
+
+  /**
+   * 查询遮挡事件历史
+   * 
+   * 遮挡事件 = 连续的 currently_obstructed = 1 时段
+   * 
+   * @param fromMs 起始时间 epoch ms
+   * @param toMs 结束时间 epoch ms
+   * @param limit 最多返回多少条事件（默认 20）
+   * @returns 遮挡事件列表，按时间倒序（最新的在前）
+   */
+  queryObstructionEvents(fromMs: number, toMs: number, limit: number = 20): ObstructionEvent[] {
+    // 查询指定时间范围内 currently_obstructed = 1 的采样点
+    const rows = this.db
+      .prepare(`
+        SELECT ts, fraction_obstructed
+        FROM telemetry_samples
+        WHERE ts >= ? AND ts < ? AND currently_obstructed = 1
+        ORDER BY ts ASC
+      `)
+      .all(fromMs, toMs) as Array<{ ts: number; fraction_obstructed: number }>;
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    // 将连续的遮挡采样合并为事件
+    const events: ObstructionEvent[] = [];
+    let currentEvent: {
+      startTs: number;
+      endTs: number;
+      fractions: number[];
+    } | null = null;
+
+    // 采样间隔阈值：超过 2 分钟（4 个采样周期）视为新事件
+    const gapThreshold = SAMPLE_INTERVAL_MS * 4;
+
+    for (const row of rows) {
+      if (!currentEvent) {
+        // 开始新事件
+        currentEvent = {
+          startTs: row.ts,
+          endTs: row.ts,
+          fractions: [row.fraction_obstructed],
+        };
+      } else if (row.ts - currentEvent.endTs <= gapThreshold) {
+        // 继续当前事件
+        currentEvent.endTs = row.ts;
+        currentEvent.fractions.push(row.fraction_obstructed);
+      } else {
+        // 间隔过大，结束当前事件并开始新事件
+        events.push(finalizeEvent(currentEvent));
+        currentEvent = {
+          startTs: row.ts,
+          endTs: row.ts,
+          fractions: [row.fraction_obstructed],
+        };
+      }
+    }
+
+    // 处理最后一个事件
+    if (currentEvent) {
+      events.push(finalizeEvent(currentEvent));
+    }
+
+    // 按时间倒序排列，取前 limit 条
+    return events.reverse().slice(0, limit);
+  }
 }
 
 /**
@@ -621,6 +690,28 @@ function mapRow(row: unknown): HistorySample {
     snr: r.snr as number,
     fractionObstructed: r.fraction_obstructed as number,
     satelliteId: typeof r.satellite_id === 'number' ? r.satellite_id : undefined,
+  };
+}
+
+/**
+ * 将临时事件对象转换为最终的 ObstructionEvent
+ */
+function finalizeEvent(event: {
+  startTs: number;
+  endTs: number;
+  fractions: number[];
+}): ObstructionEvent {
+  const durationSec = (event.endTs - event.startTs) / 1000;
+  const avgFractionObstructed =
+    event.fractions.reduce((sum, f) => sum + f, 0) / event.fractions.length;
+  const maxFractionObstructed = Math.max(...event.fractions);
+
+  return {
+    startTs: event.startTs,
+    endTs: event.endTs,
+    durationSec,
+    avgFractionObstructed,
+    maxFractionObstructed,
   };
 }
 

@@ -7,6 +7,20 @@
 
 import type { TelemetryData } from '../core/dishClient';
 
+/** 遮挡事件 —— 连续 currently_obstructed = 1 的时段 */
+export interface ObstructionEvent {
+  /** 事件开始时刻 epoch ms */
+  startTs: number;
+  /** 事件结束时刻 epoch ms */
+  endTs: number;
+  /** 持续时长(秒) */
+  durationSec: number;
+  /** 该时段的平均遮挡率 (0.0-1.0) */
+  avgFractionObstructed: number;
+  /** 该时段的峰值遮挡率 */
+  maxFractionObstructed: number;
+}
+
 /** 带采集时刻的遥测数据(采集器内部与写入磁盘时使用) */
 export type TimestampedTelemetry = TelemetryData & { timestamp?: Date | number | string };
 
@@ -89,4 +103,18 @@ export interface StorageStats {
 export interface PruneResult {
   samples: number;
   hourly: number;
+}
+
+/** 遮挡事件 —— 连续 currently_obstructed = 1 的时段 */
+export interface ObstructionEvent {
+  /** 事件开始时刻 epoch ms */
+  startTs: number;
+  /** 事件结束时刻 epoch ms */
+  endTs: number;
+  /** 持续时长(秒) */
+  durationSec: number;
+  /** 该时段的平均遮挡率 (0.0-1.0) */
+  avgFractionObstructed: number;
+  /** 该时段的峰值遮挡率 */
+  maxFractionObstructed: number;
 }

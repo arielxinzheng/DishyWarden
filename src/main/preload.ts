@@ -5,7 +5,7 @@ import type { NetworkAnomaly } from '../core/telemetry';
 import type { AlertRecord } from '../alerting/database';
 import type { NotificationConfig } from '../alerting/notifier';
 import type { AppConfig, CollectorConfig, PrometheusConfig, GrafanaConfig } from '../config/manager';
-import type { HistorySample, HistorySummary, PruneResult, StorageStats } from '../storage/types';
+import type { HistorySample, HistorySummary, PruneResult, StorageStats, ObstructionEvent } from '../storage/types';
 import type { RouterProbeResult } from '../core/routerProbeTypes';
 
 /**
@@ -106,6 +106,9 @@ export interface ElectronAPI {
     completed: boolean;
     duration: number;
   }>;
+
+  // 获取遮挡事件历史
+  getObstructionEvents: (fromMs: number, toMs: number, limit?: number) => Promise<ObstructionEvent[]>;
 }
 
 /**
@@ -199,4 +202,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTLESeed: () => ipcRenderer.invoke('get-tle-seed'),
 
   runTraceroute: (target?: string) => ipcRenderer.invoke('run-traceroute', target),
+
+  getObstructionEvents: (fromMs: number, toMs: number, limit?: number) =>
+    ipcRenderer.invoke('get-obstruction-events', fromMs, toMs, limit),
 } as ElectronAPI);
