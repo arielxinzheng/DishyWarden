@@ -465,6 +465,20 @@ ipcMain.handle('get-tle-seed', () => {
   };
 });
 
+/**
+ * IPC 处理器：获取最近一次路由器探测结果
+ *
+ * 需求文档 2.1.2「路由器状态监控」的数据出口。
+ * 之前探测结果只存在于 collector 内部, 既不进 Prometheus 也不进 UI ——
+ * 采集了但用户看不到。
+ *
+ * `trusted` 字段来自 ICMP 基线自检: 某些网络环境(VPN/隧道)会应答所有 ICMP,
+ * 此时可达性与延迟都是环境造出来的假象, 界面必须如实标注。
+ */
+ipcMain.handle('get-router-probe', () => {
+  return collector?.getRouterProbeResult() ?? null;
+});
+
 app.whenReady().then(async () => {
   // 后台预热种子数据, 不阻塞窗口显示
   warmupTLESeed();

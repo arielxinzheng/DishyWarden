@@ -32,6 +32,7 @@ import { ThroughputChart } from './ThroughputChart';
 import { AlertList } from './AlertList';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
 import { MetricCard } from './MetricCard';
+import { RouterStatusRow } from './RouterStatusRow';
 import { buildMetricSeries, peakOf } from './metricSeries';
 
 type TimeRange = '15m' | '1h' | '6h';
@@ -528,8 +529,10 @@ export default function Dashboard() {
           </Card>
         </div>
         
-        {/* 右侧：路由跟踪 - 占 3/10 宽度 */}
-        <div className="lg:col-span-3">
+        {/* 右侧：路由器状态 + 路由跟踪 - 占 3/10 宽度 */}
+        <div className="lg:col-span-3 space-y-3">
+          {/* 路由器状态行 —— 需求文档 2.1.2 的数据出口, 放在路由跟踪上方 */}
+          <RouterStatusRow />
           <RouteTraceCard />
         </div>
       </div>

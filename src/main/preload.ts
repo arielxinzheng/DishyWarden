@@ -6,6 +6,7 @@ import type { AlertRecord } from '../alerting/database';
 import type { NotificationConfig } from '../alerting/notifier';
 import type { AppConfig, CollectorConfig, PrometheusConfig, GrafanaConfig } from '../config/manager';
 import type { HistorySample, HistorySummary, PruneResult, StorageStats } from '../storage/types';
+import type { RouterProbeResult } from '../core/routerProbeTypes';
 
 /**
  * Electron API 接口定义
@@ -16,6 +17,9 @@ export interface ElectronAPI {
 
   // 获取最新一份遮挡图及其采集时刻
   getLatestObstruction: () => Promise<{ data: number[][]; ts: number; source: 'real' | 'mock' } | null>;
+
+  // 获取最近一次路由器探测结果 (需求文档 2.1.2)
+  getRouterProbe: () => Promise<RouterProbeResult | null>;
 
   // 获取历史数据（来自 SQLite 历史库）
   getHistory: (seconds: number) => Promise<HistorySample[]>;
@@ -98,6 +102,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLatestTelemetry: () => ipcRenderer.invoke('get-latest-telemetry'),
 
   getLatestObstruction: () => ipcRenderer.invoke('get-latest-obstruction'),
+
+  getRouterProbe: () => ipcRenderer.invoke('get-router-probe'),
 
   getHistory: (seconds: number) => ipcRenderer.invoke('get-history', seconds),
 
