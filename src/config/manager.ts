@@ -13,8 +13,7 @@ export interface CollectorConfig {
   bufferSize: number; // 历史数据缓冲大小
   dishAddress: string; // Starlink 设备地址
   dishPort: number; // Dish gRPC 端口
-  routerAddress: string; // Starlink 路由器地址
-  routerPort: number; // Router gRPC 端口
+  routerAddress: string; // 路由器地址（用于 ICMP Ping 探测）
 }
 
 export interface PrometheusConfig {
@@ -45,8 +44,7 @@ const DEFAULT_CONFIG: AppConfig = {
     bufferSize: 2880,
     dishAddress: '127.0.0.1',
     dishPort: 9200,
-    routerAddress: '127.0.0.1',
-    routerPort: 9200,
+    routerAddress: '192.168.100.1', // 默认 Starlink 网关地址
   },
   prometheus: {
     port: 9090,

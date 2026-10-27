@@ -43,8 +43,7 @@ export default function Settings() {
         collector: {
           dishAddress: '127.0.0.1',
           dishPort: 9200,
-          routerAddress: '127.0.0.1',
-          routerPort: 9200,
+          routerAddress: '192.168.100.1',
           interval: 30000,
           bufferSize: 2880,
         },
@@ -337,22 +336,11 @@ export default function Settings() {
                     collector: { ...config.collector, routerAddress: e.target.value },
                   })
                 }
-                placeholder="192.168.1.1"
+                placeholder="192.168.100.1"
               />
-              <p className="text-xs text-muted-foreground">Starlink 路由器地址</p>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Router gRPC 端口</label>
-              <Input
-                type="number"
-                value={config.collector.routerPort}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    collector: { ...config.collector, routerPort: parseInt(e.target.value) },
-                  })
-                }
-              />
+              <p className="text-xs text-muted-foreground">
+                路由器地址（用于 ICMP Ping 探测）
+              </p>
             </div>
           </div>
 

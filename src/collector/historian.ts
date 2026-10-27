@@ -2,14 +2,15 @@
  * 数据采集器 (Historian)
  * 
  * 在 Electron 主进程中运行，负责：
- * 1. 定期轮询 Starlink dish/router (默认30秒)
- * 2. 提取遥测数据并记录到内存缓冲区
- * 3. 为 Prometheus exporter 提供数据
- * 4. 持久化历史数据到本地存储
+ * 1. 定期轮询 Starlink dish 遥测（默认30秒）
+ * 2. 定期探测路由器可达性（ICMP Ping + HTTP）
+ * 3. 提取遥测数据并记录到内存缓冲区
+ * 4. 为 Prometheus exporter 提供数据
+ * 5. 持久化历史数据到本地存储
  */
 
 import { DishClient, TelemetryData } from '../core/dishClient';
-import { RouterClient, RouterTelemetryData } from '../core/routerClient';
+import { RouterProbe, RouterProbeResult } from '../core/routerProbe';
 import { TelemetryStore } from '../storage/telemetryStore';
 import type { HistorySample, PruneResult, StorageStats } from '../storage/types';
 import { EventEmitter } from 'events';
@@ -20,8 +21,7 @@ export interface CollectorConfig {
   bufferSize: number;         // 内存缓冲区大小（数据点数量）
   dishAddress?: string;       // Dish 地址
   dishPort?: number;          // Dish gRPC 端口
-  routerAddress?: string;     // Router 地址
-  routerPort?: number;        // Router gRPC 端口
+  routerAddress?: string;     // Router 地址（用于 ICMP Ping 探测）
   enablePersistence?: boolean; // 是否持久化到磁盘
   dataDir?: string;           // 自定义数据目录（留空则用 app.getPath('userData')/data）
 }
@@ -38,13 +38,15 @@ export interface CollectorStats {
 export class DataCollector extends EventEmitter {
   private config: Required<CollectorConfig>;
   private client: DishClient;
-  private routerClient: RouterClient;
+  private routerProbe: RouterProbe;
   private buffer: TelemetryData[] = [];
   private intervalHandle: NodeJS.Timeout | null = null;
   private isRunning = false;
   private startTime: Date | null = null;
   /** 历史库。打不开时降级为 null, 采集与实时推送不受影响。 */
   private store: TelemetryStore | null = null;
+  /** 最近一次路由器探测结果 */
+  private lastRouterProbe: RouterProbeResult | null = null;
   
   private stats: CollectorStats = {
     totalSamples: 0,
@@ -63,8 +65,7 @@ export class DataCollector extends EventEmitter {
       bufferSize: config.bufferSize || 2880, // 24小时数据 (86400/30)
       dishAddress: config.dishAddress || '127.0.0.1',
       dishPort: config.dishPort || 9200,
-      routerAddress: config.routerAddress || '127.0.0.1',
-      routerPort: config.routerPort || 9200,
+      routerAddress: config.routerAddress || '192.168.100.1',
       enablePersistence: config.enablePersistence ?? true,
       dataDir: config.dataDir || '', // 空 = 使用 app.getPath('userData')/data
     };
@@ -74,9 +75,10 @@ export class DataCollector extends EventEmitter {
       grpcPort: this.config.dishPort,
     });
 
-    this.routerClient = new RouterClient({
+    this.routerProbe = new RouterProbe({
       address: this.config.routerAddress,
-      grpcPort: this.config.routerPort,
+      timeout: 5000,
+      pingCount: 3,
     });
 
     if (this.config.enablePersistence) {
@@ -138,11 +140,10 @@ export class DataCollector extends EventEmitter {
         setTimeout(() => reject(new Error('Starlink 设备连接超时 (10s)')), 10000)
       );
       
-      // 并行采集 dish 和 router 数据，两侧独立成败
-      // 使用 allSettled 确保一方失败不影响另一方
+      // 并行采集 dish 遥测和 router 探活，两侧独立成败
       const collectPromise = Promise.allSettled([
         this.client.getTelemetry(),
-        this.routerClient.getTelemetry(),
+        this.routerProbe.probe(),
       ]);
       
       const results = await Promise.race([
@@ -160,20 +161,19 @@ export class DataCollector extends EventEmitter {
       
       const telemetry = dishResult.value;
       
-      // router 失败时降级为 null，不影响 dish 数据
-      let routerTelemetry: RouterTelemetryData | null = null;
+      // router 探测失败时降级为 null，不影响 dish 数据
       if (routerResult.status === 'fulfilled') {
-        routerTelemetry = routerResult.value;
+        this.lastRouterProbe = routerResult.value;
       } else {
-        console.warn('[Collector] Router 采集失败:', routerResult.reason);
+        console.warn('[Collector] Router 探测失败:', routerResult.reason);
+        this.lastRouterProbe = null;
       }
       
       // 添加时间戳
       const dataPoint = {
         ...telemetry,
-        router: routerTelemetry,
         timestamp: new Date(),
-      } as TelemetryData & { router: RouterTelemetryData | null; timestamp: Date };
+      } as TelemetryData & { timestamp: Date };
 
       // 添加到缓冲区
       this.buffer.push(dataPoint);
@@ -204,8 +204,9 @@ export class DataCollector extends EventEmitter {
       // 发送数据更新事件
       this.emit('data', dataPoint);
 
-      const routerInfo = routerTelemetry 
-        ? `router_clients=${routerTelemetry.connectedClients}` 
+      // 日志输出：包含路由器探测结果
+      const routerInfo = this.lastRouterProbe 
+        ? `router=${this.lastRouterProbe.reachable ? 'up' : 'down'}, rtt=${this.lastRouterProbe.rttMs?.toFixed(1) ?? 'N/A'}ms` 
         : 'router=unavailable';
       console.log(`[Collector] Sample ${this.stats.totalSamples}: latency=${telemetry.popPingLatencyMs.toFixed(1)}ms, state=${telemetry.state}, ${routerInfo}`);
 
@@ -351,7 +352,7 @@ export class DataCollector extends EventEmitter {
 
     this.config = { ...this.config, ...config };
     
-    // 更新客户端配置
+    // 更新 dish 客户端配置
     if (config.dishAddress || config.dishPort) {
       this.client.updateConfig({
         address: this.config.dishAddress,
@@ -359,11 +360,10 @@ export class DataCollector extends EventEmitter {
       });
     }
     
-    // 更新 router 客户端配置
-    if (config.routerAddress || config.routerPort) {
-      this.routerClient.updateConfig({
+    // 更新 router 探测配置
+    if (config.routerAddress) {
+      this.routerProbe.updateConfig({
         address: this.config.routerAddress,
-        grpcPort: this.config.routerPort,
       });
     }
 
@@ -378,6 +378,13 @@ export class DataCollector extends EventEmitter {
   clearBuffer() {
     this.buffer = [];
     console.log('[Collector] Buffer cleared');
+  }
+
+  /**
+   * 获取最近一次路由器探测结果
+   */
+  getRouterProbeResult(): RouterProbeResult | null {
+    return this.lastRouterProbe;
   }
 }
 
