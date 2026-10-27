@@ -20,8 +20,9 @@
  *
  * v1: 初始表结构
  * v2: latest_obstruction_map 增加 source 列(标记遮挡图是实测还是模拟)
+ * v3: telemetry_hourly 增加 state 分布列(online_sec/offline_sec/searching_sec/booting_sec)
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
@@ -62,7 +63,12 @@ export const DDL = `
     up_avg         REAL NOT NULL,
     up_max         REAL NOT NULL,
     obstructed_avg REAL NOT NULL,
-    snr_avg        REAL NOT NULL
+    snr_avg        REAL NOT NULL,
+    -- v3: state 分布(秒数), 用于计算时长加权在线率
+    online_sec     INTEGER NOT NULL DEFAULT 0,
+    offline_sec    INTEGER NOT NULL DEFAULT 0,
+    searching_sec  INTEGER NOT NULL DEFAULT 0,
+    booting_sec    INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS latest_snapshot (

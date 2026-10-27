@@ -145,6 +145,7 @@ export class TelemetryStore {
 
     // 增量维护小时聚合: 用旧 sample_count 做滑动平均, MAX/MIN 直接比较。
     // SQLite 的 SET 表达式全部基于赋值前的旧行值求值, 所以这里安全。
+    // state 分布用累加秒数(假设采样间隔 30s)。
     this.upsertHourly = this.db.prepare(`
       INSERT INTO telemetry_hourly (
         bucket_ts, sample_count,
@@ -152,8 +153,9 @@ export class TelemetryStore {
         drop_avg, drop_max,
         down_avg, down_max,
         up_avg, up_max,
-        obstructed_avg, snr_avg
-      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        obstructed_avg, snr_avg,
+        online_sec, offline_sec, searching_sec, booting_sec
+      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(bucket_ts) DO UPDATE SET
         latency_avg    = (latency_avg * sample_count + excluded.latency_avg) / (sample_count + 1),
         latency_max    = MAX(latency_max, excluded.latency_max),
@@ -166,6 +168,10 @@ export class TelemetryStore {
         up_max         = MAX(up_max, excluded.up_max),
         obstructed_avg = (obstructed_avg * sample_count + excluded.obstructed_avg) / (sample_count + 1),
         snr_avg        = (snr_avg * sample_count + excluded.snr_avg) / (sample_count + 1),
+        online_sec     = online_sec + excluded.online_sec,
+        offline_sec    = offline_sec + excluded.offline_sec,
+        searching_sec  = searching_sec + excluded.searching_sec,
+        booting_sec    = booting_sec + excluded.booting_sec,
         sample_count   = sample_count + 1
     `);
 
@@ -223,7 +229,11 @@ export class TelemetryStore {
              AVG(down_avg)       AS down_bps,
              AVG(up_avg)         AS up_bps,
              AVG(snr_avg)        AS snr,
-             AVG(obstructed_avg) AS fraction_obstructed
+             AVG(obstructed_avg) AS fraction_obstructed,
+             SUM(online_sec)     AS online_sec,
+             SUM(offline_sec)    AS offline_sec,
+             SUM(searching_sec)  AS searching_sec,
+             SUM(booting_sec)    AS booting_sec
       FROM telemetry_hourly
       WHERE bucket_ts >= ? AND bucket_ts < ?
       GROUP BY bucket
@@ -278,19 +288,36 @@ export class TelemetryStore {
    */
   private migrate(): void {
     try {
-      const cols = this.db
+      // v2: latest_obstruction_map 增加 source 列
+      const obsCols = this.db
         .prepare("PRAGMA table_info(latest_obstruction_map)")
         .all() as { name: string }[];
-      const names = cols.map((c) => c.name);
+      const obsNames = obsCols.map((c) => c.name);
 
-      if (!names.includes('source')) {
+      if (!obsNames.includes('source')) {
         // 存量行的来源未知 —— 保守标成 'mock'。
         // 理由: 宁可提示"这是模拟数据"让用户去查, 也不能把未知数据显示成
         // 设备实测。真实数据写入时会带上自己的 source 覆盖它。
         this.db.exec(
           "ALTER TABLE latest_obstruction_map ADD COLUMN source TEXT NOT NULL DEFAULT 'mock'"
         );
-        console.log('[TelemetryStore] 迁移: latest_obstruction_map 增加 source 列(存量行标为 mock)');
+        console.log('[TelemetryStore] 迁移 v2: latest_obstruction_map 增加 source 列(存量行标为 mock)');
+      }
+
+      // v3: telemetry_hourly 增加 state 分布列
+      const hourlyCols = this.db
+        .prepare("PRAGMA table_info(telemetry_hourly)")
+        .all() as { name: string }[];
+      const hourlyNames = hourlyCols.map((c) => c.name);
+
+      if (!hourlyNames.includes('online_sec')) {
+        this.db.exec(`
+          ALTER TABLE telemetry_hourly ADD COLUMN online_sec INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE telemetry_hourly ADD COLUMN offline_sec INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE telemetry_hourly ADD COLUMN searching_sec INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE telemetry_hourly ADD COLUMN booting_sec INTEGER NOT NULL DEFAULT 0;
+        `);
+        console.log('[TelemetryStore] 迁移 v3: telemetry_hourly 增加 state 分布列(online/offline/searching/booting)');
       }
     } catch (error) {
       console.warn('[TelemetryStore] 迁移失败(不影响使用):', error);
@@ -312,6 +339,18 @@ export class TelemetryStore {
 
   private writeHourly(point: TimestampedTelemetry, ts: number): void {
     const bucketTs = Math.floor(ts / HOUR_MS) * HOUR_MS;
+    
+    // 计算本次采样代表的时长(秒)，假设采样间隔 30s
+    const durationSec = SAMPLE_INTERVAL_MS / 1000;
+    
+    // 根据 state 分配持续时长
+    const stateDuration = {
+      online: point.state === 'ONLINE' ? durationSec : 0,
+      offline: point.state === 'OFFLINE' ? durationSec : 0,
+      searching: point.state === 'SEARCHING' ? durationSec : 0,
+      booting: point.state === 'BOOTING' ? durationSec : 0,
+    };
+    
     this.upsertHourly.run(
       bucketTs,
       point.popPingLatencyMs,
@@ -325,6 +364,10 @@ export class TelemetryStore {
       point.uplinkThroughputBps,
       point.fractionObstructed,
       point.snr,
+      stateDuration.online,
+      stateDuration.offline,
+      stateDuration.searching,
+      stateDuration.booting,
     );
   }
 
@@ -547,10 +590,22 @@ function mapRow(row: unknown): HistorySample {
   const r = row as Record<string, number | string | null | undefined>;
   const state = typeof r.state === 'string' ? r.state : undefined;
 
-  // 优先用查询直接给出的 online_ratio; 没有则由明细 state 推导
+  // onlineRatio 计算优先级:
+  //   1. 分桶查询直接给出的 online_ratio
+  //   2. hourly 表的 state 秒数(时长加权)
+  //   3. 明细表的 state 字段(0 或 1)
   let onlineRatio: number | undefined;
   if (typeof r.online_ratio === 'number' && Number.isFinite(r.online_ratio)) {
     onlineRatio = r.online_ratio;
+  } else if (typeof r.online_sec === 'number' || typeof r.offline_sec === 'number' || 
+             typeof r.searching_sec === 'number' || typeof r.booting_sec === 'number') {
+    // hourly 表: 根据 state 秒数计算时长加权在线率
+    const onlineSec = (r.online_sec as number) ?? 0;
+    const offlineSec = (r.offline_sec as number) ?? 0;
+    const searchingSec = (r.searching_sec as number) ?? 0;
+    const bootingSec = (r.booting_sec as number) ?? 0;
+    const totalSec = onlineSec + offlineSec + searchingSec + bootingSec;
+    onlineRatio = totalSec > 0 ? onlineSec / totalSec : undefined;
   } else if (state !== undefined) {
     onlineRatio = state === 'ONLINE' ? 1 : 0;
   }
