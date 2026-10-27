@@ -21,8 +21,9 @@
  * v1: 初始表结构
  * v2: latest_obstruction_map 增加 source 列(标记遮挡图是实测还是模拟)
  * v3: telemetry_hourly 增加 state 分布列(online_sec/offline_sec/searching_sec/booting_sec)
+ * v4: 性能索引 - (state, ts) 和 (currently_obstructed, ts)
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
@@ -49,6 +50,12 @@ export const DDL = `
     dish_temp_c         REAL,
     psu_temp_c          REAL
   );
+
+  -- 索引: 状态过滤 + 时间范围查询（中断统计、在线率计算）
+  CREATE INDEX IF NOT EXISTS idx_samples_state_ts ON telemetry_samples(state, ts);
+  
+  -- 索引: 遮挡过滤 + 时间范围查询（遮挡事件历史）
+  CREATE INDEX IF NOT EXISTS idx_samples_obstructed_ts ON telemetry_samples(currently_obstructed, ts);
 
   CREATE TABLE IF NOT EXISTS telemetry_hourly (
     bucket_ts      INTEGER PRIMARY KEY,  -- 所在小时的起点 epoch ms

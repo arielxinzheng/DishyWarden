@@ -278,7 +278,7 @@ export class TelemetryStore {
   // ---------------------------------------------------------------- 写入
 
   /**
-   * 轻量迁移: 给已存在的库补上新增的列。
+   * 轻量迁移: 给已存在的库补上新增的列和索引。
    *
    * CREATE TABLE IF NOT EXISTS 对已存在的表不会改结构, 所以新增列
    * 必须靠 ALTER TABLE 补。这里只做"缺什么补什么"式的幂等迁移 ——
@@ -286,6 +286,8 @@ export class TelemetryStore {
    *
    * 迁移历史:
    *   v2: latest_obstruction_map.source —— 标记遮挡图是实测还是模拟
+   *   v3: telemetry_hourly state 分布列 —— 时长加权在线率
+   *   v4: telemetry_samples 性能索引 —— (state, ts) 和 (currently_obstructed, ts)
    */
   private migrate(): void {
     try {
@@ -319,6 +321,23 @@ export class TelemetryStore {
           ALTER TABLE telemetry_hourly ADD COLUMN booting_sec INTEGER NOT NULL DEFAULT 0;
         `);
         console.log('[TelemetryStore] 迁移 v3: telemetry_hourly 增加 state 分布列(online/offline/searching/booting)');
+      }
+
+      // v4: telemetry_samples 性能索引
+      // 使用 PRAGMA index_list 检查索引是否已存在
+      const indexes = this.db
+        .prepare("PRAGMA index_list(telemetry_samples)")
+        .all() as { name: string }[];
+      const indexNames = indexes.map((idx) => idx.name);
+
+      if (!indexNames.includes('idx_samples_state_ts')) {
+        this.db.exec('CREATE INDEX idx_samples_state_ts ON telemetry_samples(state, ts)');
+        console.log('[TelemetryStore] 迁移 v4: 创建索引 idx_samples_state_ts (状态 + 时间)');
+      }
+
+      if (!indexNames.includes('idx_samples_obstructed_ts')) {
+        this.db.exec('CREATE INDEX idx_samples_obstructed_ts ON telemetry_samples(currently_obstructed, ts)');
+        console.log('[TelemetryStore] 迁移 v4: 创建索引 idx_samples_obstructed_ts (遮挡 + 时间)');
       }
     } catch (error) {
       console.warn('[TelemetryStore] 迁移失败(不影响使用):', error);
