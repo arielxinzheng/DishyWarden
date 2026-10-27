@@ -138,23 +138,42 @@ export class DataCollector extends EventEmitter {
         setTimeout(() => reject(new Error('Starlink 设备连接超时 (10s)')), 10000)
       );
       
-      // 并行采集 dish 和 router 数据
-      const collectPromise = Promise.all([
+      // 并行采集 dish 和 router 数据，两侧独立成败
+      // 使用 allSettled 确保一方失败不影响另一方
+      const collectPromise = Promise.allSettled([
         this.client.getTelemetry(),
         this.routerClient.getTelemetry(),
       ]);
       
-      const [telemetry, routerTelemetry] = await Promise.race([
+      const results = await Promise.race([
         collectPromise,
         timeoutPromise
       ]);
+      
+      // 解包 allSettled 结果
+      const [dishResult, routerResult] = results;
+      
+      // dish 失败时整帧失败（dish 是主数据源）
+      if (dishResult.status === 'rejected') {
+        throw new Error(`Dish 采集失败: ${dishResult.reason}`);
+      }
+      
+      const telemetry = dishResult.value;
+      
+      // router 失败时降级为 null，不影响 dish 数据
+      let routerTelemetry: RouterTelemetryData | null = null;
+      if (routerResult.status === 'fulfilled') {
+        routerTelemetry = routerResult.value;
+      } else {
+        console.warn('[Collector] Router 采集失败:', routerResult.reason);
+      }
       
       // 添加时间戳
       const dataPoint = {
         ...telemetry,
         router: routerTelemetry,
         timestamp: new Date(),
-      } as TelemetryData & { router: RouterTelemetryData; timestamp: Date };
+      } as TelemetryData & { router: RouterTelemetryData | null; timestamp: Date };
 
       // 添加到缓冲区
       this.buffer.push(dataPoint);
@@ -185,7 +204,10 @@ export class DataCollector extends EventEmitter {
       // 发送数据更新事件
       this.emit('data', dataPoint);
 
-      console.log(`[Collector] Sample ${this.stats.totalSamples}: latency=${telemetry.popPingLatencyMs.toFixed(1)}ms, state=${telemetry.state}, router_clients=${routerTelemetry.connectedClients}`);
+      const routerInfo = routerTelemetry 
+        ? `router_clients=${routerTelemetry.connectedClients}` 
+        : 'router=unavailable';
+      console.log(`[Collector] Sample ${this.stats.totalSamples}: latency=${telemetry.popPingLatencyMs.toFixed(1)}ms, state=${telemetry.state}, ${routerInfo}`);
 
     } catch (error) {
       this.stats.failedSamples++;
