@@ -28,9 +28,9 @@ export class AlertManager extends EventEmitter {
   private checkInterval?: NodeJS.Timeout;
   private thresholds: AlertThresholds;
 
-  constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds) {
+  constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds, dbPath?: string) {
     super();
-    this.db = new AlertDatabase();
+    this.db = new AlertDatabase(dbPath);
     this.notifier = new Notifier(notificationConfig);
     this.thresholds = thresholds;
     this.initializeDefaultRules();
@@ -338,7 +338,7 @@ export class AlertManager extends EventEmitter {
   /**
    * 关闭告警管理器
    */
-  stop(): void {
+  close(): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
     }

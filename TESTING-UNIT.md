@@ -23,6 +23,10 @@ npm run test:coverage
 
 ```
 src/
+├── alerting/
+│   ├── manager.ts
+│   ├── manager.test.ts            # 告警引擎集成测试 (18 测试)
+│   └── database.ts
 ├── core/
 │   ├── telemetry.ts
 │   ├── telemetry.test.ts          # 格式化、异常检测、信号质量 (69 测试)
@@ -36,7 +40,7 @@ src/
         └── obstructionAnalysis.test.ts  # 遮挡图分析、方位角 (28 测试)
 ```
 
-**总计**: 4 个测试文件，103 个测试用例，全部通过。
+**总计**: 5 个测试文件，121 个测试用例，全部通过（474ms）。
 
 ## 测试覆盖范围
 
@@ -102,12 +106,34 @@ src/
 - `<1 ms` 延迟解析
 - 忽略标题和尾部统计
 
+### 5. `manager.ts` (18 测试) — **告警引擎集成测试**
+
+**技术说明**:
+- better-sqlite3 编译为 Electron ABI（NODE_MODULE_VERSION 130），无法在标准 node 环境运行
+- 使用 Vitest Mock 替代真实 SQLite，验证业务逻辑与数据库接口契约
+
+**AlertDatabase Mock 测试** (9 用例):
+- **告警记录与去重**: 新告警写入、重复告警增加计数、告警恢复状态更新
+- **告警查询**: 活跃告警筛选、状态过滤（resolved/ongoing）、严重性过滤、分页
+- **通知记录**: 计数更新、累加逻辑
+
+**AlertManager 业务逻辑测试** (9 用例):
+- **告警规则触发**: 正常数据不触发、离线触发 critical、高延迟触发 warning、高丢包触发 critical、遮挡触发 warning、多重异常触发多个告警
+- **状态转换**: 持续触发的告警增加计数、告警恢复触发 resolved 事件
+- **阈值可配置**: 自定义阈值验证（200ms 不触发，250ms 触发）
+
+**代码调整**:
+- `AlertDatabase` 构造函数支持传入 dbPath（包括 `:memory:`）
+- `AlertManager` 构造函数增加可选 dbPath 参数，用于测试注入
+- `close()` 方法统一命名（替换原 `stop()`）
+
 ## 测试策略
 
 ### 单元测试优先
 - 覆盖纯函数逻辑层
-- 不依赖 Electron / SQLite / gRPC
-- 快速反馈（105ms 完成 103 个测试）
+- 不依赖 Electron / gRPC
+- Mock SQLite 验证告警引擎业务逻辑
+- 快速反馈（474ms 完成 121 个测试）
 
 ### 边界情况
 - 空值 / null / undefined
@@ -168,10 +194,10 @@ const createMockData = (overrides: Partial<TelemetryData> = {}): TelemetryData =
 
 ## 下一步
 
-### 阶段 2: 集成测试（建议）
-- 告警引擎 + SQLite（内存数据库）
-- 数据采集器 + DishyMock
-- 外发渠道测试（webhook.site）
+### 阶段 2: 集成测试（已部分完成）
+- ✅ **告警引擎 + Mock 数据库**（18 用例已就绪）
+- [ ] 数据采集器 + DishyMock
+- [ ] 外发渠道测试（webhook.site）
 
 ### 阶段 3: E2E 测试（可选）
 - Playwright for Electron

@@ -32,13 +32,17 @@ export class AlertDatabase {
   private db: Database.Database;
 
   constructor(dbPath?: string) {
-    const dataDir = path.join(app.getPath('userData'), 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    // 如果提供了明确路径（包括 :memory:），直接使用
+    if (dbPath) {
+      this.db = new Database(dbPath);
+    } else {
+      // 否则使用默认路径
+      const dataDir = path.join(app.getPath('userData'), 'data');
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      this.db = new Database(path.join(dataDir, 'alerts.db'));
     }
-
-    const finalPath = dbPath || path.join(dataDir, 'alerts.db');
-    this.db = new Database(finalPath);
     this.initializeSchema();
   }
 
