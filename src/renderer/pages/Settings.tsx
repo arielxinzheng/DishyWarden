@@ -80,6 +80,10 @@ export default function Settings() {
           username: '',
           password: '',
         },
+        alertThresholds: {
+          highLatencyMs: 100,
+          highPacketLoss: 0.1,
+        },
         version: '0.1.0',
       } as AppConfig);
     }
@@ -485,6 +489,69 @@ export default function Settings() {
               <span className="text-xs opacity-80">数据仅保存在本地浏览器中,不会上传到服务器</span>
             </AlertDescription>
           </Alert>
+        </CardContent>
+      </Card>
+
+      {/* 告警阈值 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>告警阈值</CardTitle>
+          <CardDescription>配置触发告警的阈值条件</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <label htmlFor="high-latency-threshold" className="block text-sm font-medium mb-2">
+              高延迟告警阈值 (毫秒)
+            </label>
+            <input
+              type="number"
+              id="high-latency-threshold"
+              className="w-full px-3 py-2 bg-background border border-border rounded-md"
+              value={config.alertThresholds?.highLatencyMs ?? 100}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  alertThresholds: {
+                    ...config.alertThresholds,
+                    highLatencyMs: Number(e.target.value),
+                    highPacketLoss: config.alertThresholds?.highPacketLoss ?? 0.1,
+                  },
+                })
+              }
+              min="10"
+              max="1000"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              当 PoP 延迟超过此值时触发告警（默认 100ms）
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="high-packet-loss-threshold" className="block text-sm font-medium mb-2">
+              高丢包告警阈值 (%)
+            </label>
+            <input
+              type="number"
+              id="high-packet-loss-threshold"
+              className="w-full px-3 py-2 bg-background border border-border rounded-md"
+              value={((config.alertThresholds?.highPacketLoss ?? 0.1) * 100).toFixed(1)}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  alertThresholds: {
+                    highLatencyMs: config.alertThresholds?.highLatencyMs ?? 100,
+                    highPacketLoss: Number(e.target.value) / 100,
+                  },
+                })
+              }
+              min="0.1"
+              max="50"
+              step="0.1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              当丢包率超过此值时触发告警（默认 10%）
+            </p>
+          </div>
         </CardContent>
       </Card>
 

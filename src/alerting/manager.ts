@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import { AlertDatabase, type AlertRecord } from './database';
 import { Notifier, type NotificationConfig, type NotificationContext } from './notifier';
 import type { TelemetryData } from '../core/dishClient';
+import type { AlertThresholds } from '../config/manager';
 
 export interface AlertRule {
   id: string;
@@ -25,11 +26,13 @@ export class AlertManager extends EventEmitter {
   private notifier: Notifier;
   private rules: Map<string, AlertRule> = new Map();
   private checkInterval?: NodeJS.Timeout;
+  private thresholds: AlertThresholds;
 
-  constructor(notificationConfig: NotificationConfig) {
+  constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds) {
     super();
     this.db = new AlertDatabase();
     this.notifier = new Notifier(notificationConfig);
+    this.thresholds = thresholds;
     this.initializeDefaultRules();
   }
 
@@ -64,7 +67,7 @@ export class AlertManager extends EventEmitter {
         name: 'PoP 延迟过高',
         enabled: true,
         severity: 'warning',
-        condition: (data) => (data.popPingLatencyMs || 0) > 100,
+        condition: (data) => (data.popPingLatencyMs || 0) > this.thresholds.highLatencyMs,
         summary: (data) => `PoP 延迟 ${data.popPingLatencyMs?.toFixed(1)}ms`,
         description: () => 'Starlink 骨干网络延迟异常',
         evidence: (data) => ({
@@ -83,7 +86,7 @@ export class AlertManager extends EventEmitter {
         name: '严重丢包',
         enabled: true,
         severity: 'critical',
-        condition: (data) => (data.popPingDropRate || 0) > 0.1,
+        condition: (data) => (data.popPingDropRate || 0) > this.thresholds.highPacketLoss,
         summary: (data) => `丢包率 ${((data.popPingDropRate || 0) * 100).toFixed(1)}%`,
         description: () => 'Starlink 网络丢包严重',
         evidence: (data) => ({
@@ -322,6 +325,14 @@ export class AlertManager extends EventEmitter {
    */
   cleanup(daysToKeep = 30): number {
     return this.db.cleanupResolvedAlerts(daysToKeep);
+  }
+
+  /**
+   * 更新告警阈值并重新初始化规则
+   */
+  updateThresholds(thresholds: AlertThresholds): void {
+    this.thresholds = thresholds;
+    this.initializeDefaultRules(); // 重新初始化规则以应用新阈值
   }
 
   /**

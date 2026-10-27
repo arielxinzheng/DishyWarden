@@ -141,7 +141,7 @@ async function startBackgroundServices() {
     console.log('[Main] Prometheus exporter started on :9817/metrics');
 
     // 4. 启动告警管理器
-    alertManager = new AlertManager(config.notifications);
+    alertManager = new AlertManager(config.notifications, config.alertThresholds);
     
     // 启动定期检查需要更新通知的告警
     alertManager.startUpdateNotificationCheck(60000); // 每分钟检查一次
@@ -315,7 +315,8 @@ ipcMain.handle('update-notification-config', (_event, config) => {
   // 重新创建告警管理器以应用新配置
   if (alertManager) {
     alertManager.stop();
-    alertManager = new AlertManager(configManager.getConfig().notifications);
+    const config = configManager.getConfig();
+    alertManager = new AlertManager(config.notifications, config.alertThresholds);
     alertManager.startUpdateNotificationCheck(60000);
     
     // 重新绑定事件监听

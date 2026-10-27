@@ -16,6 +16,11 @@ export interface CollectorConfig {
   routerAddress: string; // 路由器地址（用于 ICMP Ping 探测）
 }
 
+export interface AlertThresholds {
+  highLatencyMs: number; // 延迟告警阈值(毫秒)
+  highPacketLoss: number; // 丢包率告警阈值(0-1 之间)
+}
+
 export interface PrometheusConfig {
   port: number;
   retentionTime: string; // 如 "90d"
@@ -35,6 +40,7 @@ export interface AppConfig {
   prometheus: PrometheusConfig;
   notifications: NotificationConfig;
   grafana: GrafanaConfig;
+  alertThresholds: AlertThresholds;
   version: string;
 }
 
@@ -78,6 +84,10 @@ const DEFAULT_CONFIG: AppConfig = {
     apiKey: '',
     username: 'admin',
     password: 'admin',
+  },
+  alertThresholds: {
+    highLatencyMs: 100,
+    highPacketLoss: 0.1,
   },
   version: '0.1.0',
 };
@@ -138,6 +148,7 @@ export class ConfigManager {
           : defaults.notifications.email,
       },
       grafana: { ...defaults.grafana, ...loaded.grafana },
+      alertThresholds: { ...defaults.alertThresholds, ...loaded.alertThresholds },
       version: loaded.version || defaults.version,
     };
   }
