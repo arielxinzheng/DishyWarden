@@ -18,6 +18,12 @@ import {
   calculateAngularSeparation,
   type SatellitePosition,
 } from '../utils/satelliteCalculator';
+import {
+  estimateServingSatellite,
+  excludeDirectToCellSatellites,
+  MAX_PLAUSIBLE_RANGE_KM,
+  type ServingSatelliteEstimate,
+} from '../utils/servingSatellite';
 
 // 卫星数据类型
 interface SatelliteData {
@@ -47,6 +53,15 @@ export default function SatelliteRadar() {
   const [cacheInfo, setCacheInfo] = useState({ hasCached: false, age: null as number | null, count: null as number | null });
   // 星历来源与新鲜度: 离线兜底时需要告诉用户数据有多旧
   const [tleInfo, setTleInfo] = useState<{ source: string; text: string; degraded: boolean } | null>(null);
+  // 服务卫星估算结果 (含置信度与原因)
+  const [estimate, setEstimate] = useState<ServingSatelliteEstimate | null>(null);
+  const [estimateNote, setEstimateNote] = useState<string | null>(null);
+  // 上一帧的服务卫星, 用于时间连续性判断 (交接瞬间相邻候选难分, 连续性可破)
+  const servingSatRef = useRef<{ norad: string; name: string } | null>(null);
+  // 设备波束指向 —— 提到组件层, chart effect 与重算 effect 都要依赖它
+  // (telemetry 每次 refresh 都是新对象, 所以取具体字段值而非对象)
+  const bsAz = telemetry?.boresightAzimuthDeg;
+  const bsEl = telemetry?.boresightElevationDeg;
 
   // 转换 SatellitePosition 为 SatelliteData
   const convertToSatelliteData = (
@@ -110,44 +125,88 @@ export default function SatelliteRadar() {
         return;
       }
 
+      // 排除 DTC(Direct-to-Cell) 卫星 —— 那是给手机直连用的，
+      // 不承载固定宽带终端的连接，不能作为服务卫星候选
+      const nonDtcTles = excludeDirectToCellSatellites(tles);
+      const dtcExcluded = tles.length - nonDtcTles.length;
+      if (dtcExcluded > 0) {
+        console.log(`[SatelliteRadar] 已排除 ${dtcExcluded} 颗 DTC 卫星`);
+      }
+
       // 计算所有卫星位置
-      const allPositions = calculateMultipleSatellites(tles, observer);
-      
+      const allPositions = calculateMultipleSatellites(nonDtcTles, observer);
+
       // 只保留地平线以上的卫星
       const visiblePositions = filterVisibleSatellites(allPositions, 0);
 
-      if (visiblePositions.length === 0) {
+      // 剔除轨道距离异常的解轨残留 (实测见过 150636km / 20076020km)。
+      // 它们仰角算得"正常", 混在列表里会误导用户, 也可能被选成服务卫星。
+      const plausiblePositions = visiblePositions.filter((pos) => pos.range <= MAX_PLAUSIBLE_RANGE_KM);
+      if (plausiblePositions.length < visiblePositions.length) {
+        console.log(
+          `[SatelliteRadar] 剔除 ${visiblePositions.length - plausiblePositions.length} 颗轨道距离异常的解轨残留`
+        );
+      }
+
+      if (plausiblePositions.length === 0) {
         setError('当前位置没有可见卫星');
         loadingRef.current = false;
         setLoading(false);
         return;
       }
 
-      // 从 telemetry 获取真实的服务卫星 ID
-      // 如果 telemetry 可用且包含有效的 satelliteId，使用它；否则回退到仰角最高的
-      let servingPosition: SatellitePosition;
+      // 确定服务卫星
+      //
+      // dish 的 gRPC 协议里没有 satelliteId 字段，拿不到设备上报的 ID。
+      // 但 dish 给了波束指向（boresightAzimuthDeg / boresightElevationDeg），
+      // 可以据此反推 —— 这正是 SatelliteTracker 一类工具的做法。
+      //
+      // 旧实现回退到「仰角最高」，实测不可靠：Starlink 密度高时仰角前几名
+      // 互相差不到 2°，第 3 名甚至可能在正南方，与波束毫无关系。
+      let servingPosition: SatellitePosition | null = null;
+      let estimate: ServingSatelliteEstimate | null = null;
+      let estimateNote: string | null = null;
+
+      // 优先用设备上报的 ID（协议目前没有，但留好口子）
       if (telemetry?.satelliteId) {
         const servingSatId = String(telemetry.satelliteId);
-        const matchedPosition = visiblePositions.find((pos) => pos.noradId === servingSatId);
-        
+        const matchedPosition = plausiblePositions.find((pos) => pos.noradId === servingSatId);
         if (matchedPosition) {
           servingPosition = matchedPosition;
+          estimateNote = '设备上报的服务卫星 ID';
         } else {
-          // 如果匹配失败（卫星ID不在可见列表中），使用仰角最高的
-          console.warn(`Service satellite ${servingSatId} not found in visible positions, using highest elevation`);
-          servingPosition = visiblePositions.reduce((max, pos) =>
-            pos.elevation > max.elevation ? pos : max
+          console.warn(
+            `Service satellite ${servingSatId} not found in visible positions, falling back to boresight estimate`
           );
         }
-      } else {
-        // 如果没有 telemetry 数据，使用仰角最高的
-        servingPosition = visiblePositions.reduce((max, pos) =>
-          pos.elevation > max.elevation ? pos : max
-        );
       }
 
+      // 没有设备 ID 就用波束估算
+      if (!servingPosition) {
+        const boresight =
+          bsAz !== undefined && bsEl !== undefined
+            ? { azimuthDeg: bsAz, elevationDeg: bsEl }
+            : null;
+
+        estimate = estimateServingSatellite(
+          plausiblePositions,
+          boresight,
+          servingSatRef.current?.norad
+        );
+        servingPosition = estimate.satellite;
+        estimateNote = estimate.reason;
+      }
+
+      // 上一帧的估算结果，用于时间连续性判断
+      servingSatRef.current = servingPosition
+        ? { norad: servingPosition.noradId, name: servingPosition.name }
+        : null;
+
+      setEstimate(estimate);
+      setEstimateNote(estimateNote);
+
       // 转换数据格式
-      const satelliteData = visiblePositions.map((pos) =>
+      const satelliteData = plausiblePositions.map((pos) =>
         convertToSatelliteData(pos, servingPosition)
       );
 
@@ -166,7 +225,12 @@ export default function SatelliteRadar() {
     }
   };
 
-  // 首次加载
+  // 首次加载 + 遥测到达后重算
+  //
+  // 服务卫星是**估算**出来的, 需要 telemetry 里的设备波束指向。
+  // 而 telemetry 是异步拿到的 —— 首次挂载时它还是 null,
+  // 只跑一次的话估算必然拿不到波束 (会退化成"无法确定")。
+  // 所以 telemetry 变化时要重算。
   useEffect(() => {
     loadSatelliteData();
     setCacheInfo(getCacheInfo());
@@ -178,6 +242,12 @@ export default function SatelliteRadar() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // 遥测到了 → 重算服务卫星
+  useEffect(() => {
+    if (bsAz === undefined && bsEl === undefined) return;
+    loadSatelliteData(false);
+  }, [bsAz, bsEl]);
 
   // 监听位置更新事件和页面可见性变化
   useEffect(() => {
@@ -253,6 +323,30 @@ export default function SatelliteRadar() {
         az: s.azimuth.toFixed(0),
       }));
 
+    // 服务卫星标记颜色随置信度变 —— 低置信度不该还用绿色脉冲
+    const servingColor =
+      !estimate || estimate.confidence === 'high'
+        ? '#4ade80'
+        : estimate.confidence === 'medium'
+          ? '#f59e0b'
+          : '#ef4444';
+
+    // 图例与 series 必须同名 (echarts 要求), 所以只算一次
+    const servingSeriesName = estimate ? '当前服务(估算)' : '当前服务';
+
+    // 设备波束指向 —— 估算的参照物，画成十字
+    const boresightData =
+      bsAz !== undefined && bsEl !== undefined
+        ? [
+            {
+              value: [bsAz, 90 - bsEl],
+              name: '设备波束',
+              el: bsEl.toFixed(1),
+              az: bsAz.toFixed(0),
+            },
+          ]
+        : [];
+
     const option: echarts.EChartsOption = {
       backgroundColor: 'transparent',
       polar: {
@@ -264,7 +358,15 @@ export default function SatelliteRadar() {
         textStyle: { color: '#94a3b8', fontSize: 10 },
         itemWidth: 9,
         itemHeight: 9,
-        data: ['当前服务', '候选卫星', '可见卫星'],
+        // 估算出来的服务卫星要说清楚 —— 绿色脉冲看着像"确知的"
+        // 注意: 图例名必须与 series 的 name 完全一致, 否则 echarts 报
+        // "series not exists"
+        data: [
+          servingSeriesName,
+          '候选卫星',
+          '可见卫星',
+          '设备波束',
+        ],
       },
       angleAxis: {
         min: 0,
@@ -325,18 +427,33 @@ export default function SatelliteRadar() {
           emphasis: { scale: 1.5 },
         },
         {
-          name: '当前服务',
+          name: servingSeriesName,
           type: 'effectScatter',
           coordinateSystem: 'polar',
           data: servingData,
           symbolSize: 17,
           rippleEffect: { scale: 3, brushType: 'stroke' },
           itemStyle: {
-            color: '#4ade80',
+            // 置信度低时用警示色，别让绿脉冲看起来像"确知的"
+            color: servingColor,
             shadowBlur: 14,
-            shadowColor: '#4ade80',
+            shadowColor: servingColor,
           },
         },
+        // 设备波束指向 —— 估算的参照物
+        ...(boresightData.length > 0
+          ? [
+              {
+                name: '设备波束',
+                type: 'scatter' as const,
+                coordinateSystem: 'polar' as const,
+                data: boresightData,
+                symbolSize: 13,
+                symbol: 'cross' as const,
+                itemStyle: { color: '#a78bfa', opacity: 0.9 },
+              },
+            ]
+          : []),
       ],
     };
 
@@ -349,7 +466,7 @@ export default function SatelliteRadar() {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [satellites]);
+  }, [satellites, estimate, bsAz, bsEl]);
 
   // 统计数据
   const stats = {
@@ -499,7 +616,12 @@ export default function SatelliteRadar() {
               <CardContent>
                 <div ref={radarRef} style={{ height: '380px', width: '100%' }}></div>
                 <p className="text-xs text-muted-foreground text-center mt-2">
-                  圆心 = 天顶 | 边缘 = 地平线 | 绿色脉冲 = 当前服务卫星
+                  圆心 = 天顶 | 边缘 = 地平线 | 紫色十字 = 设备波束指向
+                  {estimate ? ' | 脉冲标记为估算的服务卫星' : ' | 绿色脉冲 = 当前服务卫星'}
+                </p>
+                {/* DTC 说明 —— 用户可能好奇为什么少了些星 */}
+                <p className="text-xs text-muted-foreground text-center mt-1">
+                  已排除 DTC(手机直连)卫星 —— 它们不承载固定宽带终端连接
                 </p>
               </CardContent>
             </Card>
@@ -511,7 +633,9 @@ export default function SatelliteRadar() {
           {servingSat && (
             <Card className="border-accent/40 shadow-lg shadow-accent/20">
               <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground">当前服务卫星 (Active)</div>
+                <div className="text-xs text-muted-foreground">
+                  {estimate ? '当前服务卫星 (估算)' : '当前服务卫星 (Active)'}
+                </div>
                 <div className="font-mono text-2xl font-bold text-accent mt-1">
                   {servingSat.name}
                 </div>
@@ -523,6 +647,38 @@ export default function SatelliteRadar() {
                     </span>
                   )}
                 </div>
+
+                {/* 估算置信度 —— 必须标明这是推断值，不是设备上报的 ID */}
+                {estimate && (
+                  <div className="mt-2 text-xs">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] ${
+                        estimate.confidence === 'high'
+                          ? 'bg-accent/20 text-accent'
+                          : estimate.confidence === 'medium'
+                            ? 'bg-warning-orange/20 text-warning-orange'
+                            : 'bg-danger-red/20 text-danger-red'
+                      }`}
+                    >
+                      置信度:{' '}
+                      {estimate.confidence === 'high'
+                        ? '高'
+                        : estimate.confidence === 'medium'
+                          ? '中'
+                          : '低'}
+                    </span>
+                    {estimate.separationDeg !== undefined && !Number.isNaN(estimate.separationDeg) && (
+                      <span className="ml-2 text-muted-foreground">
+                        与波束相差 {estimate.separationDeg.toFixed(2)}°
+                      </span>
+                    )}
+                    {estimateNote && (
+                      <div className="text-muted-foreground mt-1 leading-relaxed">
+                        {estimateNote}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
                   <div>
                     <div className="text-muted-foreground">方位角</div>
