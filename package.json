@@ -14,7 +14,11 @@
     "download-prometheus": "node scripts/download-prometheus.mjs",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0",
@@ -42,6 +46,7 @@
     "three": "^0.171.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/typography": "^0.5.20",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.5",
