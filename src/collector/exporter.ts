@@ -7,6 +7,7 @@
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import type { TelemetryData } from '../core/dishClient';
+import type { RouterProbeResult } from '../core/routerProbeTypes';
 import type { DataCollector } from './historian';
 
 export interface ExporterConfig {
@@ -98,6 +99,7 @@ export class PrometheusExporter {
    */
   private serveMetrics(_req: IncomingMessage, res: ServerResponse) {
     const telemetry = this.collector.getLatest();
+    const routerProbe = this.collector.getRouterProbeResult();
     
     if (!telemetry) {
       res.writeHead(503, { 'Content-Type': 'text/plain' });
@@ -105,7 +107,7 @@ export class PrometheusExporter {
       return;
     }
 
-    const metrics = this.generateMetrics(telemetry);
+    const metrics = this.generateMetrics(telemetry, routerProbe);
     
     res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4' });
     res.end(metrics);
@@ -134,7 +136,7 @@ export class PrometheusExporter {
   /**
    * 生成 Prometheus metrics 文本
    */
-  private generateMetrics(telemetry: TelemetryData): string {
+  private generateMetrics(telemetry: TelemetryData, routerProbe: RouterProbeResult | null): string {
     const lines: string[] = [];
 
     // Helper function to add metric
@@ -149,6 +151,8 @@ export class PrometheusExporter {
       lines.push(`${name}${labelStr} ${value}`);
     };
 
+    // ========== Dish 指标 ==========
+    
     // 连接状态
     const stateValue = telemetry.state === 'ONLINE' ? 1 : 0;
     addMetric('starlink_dish_up', stateValue, 'Dish online status (1=online, 0=offline)');
@@ -183,6 +187,28 @@ export class PrometheusExporter {
 
     // 告警计数
     addMetric('starlink_alerts_total', telemetry.alerts.length, 'Total number of active alerts');
+
+    // ========== Router 指标 ==========
+    
+    if (routerProbe) {
+      // 路由器可达性
+      addMetric('starlink_router_up', routerProbe.reachable ? 1 : 0, 'Router reachability status (1=reachable, 0=unreachable)');
+      
+      // RTT 延迟（不可达时为 -1）
+      const rttValue = routerProbe.rttMs !== null ? routerProbe.rttMs : -1;
+      addMetric('starlink_router_rtt_ms', rttValue, 'Router round-trip time in milliseconds (-1 if unreachable)');
+      
+      // 丢包率
+      addMetric('starlink_router_packet_loss', routerProbe.packetLoss, 'Router packet loss rate (0.0-1.0)');
+      
+      // HTTP 健康检查（未启用时为 -1）
+      const httpValue = routerProbe.httpOk === null ? -1 : (routerProbe.httpOk ? 1 : 0);
+      addMetric('starlink_router_http_ok', httpValue, 'Router HTTP health check status (1=ok, 0=failed, -1=not enabled)');
+      
+      // 可信度标记（用于识别 VPN/隧道环境的 ICMP 篡改）
+      const trustedValue = routerProbe.trusted === undefined ? -1 : (routerProbe.trusted ? 1 : 0);
+      addMetric('starlink_router_probe_trusted', trustedValue, 'Router probe result trustworthiness (1=trusted, 0=untrusted due to ICMP spoofing, -1=not checked)');
+    }
 
     return lines.join('\n') + '\n';
   }
