@@ -296,6 +296,44 @@ export class AlertManager extends EventEmitter {
         ],
       },
 
+      // 恶劣天气
+      {
+        id: 'severe_weather',
+        name: '恶劣天气影响',
+        enabled: true,
+        severity: 'warning',
+        condition: (data) => {
+          // 判断逻辑：高丢包 + 低SNR + 无明显遮挡 = 很可能是天气因素
+          const highDropRate = (data.popPingDropRate || 0) > 0.15; // 15% 丢包
+          const lowSnr = (data.snr || 0) < 8; // SNR < 8 dB
+          const notObstructed = !data.currentlyObstructed && (data.fractionObstructed || 0) < 0.05; // 遮挡率 < 5%
+          
+          // 同时满足三个条件才判定为天气影响
+          return data.state === 'ONLINE' && highDropRate && lowSnr && notObstructed;
+        },
+        summary: (data) => {
+          const dropRate = ((data.popPingDropRate || 0) * 100).toFixed(1);
+          const snr = data.snr?.toFixed(1);
+          return `恶劣天气影响信号 (丢包 ${dropRate}%, SNR ${snr} dB)`;
+        },
+        description: () => 
+          '暴雨、暴雪等恶劣天气会严重衰减卫星信号, 这是正常的物理现象',
+        evidence: (data) => ({
+          pop_drop_rate: data.popPingDropRate,
+          snr: data.snr,
+          obstructed: data.currentlyObstructed,
+          fraction_obstructed: data.fractionObstructed,
+          pop_latency_ms: data.popPingLatencyMs,
+          downlink_mbps: (data.downlinkThroughputBps || 0) / 1024 / 1024,
+        }),
+        recommendations: [
+          '恶劣天气(暴雨/暴雪/雷暴)是造成信号衰减的主要原因',
+          '这是正常现象, 天气好转后信号会自动恢复',
+          '可以通过天气预报了解恢复时间',
+          '如天气正常仍有此告警, 请检查天线安装位置',
+        ],
+      },
+
       // 设备高温
       {
         id: 'high_temperature',
