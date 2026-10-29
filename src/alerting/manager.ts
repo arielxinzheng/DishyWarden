@@ -126,16 +126,22 @@ export class AlertManager extends EventEmitter {
         name: '天线过热降频',
         enabled: true,
         severity: 'warning',
-        condition: (data) => data.alerts?.includes('THERMAL_THROTTLE') || false,
+        condition: (data) => data.alerts?.includes('thermalThrottle') || false,
         summary: () => '天线温度过高,已启动降频保护',
-        description: () => '高温导致性能下降',
+        description: (data) => {
+          const temp = data.dishTemperature?.toFixed(1) || 'N/A';
+          return `当前温度: ${temp}°C, 高温导致性能下降`;
+        },
         evidence: (data) => ({
-          thermal_throttle: data.alerts?.includes('THERMAL_THROTTLE'),
+          thermal_throttle: data.alerts?.includes('thermalThrottle'),
+          dish_temperature: data.dishTemperature,
+          psu_temperature: data.powerSupplyTemperature,
         }),
         recommendations: [
           '改善天线通风散热条件',
           '避免阳光直射',
           '检查天线安装环境温度',
+          '降频保护会自动解除, 等待温度下降',
         ],
       },
 
@@ -311,7 +317,7 @@ export class AlertManager extends EventEmitter {
         evidence: (data) => ({
           dish_temperature: data.dishTemperature,
           psu_temperature: data.powerSupplyTemperature,
-          thermal_throttle: data.alerts?.includes('THERMAL_THROTTLE'),
+          thermal_throttle: data.alerts?.includes('thermalThrottle'),
         }),
         recommendations: [
           '改善设备通风散热条件',
