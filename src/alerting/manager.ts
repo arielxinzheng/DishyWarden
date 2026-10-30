@@ -632,18 +632,6 @@ export class AlertManager extends EventEmitter {
   async checkTelemetry(telemetry: TelemetryData): Promise<void> {
     const now = new Date().toISOString();
 
-    // 临时调试：输出 WiFi 字段
-    if (telemetry.wifiRssi !== undefined || telemetry.wifiTxRate !== undefined) {
-      console.log('[AlertManager] WiFi data:', {
-        rssi: telemetry.wifiRssi,
-        txRate: telemetry.wifiTxRate,
-        rxRate: telemetry.wifiRxRate,
-        channelUtil: telemetry.wifiChannelUtilization,
-        retransmit: telemetry.wifiRetransmitRate,
-        clientCount: telemetry.wifiClientCount,
-      });
-    }
-
     for (const [ruleId, rule] of this.rules.entries()) {
       if (!rule.enabled) continue;
 
