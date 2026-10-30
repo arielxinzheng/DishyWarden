@@ -29,11 +29,12 @@ import {
 } from '../../../core/telemetry';
 import { LatencyChart } from './LatencyChart';
 import { ThroughputChart } from './ThroughputChart';
-import { AlertList } from './AlertList';
+import { AlertDrawerContent } from './AlertDrawerContent';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
 import { MetricCard } from './MetricCard';
 import { RouterStatusRow } from './RouterStatusRow';
 import { buildMetricSeries, peakOf } from './metricSeries';
+import { Drawer } from '../ui/drawer';
 
 type TimeRange = '15m' | '1h' | '6h';
 type RefreshInterval = '30s' | '1m' | 'manual';
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
+  const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
 
   // 监听活跃告警
   useEffect(() => {
@@ -296,39 +298,52 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 活跃告警 - 战时动态推展，平时隐藏 */}
+      {/* 活跃告警 - 聚合横幅 */}
       {hasAlerts && (
         <div 
-          className={`overflow-hidden transition-all duration-300 ${
-            hasCriticalAlerts ? 'animate-pulse-slow' : ''
-          }`}
-          style={{
-            animation: hasCriticalAlerts ? 'pulse-glow 2s ease-in-out infinite' : 'none'
-          }}
+          className={`
+            rounded-lg border p-4 cursor-pointer transition-all duration-200
+            ${hasCriticalAlerts 
+              ? 'border-danger-red/50 bg-danger-red/10 hover:bg-danger-red/15 hover:border-danger-red' 
+              : 'border-warning-orange/50 bg-warning-orange/5 hover:bg-warning-orange/10 hover:border-warning-orange'
+            }
+          `}
+          onClick={() => setAlertDrawerOpen(true)}
         >
-          <div 
-            className={`rounded-2xl border p-6 ${
-              hasCriticalAlerts 
-                ? 'border-danger-red bg-danger-red/10 shadow-[0_0_20px_rgba(239,68,68,0.3)]' 
-                : 'border-warning-orange/50 bg-warning-orange/5'
-            }`}
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <AlertCircle className={`w-6 h-6 ${hasCriticalAlerts ? 'text-danger-red' : 'text-warning-orange'}`} />
-              <h2 className={`text-xl font-semibold ${hasCriticalAlerts ? 'text-danger-red' : 'text-warning-orange'}`}>
-                活跃告警 {hasCriticalAlerts && '- 严重'}
-              </h2>
-              <Badge 
-                variant={hasCriticalAlerts ? 'destructive' : 'secondary'}
-                className="ml-auto"
-              >
-                {activeAlerts.length} 个告警
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className={`w-5 h-5 ${hasCriticalAlerts ? 'text-danger-red' : 'text-warning-orange'}`} />
+              <span className={`font-medium ${hasCriticalAlerts ? 'text-danger-red' : 'text-warning-orange'}`}>
+                {hasCriticalAlerts ? '⚠️ 检测到严重告警' : '⚠️ 检测到网络环境异常'}
+              </span>
+              <Badge variant={hasCriticalAlerts ? 'destructive' : 'secondary'}>
+                {activeAlerts.length} 个
               </Badge>
             </div>
-            <AlertList />
+            <button 
+              className={`
+                px-4 py-1.5 rounded-md text-sm font-medium transition-colors
+                ${hasCriticalAlerts 
+                  ? 'bg-danger-red/20 text-danger-red hover:bg-danger-red/30' 
+                  : 'bg-warning-orange/20 text-warning-orange hover:bg-warning-orange/30'
+                }
+              `}
+            >
+              查看详情
+            </button>
           </div>
         </div>
       )}
+
+      {/* 告警抽屉 */}
+      <Drawer
+        open={alertDrawerOpen}
+        onClose={() => setAlertDrawerOpen(false)}
+        title="活跃告警"
+        width="md"
+      >
+        <AlertDrawerContent alerts={activeAlerts} />
+      </Drawer>
 
       {/* System overview band - 5 status blocks */}
       <div className="relative overflow-hidden rounded-2xl border border-border">
