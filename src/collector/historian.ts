@@ -73,6 +73,7 @@ export class DataCollector extends EventEmitter {
     this.client = new DishClient({
       address: this.config.dishAddress,
       grpcPort: this.config.dishPort,
+      fallbackToMock: true,  // 设备不可达时回落到模拟数据
     });
 
     this.routerProbe = new RouterProbe({

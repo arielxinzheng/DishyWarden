@@ -492,6 +492,37 @@ export class AlertManager extends EventEmitter {
         ],
       },
 
+      // 路由器异常
+      {
+        id: 'router_offline',
+        name: '路由器离线',
+        enabled: true,
+        severity: 'critical',
+        condition: (data) => {
+          // 检测路由器断开：已连接路由器数量为 0 且设备在线
+          const noRouter = (data.connectedRouterCount ?? 0) === 0;
+          const dishOnline = data.state === 'ONLINE' || data.state === 'SEARCHING';
+          return noRouter && dishOnline;
+        },
+        summary: () => '路由器断开连接',
+        description: (data) => 
+          `天线正常工作，但未检测到已连接的路由器 (当前 ${data.connectedRouterCount ?? 0} 台)`,
+        evidence: (data) => ({
+          connected_router_count: data.connectedRouterCount,
+          state: data.state,
+          uptime_seconds: data.uptime,
+          eth_speed_mbps: data.ethSpeedMbps,
+        }),
+        recommendations: [
+          '检查路由器电源是否正常',
+          '确认天线到路由器的网线连接牢固',
+          '检查路由器是否重启或死机',
+          '验证路由器 LAN 口是否工作正常',
+          '尝试重启路由器',
+          '检查路由器管理页面是否可访问',
+        ],
+      },
+
       // 频繁搜星 (通过 state 切换判断)
       {
         id: 'frequent_searching',
@@ -521,6 +552,73 @@ export class AlertManager extends EventEmitter {
           '尝试重启设备',
         ],
       },
+
+      // WiFi 信号问题
+      {
+        id: 'wifi_signal',
+        name: 'WiFi 信号问题',
+        enabled: true,
+        severity: 'warning',
+        condition: (data) => {
+          // 检测 WiFi 信号质量问题
+          const lowRssi = (data.wifiRssi ?? 0) < -70; // RSSI < -70 dBm 视为信号弱
+          const lowTxRate = (data.wifiTxRate ?? 0) > 0 && (data.wifiTxRate ?? 0) < 50; // 发送速率 < 50 Mbps
+          const highRetransmit = (data.wifiRetransmitRate ?? 0) > 0.15; // 重传率 > 15%
+          const highChannelUtil = (data.wifiChannelUtilization ?? 0) > 0.80; // 信道利用率 > 80%
+          
+          // 任意条件满足即触发告警
+          return lowRssi || lowTxRate || highRetransmit || highChannelUtil;
+        },
+        summary: (data) => {
+          const rssi = data.wifiRssi?.toFixed(0) ?? 'N/A';
+          const txRate = data.wifiTxRate?.toFixed(0) ?? 'N/A';
+          const retransmit = data.wifiRetransmitRate ? `${(data.wifiRetransmitRate * 100).toFixed(1)}%` : 'N/A';
+          const channelUtil = data.wifiChannelUtilization ? `${(data.wifiChannelUtilization * 100).toFixed(0)}%` : 'N/A';
+          
+          if ((data.wifiRssi ?? 0) < -70) {
+            return `WiFi 信号弱 (${rssi} dBm)`;
+          } else if ((data.wifiRetransmitRate ?? 0) > 0.15) {
+            return `WiFi 重传率高 (${retransmit})`;
+          } else if ((data.wifiChannelUtilization ?? 0) > 0.80) {
+            return `WiFi 信道拥堵 (${channelUtil})`;
+          } else {
+            return `WiFi 连接速率低 (${txRate} Mbps)`;
+          }
+        },
+        description: (data) => {
+          const issues = [];
+          if ((data.wifiRssi ?? 0) < -70) {
+            issues.push(`信号强度 ${data.wifiRssi?.toFixed(0)} dBm (弱)`);
+          }
+          if ((data.wifiTxRate ?? 0) > 0 && (data.wifiTxRate ?? 0) < 50) {
+            issues.push(`发送速率 ${data.wifiTxRate?.toFixed(0)} Mbps (低)`);
+          }
+          if ((data.wifiRetransmitRate ?? 0) > 0.15) {
+            issues.push(`重传率 ${((data.wifiRetransmitRate ?? 0) * 100).toFixed(1)}% (高)`);
+          }
+          if ((data.wifiChannelUtilization ?? 0) > 0.80) {
+            issues.push(`信道利用率 ${((data.wifiChannelUtilization ?? 0) * 100).toFixed(0)}% (拥堵)`);
+          }
+          return `WiFi 质量异常: ${issues.join(', ')}`;
+        },
+        evidence: (data) => ({
+          wifi_rssi: data.wifiRssi,
+          wifi_tx_rate: data.wifiTxRate,
+          wifi_rx_rate: data.wifiRxRate,
+          wifi_retransmit_rate: data.wifiRetransmitRate,
+          wifi_channel_utilization: data.wifiChannelUtilization,
+          wifi_client_count: data.wifiClientCount,
+        }),
+        recommendations: [
+          '移动设备靠近路由器以改善信号',
+          '检查是否有物理障碍物（墙体、金属物）阻挡信号',
+          '尝试切换到不拥堵的 WiFi 信道（2.4GHz 或 5GHz）',
+          '减少连接设备数量或限制带宽占用',
+          '考虑使用 Mesh 网络扩展覆盖范围',
+          '检查路由器天线方向',
+          '远离微波炉、蓝牙设备等干扰源',
+        ],
+      },
     ];
 
     rules.forEach((rule) => {
@@ -533,6 +631,18 @@ export class AlertManager extends EventEmitter {
    */
   async checkTelemetry(telemetry: TelemetryData): Promise<void> {
     const now = new Date().toISOString();
+
+    // 临时调试：输出 WiFi 字段
+    if (telemetry.wifiRssi !== undefined || telemetry.wifiTxRate !== undefined) {
+      console.log('[AlertManager] WiFi data:', {
+        rssi: telemetry.wifiRssi,
+        txRate: telemetry.wifiTxRate,
+        rxRate: telemetry.wifiRxRate,
+        channelUtil: telemetry.wifiChannelUtilization,
+        retransmit: telemetry.wifiRetransmitRate,
+        clientCount: telemetry.wifiClientCount,
+      });
+    }
 
     for (const [ruleId, rule] of this.rules.entries()) {
       if (!rule.enabled) continue;

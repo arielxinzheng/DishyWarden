@@ -77,6 +77,26 @@ export interface TelemetryData {
   hardwareVersion: string;
   softwareVersion: string;
   
+  // GPS/GNSS 定位状态
+  gpsValid?: boolean;                    // GPS 定位是否有效
+  gpsSats?: number;                      // 可见 GPS 卫星数量
+  gpsConvergenceState?: string;          // PNT 滤波器收敛状态
+  
+  // 以太网状态
+  ethSpeedMbps?: number;                 // 以太网协商速率 (Mbps)
+  ethDuplex?: string;                    // 双工模式 (FULL/HALF)
+  
+  // 路由器状态
+  connectedRouterCount?: number;         // 已连接的路由器数量
+  
+  // WiFi 状态（来自路由器的 WiFi 统计）
+  wifiRssi?: number;                     // WiFi 信号强度 (dBm, 通常 -30 到 -90)
+  wifiTxRate?: number;                   // WiFi 发送速率 (Mbps)
+  wifiRxRate?: number;                   // WiFi 接收速率 (Mbps)
+  wifiChannelUtilization?: number;       // 信道利用率 (0-1)
+  wifiRetransmitRate?: number;           // 重传率 (0-1)
+  wifiClientCount?: number;              // 连接的 WiFi 客户端数量
+  
   // 告警
   alerts: string[];
 }
@@ -303,6 +323,53 @@ export class DishClient {
         typeof deviceInfo.softwareVersion === 'string'
           ? deviceInfo.softwareVersion
           : prev?.softwareVersion ?? '',
+      
+      // GPS/GNSS 定位状态
+      gpsValid: (status.gpsStats as Record<string, unknown> | undefined)?.gpsValid === true,
+      gpsSats: num((status.gpsStats as Record<string, unknown> | undefined)?.gpsSats, prev?.gpsSats ?? 0),
+      gpsConvergenceState:
+        typeof (status.gpsStats as Record<string, unknown> | undefined)?.pntFilterConvergenceState === 'string'
+          ? String((status.gpsStats as Record<string, unknown> | undefined)?.pntFilterConvergenceState)
+          : prev?.gpsConvergenceState,
+      
+      // 以太网状态
+      ethSpeedMbps: num(status.ethSpeedMbps, prev?.ethSpeedMbps ?? 0),
+      ethDuplex:
+        typeof status.ethDuplex === 'string'
+          ? status.ethDuplex
+          : prev?.ethDuplex,
+      
+      // 路由器状态
+      connectedRouterCount: Array.isArray(status.connectedRouters)
+        ? (status.connectedRouters as unknown[]).length
+        : prev?.connectedRouterCount ?? 0,
+      
+      // WiFi 状态（从 wifiStats 或 connectedRouters 中的第一个路由器获取）
+      wifiRssi: num(
+        (status.wifiStats as Record<string, unknown> | undefined)?.rssi,
+        prev?.wifiRssi
+      ),
+      wifiTxRate: num(
+        (status.wifiStats as Record<string, unknown> | undefined)?.txRate,
+        prev?.wifiTxRate
+      ),
+      wifiRxRate: num(
+        (status.wifiStats as Record<string, unknown> | undefined)?.rxRate,
+        prev?.wifiRxRate
+      ),
+      wifiChannelUtilization: num(
+        (status.wifiStats as Record<string, unknown> | undefined)?.channelUtilization,
+        prev?.wifiChannelUtilization
+      ),
+      wifiRetransmitRate: num(
+        (status.wifiStats as Record<string, unknown> | undefined)?.retransmitRate,
+        prev?.wifiRetransmitRate
+      ),
+      wifiClientCount: num(
+        (status.wifiStats as Record<string, unknown> | undefined)?.clientCount,
+        prev?.wifiClientCount ?? 0
+      ),
+      
       alerts,
     };
 
@@ -395,6 +462,15 @@ export class DishClient {
       powerSupplyTemperature: 40 + Math.random() * 5,
       hardwareVersion: 'rev3_proto2',
       softwareVersion: '2024.10.22.mr12345',
+      
+      // WiFi 模拟数据（弱信号触发告警）
+      wifiRssi: -75 - Math.random() * 10,  // -75 到 -85 dBm（弱信号）
+      wifiTxRate: 40 + Math.random() * 20,  // 40-60 Mbps
+      wifiRxRate: 35 + Math.random() * 15,  // 35-50 Mbps  
+      wifiChannelUtilization: 0.3 + Math.random() * 0.3,  // 30-60%
+      wifiRetransmitRate: 0.05 + Math.random() * 0.05,  // 5-10%
+      wifiClientCount: Math.floor(Math.random() * 5) + 1,  // 1-5 个客户端
+      
       alerts: [],
     };
   }
