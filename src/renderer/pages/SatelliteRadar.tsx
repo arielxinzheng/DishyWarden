@@ -20,7 +20,6 @@ import {
 } from '../utils/satelliteCalculator';
 import {
   estimateServingSatellite,
-  excludeDirectToCellSatellites,
   MAX_PLAUSIBLE_RANGE_KM,
   type ServingSatelliteEstimate,
 } from '../utils/servingSatellite';
@@ -125,16 +124,8 @@ export default function SatelliteRadar() {
         return;
       }
 
-      // 排除 DTC(Direct-to-Cell) 卫星 —— 那是给手机直连用的，
-      // 不承载固定宽带终端的连接，不能作为服务卫星候选
-      const nonDtcTles = excludeDirectToCellSatellites(tles);
-      const dtcExcluded = tles.length - nonDtcTles.length;
-      if (dtcExcluded > 0) {
-        console.log(`[SatelliteRadar] 已排除 ${dtcExcluded} 颗 DTC 卫星`);
-      }
-
-      // 计算所有卫星位置
-      const allPositions = calculateMultipleSatellites(nonDtcTles, observer);
+      // 计算所有卫星位置（包含 DTC 卫星 - 支持手机和普通终端）
+      const allPositions = calculateMultipleSatellites(tles, observer);
 
       // 只保留地平线以上的卫星
       const visiblePositions = filterVisibleSatellites(allPositions, 0);
@@ -618,10 +609,6 @@ export default function SatelliteRadar() {
                 <p className="text-xs text-muted-foreground text-center mt-2">
                   圆心 = 天顶 | 边缘 = 地平线 | 紫色十字 = 设备波束指向
                   {estimate ? ' | 脉冲标记为估算的服务卫星' : ' | 绿色脉冲 = 当前服务卫星'}
-                </p>
-                {/* DTC 说明 —— 用户可能好奇为什么少了些星 */}
-                <p className="text-xs text-muted-foreground text-center mt-1">
-                  已排除 DTC(手机直连)卫星 —— 它们不承载固定宽带终端连接
                 </p>
               </CardContent>
             </Card>
