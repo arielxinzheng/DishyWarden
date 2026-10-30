@@ -26,7 +26,10 @@ export class AlertManager extends EventEmitter {
   private notifier: Notifier;
   private rules: Map<string, AlertRule> = new Map();
   private checkInterval?: NodeJS.Timeout;
+  private heartbeatInterval?: NodeJS.Timeout;
   private thresholds: AlertThresholds;
+  private lastCollectorSuccess: Date | null = null;
+  private heartbeatStartTime: Date = new Date(); // 心跳检查启动时间
 
   constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds, dbPath?: string) {
     super();
@@ -619,6 +622,33 @@ export class AlertManager extends EventEmitter {
           '远离微波炉、蓝牙设备等干扰源',
         ],
       },
+
+      // 采集器心跳失联
+      {
+        id: 'collector_heartbeat_lost',
+        name: '数据采集器失联',
+        enabled: true,
+        severity: 'critical',
+        condition: () => {
+          // 此规则不通过遥测数据触发，由 checkCollectorHeartbeat() 独立检查
+          return false;
+        },
+        summary: () => '采集器连续多次采样失败',
+        description: () => '无法从 Starlink 设备获取遥测数据，可能是网络或 gRPC 服务异常',
+        evidence: () => ({
+          last_success_time: this.lastCollectorSuccess?.toISOString() || null,
+          minutes_since_success: this.lastCollectorSuccess 
+            ? Math.floor((Date.now() - this.lastCollectorSuccess.getTime()) / 60000)
+            : null,
+        }),
+        recommendations: [
+          '检查 Starlink 设备是否开机、网线是否连接',
+          '确认设备 IP 地址和 gRPC 端口 (默认 9200) 配置正确',
+          '检查防火墙是否阻止 gRPC 连接',
+          '查看采集器日志确认具体错误信息',
+          '如果是 DishyMock 测试环境，确认 mock 进程正在运行',
+        ],
+      },
     ];
 
     rules.forEach((rule) => {
@@ -630,6 +660,9 @@ export class AlertManager extends EventEmitter {
    * 检查遥测数据并触发告警
    */
   async checkTelemetry(telemetry: TelemetryData): Promise<void> {
+    // 更新采集器心跳时间
+    this.lastCollectorSuccess = new Date();
+
     const now = new Date().toISOString();
 
     for (const [ruleId, rule] of this.rules.entries()) {
@@ -713,6 +746,82 @@ export class AlertManager extends EventEmitter {
         }
       });
     }, intervalMs);
+  }
+
+  /**
+   * 启动采集器心跳检查
+   * @param timeoutMinutes 超时分钟数，默认 3 分钟
+   * @param checkIntervalMs 检查间隔，默认 30 秒
+   */
+  startHeartbeatCheck(timeoutMinutes = 3, checkIntervalMs = 30000): void {
+    this.heartbeatInterval = setInterval(async () => {
+      await this.checkCollectorHeartbeat(timeoutMinutes);
+    }, checkIntervalMs);
+  }
+
+  /**
+   * 检查采集器心跳
+   */
+  private async checkCollectorHeartbeat(timeoutMinutes: number): Promise<void> {
+    const now = new Date();
+    const alertKey = 'collector_heartbeat_lost:starlink';
+
+    // 计算距离上次成功的时间，如果从未成功则计算距离启动的时间
+    const referenceTime = this.lastCollectorSuccess || this.heartbeatStartTime;
+    const minutesSinceSuccess = (now.getTime() - referenceTime.getTime()) / 60000;
+    const isTimeout = minutesSinceSuccess >= timeoutMinutes;
+
+    if (isTimeout) {
+      // 触发心跳失联告警
+      const rule = this.rules.get('collector_heartbeat_lost');
+      if (!rule || !rule.enabled) return;
+
+      const alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'> = {
+        alert_key: alertKey,
+        alert_type: 'collector_heartbeat_lost',
+        severity: 'critical',
+        status: 'ongoing',
+        first_seen: now.toISOString(),
+        last_seen: now.toISOString(),
+        occurrence_count: 1,
+        last_notified_at: null,
+        notification_count: 0,
+        summary: rule.summary({} as TelemetryData),
+        description: rule.description({} as TelemetryData),
+        evidence: JSON.stringify(rule.evidence({} as TelemetryData)),
+        recommendations: JSON.stringify(rule.recommendations),
+      };
+
+      const result = this.db.upsertAlert(alert);
+
+      if (result === 'new') {
+        const record = this.db.getAlertByKey(alertKey)!;
+        await this.sendNotification({ type: 'new', alert: record });
+        this.db.markNotified(alertKey);
+        this.emit('alert:new', record);
+        console.log(`[AlertManager] Collector heartbeat lost: ${minutesSinceSuccess.toFixed(1)} minutes since last success`);
+      }
+    } else {
+      // 检查是否需要解除告警
+      const existing = this.db.getAlertByKey(alertKey);
+      if (existing && existing.status === 'ongoing') {
+        const duration = this.calculateDuration(existing.first_seen, now.toISOString());
+
+        this.db.upsertAlert({
+          ...existing,
+          status: 'resolved',
+          last_seen: now.toISOString(),
+        });
+
+        await this.sendNotification({
+          type: 'resolved',
+          alert: { ...existing, status: 'resolved', last_seen: now.toISOString() },
+          duration,
+        });
+        this.emit('alert:resolved', existing);
+        console.log(`[AlertManager] Collector heartbeat restored`);
+      }
+    }
   }
 
   /**
@@ -822,6 +931,9 @@ export class AlertManager extends EventEmitter {
   close(): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
+    }
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
     }
     this.db.close();
   }

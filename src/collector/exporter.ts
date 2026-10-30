@@ -188,6 +188,23 @@ export class PrometheusExporter {
     // 告警计数
     addMetric('starlink_alerts_total', telemetry.alerts.length, 'Total number of active alerts');
 
+    // ========== 采集器健康指标 ==========
+    
+    const stats = this.collector.getStats();
+    
+    // 采集器最后成功时间戳（Unix timestamp in seconds）
+    const lastSuccessTs = stats.lastSuccessTime 
+      ? Math.floor(stats.lastSuccessTime.getTime() / 1000) 
+      : 0;
+    addMetric('starlink_collector_last_success_timestamp', lastSuccessTs, 
+      'Unix timestamp of last successful data collection (0 if never succeeded)', 'gauge');
+    
+    // 采集器总采样数和失败数
+    addMetric('starlink_collector_samples_total', stats.totalSamples, 
+      'Total number of samples collected', 'counter');
+    addMetric('starlink_collector_samples_failed_total', stats.failedSamples, 
+      'Total number of failed sample attempts', 'counter');
+
     // ========== Router 指标 ==========
     
     if (routerProbe) {

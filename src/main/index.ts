@@ -145,6 +145,9 @@ async function startBackgroundServices() {
     
     // 启动定期检查需要更新通知的告警
     alertManager.startUpdateNotificationCheck(60000); // 每分钟检查一次
+    
+    // 启动采集器心跳检查（3 分钟超时，每 30 秒检查一次）
+    alertManager.startHeartbeatCheck(3, 30000);
 
     // 监听告警事件
     alertManager.on('alert:new', (alert) => {
