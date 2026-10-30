@@ -635,12 +635,23 @@ export class AlertManager extends EventEmitter {
         },
         summary: () => '采集器连续多次采样失败',
         description: () => '无法从 Starlink 设备获取遥测数据，可能是网络或 gRPC 服务异常',
-        evidence: () => ({
-          last_success_time: this.lastCollectorSuccess?.toISOString() || null,
-          minutes_since_success: this.lastCollectorSuccess 
-            ? Math.floor((Date.now() - this.lastCollectorSuccess.getTime()) / 60000)
-            : null,
-        }),
+        evidence: () => {
+          // 参考时间点与 checkCollectorHeartbeat() 的超时判定保持一致:
+          // 从未成功采样过时回退到"心跳检查启动时间"。
+          //
+          // ⚠️ 不能只在 lastCollectorSuccess 非空时才给 minutes_since_success ——
+          //    "从未成功过"恰恰是最需要诊断信息的情况(刚启动就断了),
+          //    那时告警详情里却显示 null, 什么线索都没有。
+          const referenceTime = this.lastCollectorSuccess || this.heartbeatStartTime;
+          return {
+            last_success_time: this.lastCollectorSuccess?.toISOString() || null,
+            minutes_since_success: Math.floor(
+              (Date.now() - referenceTime.getTime()) / 60000
+            ),
+            never_succeeded: this.lastCollectorSuccess === null,
+            collector_started_at: this.heartbeatStartTime.toISOString(),
+          };
+        },
         recommendations: [
           '检查 Starlink 设备是否开机、网线是否连接',
           '确认设备 IP 地址和 gRPC 端口 (默认 9200) 配置正确',

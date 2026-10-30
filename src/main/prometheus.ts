@@ -297,6 +297,26 @@ groups:
         annotations:
           summary: "High dish temperature"
           description: "Dish temperature is {{ $value }}°C (threshold: 60°C)"
+
+      # 采集器心跳失联（3分钟未更新）
+      - alert: StarlinkCollectorHeartbeatLost
+        expr: (time() - starlink_collector_last_success_timestamp) > 180
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Collector heartbeat lost"
+          description: "No successful data collection for {{ $value | humanizeDuration }} (threshold: 3 minutes)"
+
+      # 采集器指标缺失（备用规则，用于检测 exporter 完全下线）
+      - alert: StarlinkCollectorAbsent
+        expr: absent(starlink_collector_last_success_timestamp)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Collector metrics absent"
+          description: "Starlink collector metrics are not being scraped"
 `.trim();
 
     await fs.writeFile(alertsPath, rules, 'utf-8');

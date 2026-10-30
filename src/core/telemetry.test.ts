@@ -16,7 +16,6 @@ import {
   getObstructionSeverity,
   getObstructionSeverityLabel,
   detectAnomalies,
-  type NetworkAnomaly,
 } from './telemetry';
 import type { TelemetryData } from './dishClient';
 
@@ -181,7 +180,7 @@ describe('telemetry.ts - 遮挡严重程度', () => {
 describe('telemetry.ts - 异常检测', () => {
   const createMockData = (overrides: Partial<TelemetryData> = {}): TelemetryData => ({
     state: 'ONLINE',
-    uptimeSeconds: 3600,
+    uptime: 3600,
     snr: 8,
     popPingLatencyMs: 45,
     popPingDropRate: 0.01,
@@ -190,27 +189,15 @@ describe('telemetry.ts - 异常检测', () => {
     fractionObstructed: 0.02,
     currentlyObstructed: false,
     secondsObstructed: 0,
-    obstruction: {
-      currentlyObstructed: false,
-      fractionObstructed: 0.02,
-      lastObstructionDurationSeconds: 0,
-      validS: 1,
-      avgProlongedObstructionDurationS: 0,
-      avgProlongedObstructionIntervalS: 0,
-      avgProlongedObstructionValid: false,
-    },
-    alerts: {
-      motorsStuck: false,
-      thermalThrottle: false,
-      thermalShutdown: false,
-      mastNotNearVertical: false,
-      unexpectedLocation: false,
-      slowEthernetSpeeds: false,
-    },
-    downlinkThroughputBps_dish: 50_000_000,
-    uplinkThroughputBps_dish: 5_000_000,
-    dishPowerW: 50,
-    dishPsuTempC: 35,
+    satelliteId: 12345,
+    secondsToFirstNonemptySlot: 0,
+    dishTemperature: 35,
+    powerSupplyTemperature: 30,
+    hardwareVersion: '1.0.0',
+    softwareVersion: '1.0.0',
+    // alerts 是**字符串数组**(如 ['thermalThrottle', 'motorsStow']),
+    // 告警规则用 data.alerts.includes('xxx') 判断。
+    alerts: [],
     ...overrides,
   });
 

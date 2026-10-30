@@ -11,7 +11,7 @@
  * 4. 通知计数与降噪
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AlertManager } from './manager';
 import type { AlertRecord } from './database';
 import type { TelemetryData } from '../core/dishClient';
@@ -20,10 +20,10 @@ import type { TelemetryData } from '../core/dishClient';
 vi.mock('./database', () => {
   return {
     AlertDatabase: class MockAlertDatabase {
-      private alerts: Map<string, any> = new Map();
+      private alerts: Map<string, AlertRecord> = new Map();
       private idCounter = 1;
 
-      upsertAlert(alert: any): 'new' | 'ongoing' | 'resolved' {
+      upsertAlert(alert: AlertRecord): 'new' | 'ongoing' | 'resolved' {
         const existing = this.alerts.get(alert.alert_key);
 
         if (!existing) {
@@ -57,7 +57,7 @@ vi.mock('./database', () => {
 
       getActiveAlerts(): any[] {
         return Array.from(this.alerts.values()).filter(
-          (a) => a.status === 'new' || a.status === 'ongoing'
+          (a: { status: string }) => a.status === 'new' || a.status === 'ongoing'
         );
       }
 
@@ -194,7 +194,7 @@ describe('alerting 集成测试 - AlertDatabase Mock', () => {
         alert_key: 'high_latency',
         alert_type: 'high_latency',
         severity: 'warning' as const,
-        status: 'ongoing' as const,
+        status: 'ongoing' as 'ongoing' | 'resolved',
         first_seen: '2024-01-15T10:00:00Z',
         last_seen: '2024-01-15T10:00:00Z',
         occurrence_count: 5,
@@ -272,23 +272,23 @@ describe('alerting 集成测试 - AlertDatabase Mock', () => {
     it('getActiveAlerts 只返回活跃告警', () => {
       const active = db.getActiveAlerts();
       expect(active).toHaveLength(2);
-      expect(active.every((a) => a.status === 'new' || a.status === 'ongoing')).toBe(true);
+      expect(active.every((a: { status: string }) => a.status === 'new' || a.status === 'ongoing')).toBe(true);
     });
 
     it('getAlertHistory 支持状态过滤', () => {
       const resolved = db.getAlertHistory(100, 0, undefined, 'resolved');
       expect(resolved.length).toBeGreaterThan(0);
-      expect(resolved.every((a) => a.status === 'resolved')).toBe(true);
+      expect(resolved.every((a: { status: string }) => a.status === 'resolved')).toBe(true);
 
       const ongoing = db.getAlertHistory(100, 0, undefined, 'ongoing');
       expect(ongoing.length).toBe(2);
-      expect(ongoing.every((a) => a.status === 'ongoing')).toBe(true);
+      expect(ongoing.every((a: { status: string }) => a.status === 'ongoing')).toBe(true);
     });
 
     it('getAlertHistory 支持严重性过滤', () => {
       const critical = db.getAlertHistory(100, 0, 'critical');
       expect(critical.length).toBeGreaterThan(0);
-      expect(critical.every((a) => a.severity === 'critical')).toBe(true);
+      expect(critical.every((a: { severity: string }) => a.severity === 'critical')).toBe(true);
     });
 
     it('getAlertHistory 支持分页', () => {
@@ -356,9 +356,11 @@ describe('alerting 集成测试 - AlertManager', () => {
   let manager: AlertManager;
   let mockNotificationConfig: any;
 
+  // 字段严格对齐 TelemetryData (src/core/dishClient.ts) —— 多余字段或
+  // 拼错的字段名会被 TS 拦下, 而这些字段只设不断言, 留着只会误导。
   const createMockTelemetry = (overrides: Partial<TelemetryData> = {}): TelemetryData => ({
     state: 'ONLINE',
-    uptimeSeconds: 3600,
+    uptime: 3600,
     snr: 8,
     popPingLatencyMs: 45,
     popPingDropRate: 0.01,
@@ -367,20 +369,40 @@ describe('alerting 集成测试 - AlertManager', () => {
     fractionObstructed: 0.02,
     currentlyObstructed: false,
     secondsObstructed: 0,
-    obstruction: {
-      currentlyObstructed: false,
-      fractionObstructed: 0.02,
-      lastObstructionDurationSeconds: 0,
-      validS: 1,
-      avgProlongedObstructionDurationS: 0,
-      avgProlongedObstructionIntervalS: 0,
-      avgProlongedObstructionValid: false,
+    satelliteId: 12345,
+    secondsToFirstNonemptySlot: 0,
+    dishTemperature: 35,
+    powerSupplyTemperature: 30,
+    hardwareVersion: '1.0.0',
+    softwareVersion: '1.0.0',
+    // ⚠️ 这些**可选**字段必须给"正常值", 否则 undefined 会让
+    //    gnss_positioning / router_offline 等规则误判为异常
+    //    (gpsSats ?? 0 < 4 ⇒ 命中; connectedRouterCount ?? 0 === 0 ⇒ 命中)
+    gpsValid: true,
+    gpsSats: 12,
+    gpsConvergenceState: 'CONVERGED',
+    connectedRouterCount: 1,
+    ethSpeedMbps: 1000,
+    ethDuplex: 'full',
+    wifiRssi: -45,
+    wifiTxRate: 300,
+    wifiRxRate: 300,
+    // wifiRetransmitRate / wifiChannelUtilization 是**比例**(0-1), 不是百分比
+    wifiChannelUtilization: 0.2,
+    wifiRetransmitRate: 0.01,
+    wifiClientCount: 2,
+    // alignment_issue 要求状态字面量是 'FILTER_CONVERGED'
+    attitudeEstimationState: 'FILTER_CONVERGED',
+    tiltAngleDeg: 0,
+    boresightAzimuthDeg: 135,
+    boresightElevationDeg: 45,
+    alignmentStats: {
+      validS: true,
+      attitudeUncertaintyDeg: 0.5,
+      desiredBoresightAzimuthDeg: 135,
+      desiredBoresightElevationDeg: 45,
     },
     alerts: [],
-    downlinkThroughputBps_dish: 50_000_000,
-    uplinkThroughputBps_dish: 5_000_000,
-    dishPowerW: 50,
-    dishPsuTempC: 35,
     ...overrides,
   });
 
@@ -450,7 +472,10 @@ describe('alerting 集成测试 - AlertManager', () => {
     });
 
     it('高丢包触发 critical 告警', async () => {
-      const data = createMockTelemetry({ popPingDropRate: 0.15 });
+      // snr 给 25(>15) ⇒ severe_weather 不满足"低SNR"条件, 只剩
+      // high_packet_loss 一条 —— 本用例只验 high_packet_loss 这一条规则。
+      // (snr=8 时 severe_weather 也会命中, 那是**另一个**规则的正确行为)
+      const data = createMockTelemetry({ popPingDropRate: 0.15, snr: 25 });
 
       const alertPromise = new Promise((resolve) => {
         manager.once('alert:new', resolve);

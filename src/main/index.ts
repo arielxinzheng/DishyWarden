@@ -196,7 +196,9 @@ async function stopBackgroundServices() {
   }
 
   if (alertManager) {
-    alertManager.stop();
+    // ⚠️ 方法名是 close() 不是 stop() —— 3f7717a 重命名时漏改了调用点。
+    //    调 stop() 会抛 TypeError, 导致退出流程中断(定时器不清理、DB 不关)。
+    alertManager.close();
     alertManager = null;
   }
 
@@ -330,10 +332,13 @@ ipcMain.handle('update-notification-config', (_event, config) => {
   
   // 重新创建告警管理器以应用新配置
   if (alertManager) {
-    alertManager.stop();
+    alertManager.close();
     const config = configManager.getConfig();
     alertManager = new AlertManager(config.notifications, config.alertThresholds);
     alertManager.startUpdateNotificationCheck(60000);
+    // ⚠️ 必须一起重启心跳检查 —— stop() 会 clearInterval(heartbeatInterval),
+    //    不重启的话, 用户改过一次通知设置后, 采集器失联就永远不再告警了。
+    alertManager.startHeartbeatCheck(3, 30000);
     
     // 重新绑定事件监听
     alertManager.on('alert:new', (alert) => {
