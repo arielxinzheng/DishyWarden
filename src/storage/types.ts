@@ -44,6 +44,19 @@ export interface HistorySample {
    * 仅分桶粒度(selectBucketed)产出; 明细粒度为 1 或 0, 小时聚合无此字段。
    */
   onlineRatio?: number;
+  /**
+   * 桶内各状态的采样占比 0..1。
+   *
+   * 语义: 该时间桶里 state='XXX' 的采样数 / 桶内总采样数。
+   * 仅分桶粒度(selectBucketed)产出; 明细粒度为 1 或 0, 小时聚合无此字段。
+   *
+   * 为什么要单独给: onlineRatio 只区分「在线/不在线」,
+   * 分不出 SEARCHING(搜星中) / BOOTING(启动中) / OFFLINE(断网) ——
+   * 而这三种在「状态色块条」上必须显示成不同颜色。
+   */
+  searchingRatio?: number;
+  bootingRatio?: number;
+  offlineRatio?: number;
   popPingLatencyMs: number;
   popPingDropRate: number;
   downlinkThroughputBps: number;

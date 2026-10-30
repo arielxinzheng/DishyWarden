@@ -13,6 +13,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useDish, useDishHistory, useHistorySummary, type ObstructionData } from '../../hooks/useDish';
+import { useElementWidth } from '../../hooks/useElementWidth';
 import {
   analyzeObstructionMap,
   assessObstructionImpact,
@@ -31,7 +32,8 @@ import { LatencyChart } from './LatencyChart';
 import { ThroughputChart } from './ThroughputChart';
 import { AlertDrawerContent } from './AlertDrawerContent';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
-import { MetricCard } from './MetricCard';
+import { MetricCard, CHART_HEIGHT } from './MetricCard';
+import { StatusStrip, SLICE_PLANS, fitStatusSlots, STATUS_GAP } from './StatusStrip';
 import { RouterStatusRow } from './RouterStatusRow';
 import { buildMetricSeries, peakOf } from './metricSeries';
 import { Drawer } from '../ui/drawer';
@@ -61,6 +63,47 @@ export default function Dashboard() {
   const { history, isLoading: historyLoading } = useDishHistory(TIME_RANGE_SECONDS[timeRange]);
   // 六张指标卡的走势序列：和图表共用同一份 history, 各取一条指标
   const metricSeries = useMemo(() => buildMetricSeries(history), [history]);
+
+  // 状态色块条的时间窗 —— 与 history / 延迟折线**完全一致**,
+  // 这是"色块与右侧折线 X 轴对齐"的前提。
+  //
+  // 切片方案固定(块数表达时间分辨率, 不随宽度变):
+  //   6h→36块(每块10分钟) / 1h→30块(2分钟) / 15m→30块(30秒)
+  //   (24h→48块 已备好, 但当前时间范围选择器里没有 24h)
+  const statusStripRange = useMemo(() => {
+    const seconds = TIME_RANGE_SECONDS[timeRange];
+    const to = Date.now();
+    const from = to - seconds * 1000;
+    const plan = SLICE_PLANS[timeRange];
+    return {
+      from,
+      to,
+      leftLabel: plan?.label ?? `${timeRange} ago`,
+      maxSlots: plan?.slots ?? 30,
+    };
+  }, [timeRange, history]);
+
+  // 状态色块条的可用宽度 —— 测**图表区基准层**, 不测条带自己。
+  //
+  // ⚠️ 为什么不能测条带自己: 条带宽度 = 块数 × (flex-1 分到的宽) + gap,
+  //    而块数又由宽度决定 ⇒ **循环依赖**。ResizeObserver 观察条带时,
+  //    块数一变条带宽度就变, 触发新一轮观察, 永远收敛不了。
+  //    基准层的宽度与块数无关, 是稳定的测量基准。
+  const [statusCardRef, statusStripWidth] = useElementWidth<HTMLDivElement>();
+
+  // 屏幕变窄时**减少块数**(粒度变粗), 绝不压缩 Gap ——
+  // Gap 一旦被压到 0, 分片感就消失, 那就退化成纯色条, 失去意义。
+  const statusSlots = useMemo(() => {
+    // 宽度还没测出来(首帧/极端窄屏)时用方案值。
+    // ⚠️ 但宽度为 0 时 flex-1 的块会被压成 0 宽 —— 视觉上条带消失。
+    //    所以宽度太小就退到最小块数, 保证每块至少有 1px 可见。
+    if (statusStripWidth <= 0) return statusStripRange.maxSlots;
+    // 基准层含 p-4 的左右内边距(各 16px) ⇒ 减去 32 才是真正可画的宽
+    const available = statusStripWidth - 32;
+    if (available <= 0) return 1;
+    return fitStatusSlots(available, STATUS_GAP, statusStripRange.maxSlots, 6);
+  }, [statusStripWidth, statusStripRange.maxSlots]);
+
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>('30s');
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -465,7 +508,21 @@ export default function Dashboard() {
           series={metricSeries.availability}
           chartType="line"
           domain={[0, 1]}
-        />
+          legendLeft={statusStripRange.leftLabel}
+          legendRight="Now"
+          chartAreaRef={statusCardRef}
+        >
+          {/* 状态色块条 —— 取代折线。
+              与下方「延迟」折线共用同一份 history 和同一个时间窗,
+              所以 X 轴天然对齐: 看到红块, 往右看延迟折线就有对应尖刺。 */}
+          <StatusStrip
+            history={history}
+            fromMs={statusStripRange.from}
+            toMs={statusStripRange.to}
+            slots={statusSlots}
+            height={CHART_HEIGHT}
+          />
+        </MetricCard>
         
         <MetricCard
           title="延迟"

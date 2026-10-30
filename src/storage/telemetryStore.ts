@@ -216,7 +216,12 @@ export class TelemetryStore {
              AVG(up_bps)              AS up_bps,
              AVG(snr)                 AS snr,
              AVG(fraction_obstructed) AS fraction_obstructed,
-             AVG(CASE WHEN state = 'ONLINE' THEN 1.0 ELSE 0.0 END) AS online_ratio
+             AVG(CASE WHEN state = 'ONLINE' THEN 1.0 ELSE 0.0 END) AS online_ratio,
+             -- 各状态在桶内的采样占比 —— 用来画「状态色块条」。
+             -- 光有 online_ratio 分不出 SEARCHING / BOOTING / OFFLINE。
+             AVG(CASE WHEN state = 'SEARCHING' THEN 1.0 ELSE 0.0 END) AS searching_ratio,
+             AVG(CASE WHEN state = 'BOOTING'   THEN 1.0 ELSE 0.0 END) AS booting_ratio,
+             AVG(CASE WHEN state = 'OFFLINE'   THEN 1.0 ELSE 0.0 END) AS offline_ratio
       FROM telemetry_samples
       WHERE ts >= ? AND ts < ?
       GROUP BY bucket
@@ -702,6 +707,11 @@ function mapRow(row: unknown): HistorySample {
     timestamp: (r.bucket ?? r.ts) as number,
     state,
     onlineRatio,
+    // 各状态占比 —— 只有分桶粒度(selectBucketed)才有这三个列。
+    // 明细粒度下 state 已能表达全部信息, 用 state 推出 0/1 即可。
+    searchingRatio: ratioOf(r.searching_ratio, state, 'SEARCHING'),
+    bootingRatio: ratioOf(r.booting_ratio, state, 'BOOTING'),
+    offlineRatio: ratioOf(r.offline_ratio, state, 'OFFLINE'),
     popPingLatencyMs: r.latency_ms as number,
     popPingDropRate: r.drop_rate as number,
     downlinkThroughputBps: r.down_bps as number,
@@ -710,6 +720,23 @@ function mapRow(row: unknown): HistorySample {
     fractionObstructed: r.fraction_obstructed as number,
     satelliteId: typeof r.satellite_id === 'number' ? r.satellite_id : undefined,
   };
+}
+
+/**
+ * 取某状态的占比。
+ *
+ * 分桶粒度: 直接用 SQL 给的占比列。
+ * 明细粒度: 行里只有一个 state, 该状态占比为 1, 其余为 0。
+ * 小时聚合: 表里没存逐状态占比 -> undefined(而不是编造 0)。
+ */
+function ratioOf(
+  column: unknown,
+  state: string | undefined,
+  wanted: string
+): number | undefined {
+  if (typeof column === 'number' && Number.isFinite(column)) return column;
+  if (state === undefined) return undefined;
+  return state === wanted ? 1 : 0;
 }
 
 /**
