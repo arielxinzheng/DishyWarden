@@ -110,7 +110,7 @@ export class AlertDatabase {
 
       return 'new';
     } else if (existing.status === 'ongoing' && alert.status === 'resolved') {
-      // 告警恢复
+      // 告警恢复（从 ongoing 到 resolved）
       const stmt = this.db.prepare(`
         UPDATE alerts
         SET status = ?, last_seen = ?, updated_at = CURRENT_TIMESTAMP
@@ -119,17 +119,45 @@ export class AlertDatabase {
 
       stmt.run(alert.status, alert.last_seen, alert.alert_key);
       return 'resolved';
+    } else if (existing.status === 'resolved' && alert.status === 'ongoing') {
+      // 告警重新激活（从 resolved 到 ongoing）
+      const stmt = this.db.prepare(`
+        UPDATE alerts
+        SET status = ?,
+            first_seen = ?,
+            last_seen = ?,
+            occurrence_count = 1,
+            summary = ?,
+            description = ?,
+            evidence = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE alert_key = ?
+      `);
+
+      stmt.run(
+        alert.status,
+        alert.first_seen,
+        alert.last_seen,
+        alert.summary,
+        alert.description,
+        alert.evidence,
+        alert.alert_key
+      );
+      return 'new'; // 视为新告警，触发通知
     } else {
       // 持续触发
       const stmt = this.db.prepare(`
         UPDATE alerts
         SET occurrence_count = occurrence_count + 1,
             last_seen = ?,
+            summary = ?,
+            description = ?,
+            evidence = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE alert_key = ?
       `);
 
-      stmt.run(alert.last_seen, alert.alert_key);
+      stmt.run(alert.last_seen, alert.summary, alert.description, alert.evidence, alert.alert_key);
       return 'ongoing';
     }
   }

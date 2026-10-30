@@ -144,6 +144,9 @@ export class DishClient {
   /** 遥测里没有的字段, 保留上一帧的值, 避免指标跳成 0 */
   private lastTelemetry: TelemetryData | null = null;
 
+  /** WiFi mock 周期计数器（用于模拟信号强度周期性变化） */
+  private wifiMockCycle = 0;
+
   constructor(config: Partial<DishConfig> = {}) {
     this.config = {
       address: config.address || '127.0.0.1',
@@ -463,12 +466,12 @@ export class DishClient {
       hardwareVersion: 'rev3_proto2',
       softwareVersion: '2024.10.22.mr12345',
       
-      // WiFi 模拟数据（弱信号触发告警）
-      wifiRssi: -75 - Math.random() * 10,  // -75 到 -85 dBm（弱信号）
-      wifiTxRate: 40 + Math.random() * 20,  // 40-60 Mbps
+      // WiFi 模拟数据（周期性在弱信号和正常信号间切换，验证告警恢复）
+      wifiRssi: this.getMockWifiRssi(),
+      wifiTxRate: this.getMockWifiTxRate(),
       wifiRxRate: 35 + Math.random() * 15,  // 35-50 Mbps  
-      wifiChannelUtilization: 0.3 + Math.random() * 0.3,  // 30-60%
-      wifiRetransmitRate: 0.05 + Math.random() * 0.05,  // 5-10%
+      wifiChannelUtilization: this.getMockWifiChannelUtilization(),
+      wifiRetransmitRate: this.getMockWifiRetransmitRate(),
       wifiClientCount: Math.floor(Math.random() * 5) + 1,  // 1-5 个客户端
       
       alerts: [],
@@ -502,6 +505,50 @@ export class DishClient {
     }
     
     return map;
+  }
+
+  /**
+   * 生成模拟 WiFi RSSI（周期性在弱信号和正常信号间切换）
+   * 周期：120 次采样（约 60 分钟）
+   * - 前 60 次：弱信号 -75 到 -85 dBm（触发告警）
+   * - 后 60 次：正常信号 -55 到 -65 dBm（告警恢复）
+   */
+  private getMockWifiRssi(): number {
+    this.wifiMockCycle = (this.wifiMockCycle + 1) % 120;
+    const isWeakSignal = this.wifiMockCycle < 60;
+    return isWeakSignal 
+      ? -75 - Math.random() * 10   // 弱信号：-75 到 -85 dBm
+      : -55 - Math.random() * 10;  // 正常：-55 到 -65 dBm
+  }
+
+  /**
+   * 生成模拟 WiFi 发送速率
+   */
+  private getMockWifiTxRate(): number {
+    const isWeakSignal = this.wifiMockCycle < 60;
+    return isWeakSignal
+      ? 40 + Math.random() * 20    // 弱信号：40-60 Mbps（低）
+      : 80 + Math.random() * 40;   // 正常：80-120 Mbps
+  }
+
+  /**
+   * 生成模拟 WiFi 信道利用率
+   */
+  private getMockWifiChannelUtilization(): number {
+    const isWeakSignal = this.wifiMockCycle < 60;
+    return isWeakSignal
+      ? 0.65 + Math.random() * 0.2   // 拥堵：65-85%
+      : 0.25 + Math.random() * 0.2;  // 正常：25-45%
+  }
+
+  /**
+   * 生成模拟 WiFi 重传率
+   */
+  private getMockWifiRetransmitRate(): number {
+    const isWeakSignal = this.wifiMockCycle < 60;
+    return isWeakSignal
+      ? 0.15 + Math.random() * 0.1   // 高重传：15-25%
+      : 0.02 + Math.random() * 0.03; // 正常：2-5%
   }
   
   /**
