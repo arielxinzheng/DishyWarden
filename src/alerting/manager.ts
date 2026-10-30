@@ -217,6 +217,40 @@ export class AlertManager extends EventEmitter {
         ],
       },
 
+      // GNSS 定位异常
+      {
+        id: 'gnss_positioning',
+        name: 'GNSS 定位异常',
+        enabled: true,
+        severity: 'warning',
+        condition: (data) => {
+          // GPS 定位无效或可见卫星数量过少
+          const noFix = data.gpsValid === false;
+          const fewSats = (data.gpsSats ?? 0) < 4; // GPS 定位至少需要 4 颗卫星
+          return noFix || fewSats;
+        },
+        summary: (data) => {
+          const sats = data.gpsSats ?? 0;
+          return `GNSS 定位异常 (${sats} 颗卫星, ${data.gpsValid ? '有效' : '无效'})`;
+        },
+        description: (data) => {
+          const state = data.gpsConvergenceState || '未知';
+          return `PNT 滤波器状态: ${state}, GPS 可能影响位置服务`;
+        },
+        evidence: (data) => ({
+          gps_valid: data.gpsValid,
+          gps_sats: data.gpsSats,
+          convergence_state: data.gpsConvergenceState,
+          satellite_id: data.satelliteId,
+        }),
+        recommendations: [
+          '确认天线视野开阔, 无建筑物遮挡天顶',
+          'GPS 需要看到天空, 室内或密闭环境无法定位',
+          '初次启动或长时间断电后, GPS 冷启动需要 5-15 分钟',
+          '如持续无法定位, 可能是 GPS 模块硬件故障',
+        ],
+      },
+
       // 结冰加热
       {
         id: 'dish_heating',
@@ -235,6 +269,67 @@ export class AlertManager extends EventEmitter {
           '系统自动加热除冰中, 通常 15-30 分钟内完成',
           '结冰期间可能影响连接质量',
           '如频繁结冰, 考虑改善安装位置或增加遮蔽',
+        ],
+      },
+
+      // 以太网速率异常
+      {
+        id: 'slow_ethernet',
+        name: '以太网速率异常',
+        enabled: true,
+        severity: 'warning',
+        condition: (data) => {
+          // 检测到 slowEthernetSpeeds 告警，或实测速率 < 500 Mbps
+          const hasAlert = data.alerts?.includes('slowEthernetSpeeds') || false;
+          const lowSpeed = (data.ethSpeedMbps ?? 0) > 0 && (data.ethSpeedMbps ?? 0) < 500;
+          return hasAlert || lowSpeed;
+        },
+        summary: (data) => {
+          const speed = data.ethSpeedMbps;
+          return speed ? `以太网协商速率 ${speed} Mbps` : '以太网速率异常';
+        },
+        description: (data) => {
+          const duplex = data.ethDuplex || '未知';
+          const downMbps = ((data.downlinkThroughputBps || 0) / 1024 / 1024).toFixed(1);
+          return `双工模式: ${duplex}, 实际下行: ${downMbps} Mbps`;
+        },
+        evidence: (data) => ({
+          eth_speed_mbps: data.ethSpeedMbps,
+          eth_duplex: data.ethDuplex,
+          downlink_mbps: (data.downlinkThroughputBps || 0) / 1024 / 1024,
+          slow_ethernet_alert: data.alerts?.includes('slowEthernetSpeeds'),
+        }),
+        recommendations: [
+          '检查网线是否为 Cat5e/Cat6 千兆网线',
+          '确认路由器端口支持千兆速率',
+          '尝试更换网线或网口',
+          '检查网线是否过长或受损',
+          '部分老旧设备可能只支持百兆',
+        ],
+      },
+
+      // 线缆连接异常
+      {
+        id: 'cable_connectivity',
+        name: '线缆连接异常',
+        enabled: true,
+        severity: 'critical',
+        condition: (data) => data.alerts?.includes('connectivity') || false,
+        summary: () => '天线到路由器链路不稳定',
+        description: () => 'PoE 线缆连接异常，链路间歇中断',
+        evidence: (data) => ({
+          connectivity_alert: data.alerts?.includes('connectivity'),
+          state: data.state,
+          uptime_s: data.uptime,
+          latency_ms: data.popPingLatencyMs,
+        }),
+        recommendations: [
+          '检查 PoE 线缆是否松动或接触不良',
+          '确认线缆两端插头是否牢固',
+          '检查线缆是否有物理损坏（折断、破皮等）',
+          '尝试更换 PoE 网线',
+          '检查 PoE 供电设备是否正常',
+          '线缆过长（>100米）可能导致信号衰减',
         ],
       },
 
@@ -304,8 +399,8 @@ export class AlertManager extends EventEmitter {
         severity: 'warning',
         condition: (data) => {
           // 判断逻辑：高丢包 + 低SNR + 无明显遮挡 = 很可能是天气因素
-          const highDropRate = (data.popPingDropRate || 0) > 0.15; // 15% 丢包
-          const lowSnr = (data.snr || 0) < 8; // SNR < 8 dB
+          const highDropRate = (data.popPingDropRate || 0) > 0.10; // 10% 丢包
+          const lowSnr = (data.snr || 0) < 15; // SNR < 15 dB（考虑遮挡图基线值）
           const notObstructed = !data.currentlyObstructed && (data.fractionObstructed || 0) < 0.05; // 遮挡率 < 5%
           
           // 同时满足三个条件才判定为天气影响
@@ -362,6 +457,38 @@ export class AlertManager extends EventEmitter {
           '避免阳光直射',
           '检查安装环境温度',
           '如已触发热降频, 性能会下降直到温度降低',
+        ],
+      },
+
+      // PoE/电源异常
+      {
+        id: 'poe_power',
+        name: 'PoE/电源异常',
+        enabled: true,
+        severity: 'critical',
+        condition: (data) => {
+          // 检测设备异常重启：uptime < 60秒 且 state 为 ONLINE/SEARCHING
+          // (排除正常的初次启动 BOOTING 状态)
+          const suspiciousReboot = (data.uptime || 0) < 60 && 
+            (data.state === 'ONLINE' || data.state === 'SEARCHING');
+          return suspiciousReboot;
+        },
+        summary: (data) => `设备运行时间异常 (${data.uptime}秒)`,
+        description: () => 
+          'PoE 供电不稳定或电源异常，设备可能发生意外重启',
+        evidence: (data) => ({
+          uptime_seconds: data.uptime,
+          state: data.state,
+          dish_temperature: data.dishTemperature,
+          psu_temperature: data.powerSupplyTemperature,
+        }),
+        recommendations: [
+          '检查 PoE 线缆连接是否牢固',
+          '确认 PoE 供电设备(交换机/注入器)工作正常',
+          '检查电源电压是否稳定 (标准 48V PoE)',
+          '排查是否有供电中断或电压波动',
+          '检查线缆是否过长导致压降过大',
+          '如频繁重启，考虑更换 PoE 供电设备',
         ],
       },
 
