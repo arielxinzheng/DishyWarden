@@ -87,6 +87,8 @@ async function startBackgroundServices() {
       ...config.collector,
       probeNodes: config.probe.nodes, // 传递探针节点配置
     });
+    
+    console.log('[Main] 探针节点配置:', config.probe.nodes.map(n => `${n.id}(${n.type},enabled=${n.enabled})`).join(', '));
 
     // 监听采集事件
     collector.on('data', (data) => {

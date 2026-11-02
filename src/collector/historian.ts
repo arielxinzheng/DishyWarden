@@ -72,6 +72,7 @@ export class DataCollector extends EventEmitter {
       routerAddress: config.routerAddress || '192.168.100.1',
       enablePersistence: config.enablePersistence ?? true,
       dataDir: config.dataDir || '', // 空 = 使用 app.getPath('userData')/data
+      probeNodes: config.probeNodes || [],
     };
 
     this.client = new DishClient({
@@ -406,6 +407,7 @@ export class DataCollector extends EventEmitter {
    */
   private async probePublicLatency() {
     if (!this.config.probeNodes || this.config.probeNodes.length === 0) {
+      console.warn('[Collector] probeNodes 配置为空，跳过公网延迟采集');
       return null;
     }
     
@@ -415,6 +417,7 @@ export class DataCollector extends EventEmitter {
     );
     
     if (!publicNode) {
+      console.warn('[Collector] 未找到启用的公网 ICMP 探针节点');
       return null;
     }
     
