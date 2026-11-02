@@ -3,7 +3,9 @@
  * 使用 SGP4 算法从 TLE 数据计算卫星位置
  */
 
-import * as satellite from 'satellite.js';
+// 用 shim 而不是直接 import 'satellite.js' —— 根入口会拉进 wasm runtime,
+// 那会让 Vite 的生产构建因 top-level await 而失败。详见 satelliteShim.ts。
+import * as satellite from './satelliteShim';
 
 export interface TLEData {
   name: string;
