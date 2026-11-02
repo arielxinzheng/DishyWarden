@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createCollector, DataCollector } from '../collector/historian';
 import { createExporter, PrometheusExporter } from '../collector/exporter';
+import { ProbeRunner } from '../core/probeRunner';
 import { createPrometheusManager, PrometheusManager } from './prometheus';
 import { loadTLESeed, warmupTLESeed } from './tleSeed';
 import { AlertManager } from '../alerting/manager';
@@ -18,6 +19,7 @@ let exporter: PrometheusExporter | null = null;
 let prometheus: PrometheusManager | null = null;
 let alertManager: AlertManager | null = null;
 let grafanaManager: GrafanaManager | null = null;
+let probeRunner: ProbeRunner | null = null;
 let storagePruneTimer: NodeJS.Timeout | null = null;
 const configManager = getConfigManager();
 
@@ -112,6 +114,23 @@ async function startBackgroundServices() {
     // 启动采集器
     collector.start();
 
+    // 启动探针节点管理(需求文档 2.1.3 网络连通性探测)
+    probeRunner = new ProbeRunner(config.probe);
+    probeRunner.on('result', (result) => {
+      const tag = result.ok ? 'OK' : 'FAIL';
+      console.log(
+        `[Probe] ${tag} ${result.nodeId}: ` +
+        (result.ok
+          ? `${result.rttMs?.toFixed(1) ?? '?'}ms${result.detail ? ' / ' + result.detail : ''}`
+          : result.error ?? '未知错误')
+      );
+      // 实时推给渲染层(设置页的状态灯)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('probe-result', result);
+      }
+    });
+    probeRunner.start();
+
     // 历史库维护: 启动即清一次过期数据, 之后每 6 小时一次
     try {
       const pruned = collector.pruneStorage();
@@ -188,6 +207,11 @@ async function stopBackgroundServices() {
     // dispose 会一并关闭历史库(WAL checkpoint + close)
     collector.dispose();
     collector = null;
+  }
+
+  if (probeRunner) {
+    probeRunner.stop();
+    probeRunner = null;
   }
 
   if (exporter) {
@@ -385,9 +409,38 @@ ipcMain.handle('update-collector-config-settings', (_event, config) => {
  */
 ipcMain.handle('update-prometheus-config', (_event, config) => {
   configManager.updatePrometheusConfig(config);
-  
+
   // 注意: Prometheus 配置更改需要重启服务
   return { success: true, requiresRestart: true };
+});
+
+/**
+ * IPC 处理器：更新探针配置(节点列表 + 路由跟踪目标)
+ */
+ipcMain.handle('update-probe-config', (_event, config) => {
+  configManager.updateProbeConfig(config);
+
+  // 探针节点改动要重启探测服务才能生效(间隔/超时变了必须重建定时器)
+  if (probeRunner) {
+    probeRunner.applyConfig(configManager.getConfig().probe);
+  }
+
+  return { success: true };
+});
+
+/**
+ * IPC 处理器：取所有探针节点的当前状态
+ */
+ipcMain.handle('get-probe-states', () => {
+  return probeRunner?.getStates() ?? [];
+});
+
+/**
+ * IPC 处理器：手动探测某个节点一次(设置页的"立即测试")
+ */
+ipcMain.handle('probe-node-now', async (_event, nodeId: string) => {
+  const result = await probeRunner?.probeNow(nodeId);
+  return result ?? null;
 });
 
 /**
@@ -509,7 +562,11 @@ ipcMain.handle('get-router-probe', () => {
  */
 ipcMain.handle('run-traceroute', async (_event, target?: string) => {
   const { traceroute } = await import('../core/traceroute');
-  return traceroute(target ?? '8.8.8.8', {
+  // 默认目标取配置(设置页的「探针节点管理」), 默认 example.com。
+  // 原来硬编码 8.8.8.8 —— 在受限网络(公司 VPN/防火墙)下必然每跳超时,
+  // 用户只能看到一串 `*`。
+  const fallback = configManager.getConfig().probe?.traceTarget || 'example.com';
+  return traceroute(target?.trim() || fallback, {
     maxHops: 15,        // 限制跳数，Starlink 通常 5-10 跳
     timeout: 30000,     // 30s 总超时
     hopTimeout: 2,      // 2s 单跳超时

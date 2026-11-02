@@ -54,15 +54,6 @@ const TIME_RANGE_SECONDS: Record<TimeRange, number> = {
 // 字节 → GB 数值（保留 2 位），单位由 UI 单独渲染
 const toGb = (bytes: number) => (bytes / 1024 ** 3).toFixed(2);
 
-/**
- * 路由跟踪的默认目标。
- *
- * 8.8.8.8 在受限网络(公司 VPN / 防火墙)下 traceroute 必然每跳超时,
- * 用户只能看到一串 `*`。本机默认用回环地址, 至少能验证功能本身是通的;
- * 用户可以在卡片里改成任意目标。
- */
-const DEFAULT_TRACE_TARGET = '127.0.0.1';
-
 export default function Dashboard() {
   const { telemetry, isConnected, isLoading, error, refresh, obstruction } = useDish();
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
@@ -795,27 +786,50 @@ function RouteTraceCard() {
     duration: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 追踪目标可编辑 —— 硬编码 8.8.8.8 在受限网络(公司 VPN/防火墙)下必然
-  // 每跳超时, 用户看不到任何有用信息。默认走配置, 留空则用 8.8.8.8。
-  const [target, setTarget] = useState<string>(DEFAULT_TRACE_TARGET);
+  // 追踪目标来自设置页的「探针节点管理」(默认 example.com)。
+  // 这里只读不改 —— 要改去设置页, 避免同一个配置有两个入口。
+  const [target, setTarget] = useState<string>('');
 
   // 组件挂载时执行一次 traceroute
   useEffect(() => {
-    runTrace();
+    loadTarget();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const runTrace = async () => {
+  const loadTarget = async () => {
+    let t = '';
+    try {
+      if (window.electronAPI?.getConfig) {
+        const cfg = await window.electronAPI.getConfig();
+        t = cfg.probe?.traceTarget ?? '';
+      }
+    } catch {
+      // 配置读不到就用默认, 不阻塞卡片
+    }
+    const finalTarget = t || 'example.com';
+    setTarget(finalTarget);
+    runTrace(finalTarget);
+  };
+
+  const runTrace = async (targetOverride?: string) => {
     if (!window.electronAPI?.runTraceroute) {
       setError('Traceroute 仅在 Electron 环境可用');
       return;
     }
 
+    const t = (targetOverride ?? target).trim() || 'example.com';
     setLoading(true);
     setError(null);
 
     try {
-      const result = await window.electronAPI.runTraceroute(target.trim() || '8.8.8.8');
+      const result = await window.electronAPI.runTraceroute(t);
+      // 防御: IPC 返回的结构不可信(旧版本/异常路径), 缺 hops 会让
+      // 下面的 data.hops.length 抛错 ⇒ 整个仪表盘被 ErrorBoundary 清空。
+      if (!result || !Array.isArray(result.hops)) {
+        setData(null);
+        setError('路由跟踪返回了无法解析的结果');
+        return;
+      }
       setData(result);
     } catch (err: any) {
       setError(err.message || '执行失败');
@@ -847,19 +861,16 @@ function RouteTraceCard() {
             路由跟踪
           </h3>
           <div className="flex items-center gap-2 flex-1 justify-end">
-            {/* 目标可编辑 —— 受限网络下 8.8.8.8 必然每跳超时, 看不到有用信息 */}
-            <input
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') runTrace(); }}
-              placeholder="目标地址"
-              aria-label="路由跟踪目标"
-              className="w-28 bg-transparent border border-border rounded px-2 py-0.5
-                         font-mono text-[11px] text-slate-300 focus:outline-none
-                         focus:border-accent-green/60"
-            />
+            {/* 目标只读显示 —— 编辑入口统一在设置页的「探针节点管理」,
+                避免同一个配置有两个地方能改。 */}
+            <span
+              className="font-mono text-[11px] text-slate-400 truncate"
+              title="路由跟踪目标(在设置页修改)"
+            >
+              {target || '—'}
+            </span>
             <button
-              onClick={runTrace}
+              onClick={() => runTrace()}
               disabled={loading}
               className="text-xs text-accent-green hover:text-accent-green/80 disabled:opacity-50 shrink-0"
             >

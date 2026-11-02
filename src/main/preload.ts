@@ -4,9 +4,10 @@ import type { CollectorStats } from '../collector/historian';
 import type { NetworkAnomaly } from '../core/telemetry';
 import type { AlertRecord } from '../alerting/database';
 import type { NotificationConfig } from '../alerting/notifier';
-import type { AppConfig, CollectorConfig, PrometheusConfig, GrafanaConfig } from '../config/manager';
+import type { AppConfig, CollectorConfig, PrometheusConfig, GrafanaConfig, ProbeConfig } from '../config/manager';
 import type { HistorySample, HistorySummary, PruneResult, StorageStats, ObstructionEvent } from '../storage/types';
 import type { RouterProbeResult } from '../core/routerProbeTypes';
+import type { ProbeResult, ProbeNodeState } from '../core/probeRunner';
 
 /**
  * Electron API 接口定义
@@ -73,6 +74,18 @@ export interface ElectronAPI {
 
   // 更新 Prometheus 配置
   updatePrometheusConfig: (config: Partial<PrometheusConfig>) => Promise<{ success: boolean; requiresRestart?: boolean }>;
+
+  // 更新探针配置(节点列表 + 路由跟踪目标)
+  updateProbeConfig: (config: Partial<ProbeConfig>) => Promise<{ success: boolean }>;
+
+  // 取所有探针节点的当前状态
+  getProbeStates: () => Promise<ProbeNodeState[]>;
+
+  // 手动探测某个节点一次
+  probeNodeNow: (nodeId: string) => Promise<ProbeResult | null>;
+
+  // 订阅探针探测结果(实时状态灯)
+  onProbeResult: (callback: (result: ProbeResult) => void) => () => void;
 
   // 重置配置
   resetConfig: () => Promise<{ success: boolean; requiresRestart?: boolean }>;
@@ -189,6 +202,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   updatePrometheusConfig: (config: Partial<PrometheusConfig>) =>
     ipcRenderer.invoke('update-prometheus-config', config),
+
+  updateProbeConfig: (config: Partial<ProbeConfig>) =>
+    ipcRenderer.invoke('update-probe-config', config),
+
+  getProbeStates: () => ipcRenderer.invoke('get-probe-states'),
+
+  probeNodeNow: (nodeId: string) => ipcRenderer.invoke('probe-node-now', nodeId),
+
+  onProbeResult: (callback: (result: ProbeResult) => void) => {
+    const listener = (_e: unknown, result: ProbeResult) => callback(result);
+    ipcRenderer.on('probe-result', listener);
+    return () => ipcRenderer.removeListener('probe-result', listener);
+  },
 
   resetConfig: () => ipcRenderer.invoke('reset-config'),
 

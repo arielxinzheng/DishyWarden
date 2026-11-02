@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin } from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
+import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
 
 export default function Settings() {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -84,6 +85,10 @@ export default function Settings() {
           highLatencyMs: 100,
           highPacketLoss: 0.1,
         },
+        probe: {
+          traceTarget: 'example.com',
+          nodes: [],
+        },
         version: '0.1.0',
       } as AppConfig);
     }
@@ -105,6 +110,9 @@ export default function Settings() {
 
       // 保存 Grafana 配置
       await window.electronAPI.updateGrafanaConfig(config.grafana);
+
+      // 保存探针配置(节点列表 + 路由跟踪目标)
+      await window.electronAPI.updateProbeConfig(config.probe);
 
       setMessage({ type: 'success', text: '配置已保存' });
     } catch (error) {
@@ -554,6 +562,20 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 探针节点管理(需求文档 2.1.3 网络连通性探测) */}
+      {config && (
+        <ProbeNodesCard
+          nodes={config.probe?.nodes ?? []}
+          traceTarget={config.probe?.traceTarget ?? 'example.com'}
+          onNodesChange={(nodes) =>
+            setConfig({ ...config, probe: { ...config.probe, nodes } })
+          }
+          onTraceTargetChange={(traceTarget) =>
+            setConfig({ ...config, probe: { ...config.probe, traceTarget } })
+          }
+        />
+      )}
 
       {/* Telegram 通知 */}
       <Card>

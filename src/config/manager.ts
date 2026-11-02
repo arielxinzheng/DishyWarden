@@ -35,12 +35,57 @@ export interface GrafanaConfig {
   password: string;
 }
 
+/**
+ * 探针节点的探测类型。
+ *
+ * - `icmp` —— ICMP Ping(路由器状态监控用的就是它)
+ * - `dns`  —— DNS 解析(域名能不能解析出来)
+ * - `tls`  —— TLS 握手(证书链正不正常)
+ */
+export type ProbeType = 'icmp' | 'dns' | 'tls';
+
+/**
+ * 一个探针节点。
+ *
+ * 对应需求文档 2.1.3「网络连通性探测」的探测目标列表。
+ */
+export interface ProbeNodeConfig {
+  /** 节点 id(唯一), 用于增删改时定位 */
+  id: string;
+  /** 节点名称, 如「本地网关」「公网 Ping」 */
+  name: string;
+  /** 探测目标: IP 或域名 */
+  target: string;
+  /** 探测类型 */
+  type: ProbeType;
+  /** 探测间隔(秒) */
+  intervalSec: number;
+  /** 单次探测超时(秒) */
+  timeoutSec: number;
+  /** 是否启用 */
+  enabled: boolean;
+}
+
+/**
+ * 探针相关配置。
+ *
+ * 路由跟踪目标也放这里 —— 它本质上也是一个"探测目标",
+ * 只是探测方式(traceroute)不同, 不适合塞进节点列表。
+ */
+export interface ProbeConfig {
+  /** 探针节点列表 */
+  nodes: ProbeNodeConfig[];
+  /** 路由跟踪(traceroute)的目标, 默认 example.com */
+  traceTarget: string;
+}
+
 export interface AppConfig {
   collector: CollectorConfig;
   prometheus: PrometheusConfig;
   notifications: NotificationConfig;
   grafana: GrafanaConfig;
   alertThresholds: AlertThresholds;
+  probe: ProbeConfig;
   version: string;
 }
 
@@ -88,6 +133,48 @@ const DEFAULT_CONFIG: AppConfig = {
   alertThresholds: {
     highLatencyMs: 100,
     highPacketLoss: 0.1,
+  },
+  probe: {
+    // 路由跟踪目标: example.com 是 RFC 2606 保留域名, 稳定可达且语义中立
+    traceTarget: 'example.com',
+    nodes: [
+      {
+        id: 'local-gateway',
+        name: '本地网关',
+        target: '192.168.100.1',
+        type: 'icmp',
+        intervalSec: 30,
+        timeoutSec: 10,
+        enabled: true,
+      },
+      {
+        id: 'public-ping',
+        name: '公网 Ping',
+        target: '1.1.1.1',
+        type: 'icmp',
+        intervalSec: 60,
+        timeoutSec: 5,
+        enabled: true,
+      },
+      {
+        id: 'dns-resolve',
+        name: 'DNS 解析',
+        target: '8.8.8.8',
+        type: 'dns',
+        intervalSec: 60,
+        timeoutSec: 5,
+        enabled: true,
+      },
+      {
+        id: 'tls-check',
+        name: 'TLS 探测',
+        target: 'www.cloudflare.com',
+        type: 'tls',
+        intervalSec: 120,
+        timeoutSec: 10,
+        enabled: false,
+      },
+    ],
   },
   version: '0.1.0',
 };
@@ -149,6 +236,14 @@ export class ConfigManager {
       },
       grafana: { ...defaults.grafana, ...loaded.grafana },
       alertThresholds: { ...defaults.alertThresholds, ...loaded.alertThresholds },
+      // 探针配置: 老配置文件里没有这个字段 ⇒ 用默认值兜底。
+      // nodes 是数组, **不合并** —— 用户删掉的节点不该被默认值"复活"。
+      probe: {
+        traceTarget: loaded.probe?.traceTarget ?? defaults.probe.traceTarget,
+        nodes: Array.isArray(loaded.probe?.nodes)
+          ? loaded.probe.nodes
+          : defaults.probe.nodes,
+      },
       version: loaded.version || defaults.version,
     };
   }
@@ -186,6 +281,14 @@ export class ConfigManager {
    */
   updatePrometheusConfig(config: Partial<PrometheusConfig>): void {
     this.config.prometheus = { ...this.config.prometheus, ...config };
+    this.save(this.config);
+  }
+
+  /**
+   * 更新探针配置(节点列表 + 路由跟踪目标)
+   */
+  updateProbeConfig(config: Partial<ProbeConfig>): void {
+    this.config.probe = { ...this.config.probe, ...config };
     this.save(this.config);
   }
 
