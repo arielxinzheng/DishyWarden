@@ -12,6 +12,12 @@ data/alerts.db
 # 工具产物
 .playwright-mcp/
 
+# 测试运行产物（Playwright / Vitest 报告等）
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
 # Office 临时锁文件（~$ 开头）
 ~$*
 
