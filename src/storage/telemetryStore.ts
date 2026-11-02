@@ -157,8 +157,10 @@ export class TelemetryStore {
         down_avg, down_max,
         up_avg, up_max,
         obstructed_avg, snr_avg,
-        online_sec, offline_sec, searching_sec, booting_sec
-      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        online_sec, offline_sec, searching_sec, booting_sec,
+        public_ping_avg, public_ping_max,
+        local_gateway_avg, local_gateway_max
+      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(bucket_ts) DO UPDATE SET
         latency_avg    = (latency_avg * sample_count + excluded.latency_avg) / (sample_count + 1),
         latency_max    = MAX(latency_max, excluded.latency_max),
@@ -175,6 +177,34 @@ export class TelemetryStore {
         offline_sec    = offline_sec + excluded.offline_sec,
         searching_sec  = searching_sec + excluded.searching_sec,
         booting_sec    = booting_sec + excluded.booting_sec,
+        public_ping_avg = CASE 
+          WHEN excluded.public_ping_avg IS NOT NULL AND public_ping_avg IS NOT NULL 
+          THEN (public_ping_avg * sample_count + excluded.public_ping_avg) / (sample_count + 1)
+          WHEN excluded.public_ping_avg IS NOT NULL 
+          THEN excluded.public_ping_avg
+          ELSE public_ping_avg
+        END,
+        public_ping_max = CASE
+          WHEN excluded.public_ping_max IS NOT NULL AND public_ping_max IS NOT NULL
+          THEN MAX(public_ping_max, excluded.public_ping_max)
+          WHEN excluded.public_ping_max IS NOT NULL
+          THEN excluded.public_ping_max
+          ELSE public_ping_max
+        END,
+        local_gateway_avg = CASE 
+          WHEN excluded.local_gateway_avg IS NOT NULL AND local_gateway_avg IS NOT NULL 
+          THEN (local_gateway_avg * sample_count + excluded.local_gateway_avg) / (sample_count + 1)
+          WHEN excluded.local_gateway_avg IS NOT NULL 
+          THEN excluded.local_gateway_avg
+          ELSE local_gateway_avg
+        END,
+        local_gateway_max = CASE
+          WHEN excluded.local_gateway_max IS NOT NULL AND local_gateway_max IS NOT NULL
+          THEN MAX(local_gateway_max, excluded.local_gateway_max)
+          WHEN excluded.local_gateway_max IS NOT NULL
+          THEN excluded.local_gateway_max
+          ELSE local_gateway_max
+        END,
         sample_count   = sample_count + 1
     `);
 
@@ -204,7 +234,8 @@ export class TelemetryStore {
     //   分桶: state 不 select, 改用 online_ratio(桶内 ONLINE 采样占比)
     //   小时聚合: 无此数据(表里没存 state), 两者都是 undefined
     this.selectRaw = this.db.prepare(`
-      SELECT ts, state, latency_ms, drop_rate, down_bps, up_bps, snr, fraction_obstructed, satellite_id
+      SELECT ts, state, latency_ms, drop_rate, down_bps, up_bps, snr, fraction_obstructed, satellite_id,
+             public_ping_ms, local_gateway_ms
       FROM telemetry_samples
       WHERE ts >= ? AND ts < ?
       ORDER BY ts
@@ -218,6 +249,8 @@ export class TelemetryStore {
              AVG(up_bps)              AS up_bps,
              AVG(snr)                 AS snr,
              AVG(fraction_obstructed) AS fraction_obstructed,
+             AVG(public_ping_ms)      AS public_ping_ms,
+             AVG(local_gateway_ms)    AS local_gateway_ms,
              AVG(CASE WHEN state = 'ONLINE' THEN 1.0 ELSE 0.0 END) AS online_ratio,
              -- 各状态在桶内的采样占比 —— 用来画「状态色块条」。
              -- 光有 online_ratio 分不出 SEARCHING / BOOTING / OFFLINE。
@@ -238,6 +271,8 @@ export class TelemetryStore {
              AVG(up_avg)         AS up_bps,
              AVG(snr_avg)        AS snr,
              AVG(obstructed_avg) AS fraction_obstructed,
+             AVG(public_ping_avg) AS public_ping_ms,
+             AVG(local_gateway_avg) AS local_gateway_ms,
              SUM(online_sec)     AS online_sec,
              SUM(offline_sec)    AS offline_sec,
              SUM(searching_sec)  AS searching_sec,
@@ -330,6 +365,17 @@ export class TelemetryStore {
         console.log('[TelemetryStore] 迁移 v3: telemetry_hourly 增加 state 分布列(online/offline/searching/booting)');
       }
 
+      // v5: telemetry_hourly 增加 public/local 延迟聚合字段
+      if (!hourlyNames.includes('public_ping_avg')) {
+        this.db.exec(`
+          ALTER TABLE telemetry_hourly ADD COLUMN public_ping_avg REAL;
+          ALTER TABLE telemetry_hourly ADD COLUMN public_ping_max REAL;
+          ALTER TABLE telemetry_hourly ADD COLUMN local_gateway_avg REAL;
+          ALTER TABLE telemetry_hourly ADD COLUMN local_gateway_max REAL;
+        `);
+        console.log('[TelemetryStore] 迁移 v5: telemetry_hourly 增加 public/local 延迟聚合字段');
+      }
+
       // v4: telemetry_samples 性能索引
       // 使用 PRAGMA index_list 检查索引是否已存在
       const indexes = this.db
@@ -395,6 +441,10 @@ export class TelemetryStore {
       stateDuration.offline,
       stateDuration.searching,
       stateDuration.booting,
+      point.publicPingLatencyMs ?? null,
+      point.publicPingLatencyMs ?? null,
+      point.localGatewayLatencyMs ?? null,
+      point.localGatewayLatencyMs ?? null,
     );
   }
 

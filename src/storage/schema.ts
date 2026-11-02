@@ -78,7 +78,12 @@ export const DDL = `
     online_sec     INTEGER NOT NULL DEFAULT 0,
     offline_sec    INTEGER NOT NULL DEFAULT 0,
     searching_sec  INTEGER NOT NULL DEFAULT 0,
-    booting_sec    INTEGER NOT NULL DEFAULT 0
+    booting_sec    INTEGER NOT NULL DEFAULT 0,
+    -- v5: 公网和本地网关延迟聚合
+    public_ping_avg REAL,
+    public_ping_max REAL,
+    local_gateway_avg REAL,
+    local_gateway_max REAL
   );
 
   CREATE TABLE IF NOT EXISTS latest_snapshot (
