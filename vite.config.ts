@@ -20,12 +20,23 @@ export default defineConfig({
     // 默认行为是监听项目根目录 ⇒ 改任何 .md 文档、改 src/core/ 下的主进程代码
     // 都会触发整页 reload(用户看到的是"页面莫名其妙闪一下")。
     watch: {
-      // 排除文档、测试产物、以及主进程专属目录
+      // 排除文档、测试产物、构建产物、以及主进程专属目录。
+      //
+      // ⚠️ 漏掉构建产物目录会有实际代价: electron-builder 往 release/ 下写
+      // 几百个文件(LICENSES.*.html、asar 等), 每写一个文件 Vite 就整页
+      // reload 一次 —— 实测打包一次能触发 4 次以上无谓的页面刷新。
       ignored: [
         '**/*.md',
         '**/test-results/**',
         '**/playwright-report/**',
+        '**/blob-report/**',
         '**/coverage/**',
+        // 构建产物目录
+        '**/dist/**',
+        '**/dist-electron/**',
+        '**/release/**',
+        '**/out/**',
+        '**/.vite/**',
         // src/core 下的主进程模块: 渲染层只在 import type 时引用它们,
         // 改动不会影响渲染结果, 不该触发 reload
         '**/src/core/probeRunner.ts',
