@@ -11,6 +11,11 @@
  *   - 单跳超时: 2s
  *   - 最大跳数: 20
  *   - 总超时: 45s
+ *
+ * 超时 ≠ 失败:
+ *   命令被 kill 时, 它已经走过的跳还在 stdout 里 —— 那是有价值的信息
+ *   ("走到了第 5 跳但没到目的地")。所以超时时会把已收到的输出解析出来,
+ *   返回部分结果而不是空结果。详见 traceroute() 的 catch 分支。
  */
 
 import { exec } from 'child_process';
@@ -65,7 +70,7 @@ export async function traceroute(
       maxBuffer: 1024 * 1024, // 1MB
     });
 
-    const hops = platform === 'win32' 
+    const hops = platform === 'win32'
       ? parseWindowsTraceroute(stdout)
       : parseUnixTraceroute(stdout);
 
@@ -79,7 +84,39 @@ export async function traceroute(
       duration,
     };
   } catch (error: any) {
-    // 超时或命令失败，返回空结果
+    // ⚠️ **超时 ≠ 没有数据**。
+    //
+    // 被 kill 的那一刻, traceroute 已经输出了它走过的跳 —— 那些数据在
+    // error.stdout 里(实测: " 1  * * *\n")。直接返回空结果等于把
+    // "走到了第 5 跳但没到目的地" 这个**有意义的信息**丢成"什么都没查到"。
+    //
+    // 典型场景: 目标不可达 / 中间有跳不响应 / 网络受限。
+    // 这时命令会跑满总超时被 SIGTERM, exit code 非 0。
+    //
+    // 所以: 优先解析已收到的输出, 解析出跳数就用, 一跳都没有才算真失败。
+    const partial = extractPartialOutput(error);
+    const hops = partial
+      ? (platform === 'win32'
+          ? parseWindowsTraceroute(partial)
+          : parseUnixTraceroute(partial))
+      : [];
+
+    if (hops.length > 0) {
+      const duration = Date.now() - startTime;
+      const reached = hops.length > 0 && hops[hops.length - 1].ip !== null;
+      console.warn(
+        `[Traceroute] 超时(${duration}ms), 已取得 ${hops.length} 跳的部分结果` +
+        (reached ? '' : ' (未到达目标)')
+      );
+      return {
+        target,
+        hops,
+        completed: reached,
+        duration,
+      };
+    }
+
+    // 真失败: 没有任何可解析的输出
     console.error('[Traceroute] Failed:', error.message);
     return {
       target,
@@ -88,6 +125,23 @@ export async function traceroute(
       duration: Date.now() - startTime,
     };
   }
+}
+
+/**
+ * 从错误对象里取出**已收到的**命令输出。
+ *
+ * Node 的 exec 超时会抛错, 但 stdout/stderr 里已经有内容了。
+ * 优先用 stdout(跳数数据在 macOS/Linux 的 stdout 里);
+ * Windows 的 tracert 把数据也放 stdout, 标题在 stderr。
+ * 两者都空 ⇒ 真的什么都没拿到。
+ */
+function extractPartialOutput(error: any): string | null {
+  const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
+  const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
+
+  if (stdout.trim()) return stdout;
+  if (stderr.trim()) return stderr;
+  return null;
 }
 
 /**
