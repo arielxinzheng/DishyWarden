@@ -64,6 +64,11 @@ export interface HistorySample {
   snr: number;
   fractionObstructed: number;
   /**
+   * 额外延迟指标（由采集器补充）
+   */
+  publicPingLatencyMs?: number;      // 公网 Ping 延迟（探针节点 ICMP）
+  localGatewayLatencyMs?: number;    // 本地网关延迟（默认网关 ICMP）
+  /**
    * 该采样所连卫星。只有原始明细(telemetry_samples)带这个字段,
    * 分桶/小时聚合会丢掉它 —— 因为一个桶里可能跨了多次切换,
    * 给出任何单值都是编造。图表据此只在明细粒度上标切换点。

@@ -55,6 +55,8 @@ const SAMPLE_FIELDS = [
   { column: 'uptime_s', key: 'uptime' },
   { column: 'dish_temp_c', key: 'dishTemperature' },
   { column: 'psu_temp_c', key: 'powerSupplyTemperature' },
+  { column: 'public_ping_ms', key: 'publicPingLatencyMs' },
+  { column: 'local_gateway_ms', key: 'localGatewayLatencyMs' },
 ] as const;
 
 /** better-sqlite3 不接受 boolean/undefined, 统一归一化 */
@@ -719,6 +721,8 @@ function mapRow(row: unknown): HistorySample {
     snr: r.snr as number,
     fractionObstructed: r.fraction_obstructed as number,
     satelliteId: typeof r.satellite_id === 'number' ? r.satellite_id : undefined,
+    publicPingLatencyMs: typeof r.public_ping_ms === 'number' ? r.public_ping_ms : undefined,
+    localGatewayLatencyMs: typeof r.local_gateway_ms === 'number' ? r.local_gateway_ms : undefined,
   };
 }
 

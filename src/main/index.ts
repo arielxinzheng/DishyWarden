@@ -83,7 +83,10 @@ async function startBackgroundServices() {
     }
 
     // 2. 创建数据采集器
-    collector = createCollector(config.collector);
+    collector = createCollector({
+      ...config.collector,
+      probeNodes: config.probe.nodes, // 传递探针节点配置
+    });
 
     // 监听采集事件
     collector.on('data', (data) => {

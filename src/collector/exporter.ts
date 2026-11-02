@@ -162,6 +162,14 @@ export class PrometheusExporter {
     addMetric('starlink_ping_latency_ms', telemetry.popPingLatencyMs, 'Ping latency to Starlink PoP in milliseconds');
     addMetric('starlink_ping_drop_rate', telemetry.popPingDropRate, 'Ping packet drop rate (0.0-1.0)');
     
+    // 额外延迟指标
+    if (telemetry.publicPingLatencyMs !== undefined) {
+      addMetric('starlink_public_ping_ms', telemetry.publicPingLatencyMs, 'Public ping latency in milliseconds (ICMP to probe node)');
+    }
+    if (telemetry.localGatewayLatencyMs !== undefined) {
+      addMetric('starlink_local_gateway_ping_ms', telemetry.localGatewayLatencyMs, 'Local gateway ping latency in milliseconds (ICMP to default gateway)');
+    }
+    
     addMetric('starlink_downlink_throughput_bps', telemetry.downlinkThroughputBps, 'Downlink throughput in bits per second');
     addMetric('starlink_uplink_throughput_bps', telemetry.uplinkThroughputBps, 'Uplink throughput in bits per second');
 

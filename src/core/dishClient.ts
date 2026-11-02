@@ -34,6 +34,10 @@ export interface TelemetryData {
   downlinkThroughputBps: number;
   uplinkThroughputBps: number;
   
+  // 额外延迟指标（由采集器补充）
+  publicPingLatencyMs?: number;      // 公网 Ping 延迟（探针节点 ICMP）
+  localGatewayLatencyMs?: number;    // 本地网关延迟（默认网关 ICMP）
+  
   // 信号质量
   snr: number;
   secondsObstructed: number;

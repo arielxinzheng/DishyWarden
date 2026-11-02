@@ -19,15 +19,11 @@ type LatencyMode = 'public' | 'pop' | 'gateway';
 
 /**
  * 延迟维度可选项。
- *
- * dish history 只提供 PoP 延迟这一路数据, 公网/网关维度目前没有采集源。
- * 这里显式标成 available:false, 而不是叠一个随机数去画一条看着像真的假曲线。
- * 将来接入 ICMP / traceroute 采集后, 把对应项改成 true 就能启用。
  */
 const LATENCY_DIMENSIONS: Array<{ id: LatencyMode; label: string; available: boolean }> = [
-  { id: 'public', label: 'Public', available: false },
+  { id: 'public', label: 'Public', available: true },
   { id: 'pop', label: 'PoP', available: true },
-  { id: 'gateway', label: 'Gateway', available: false },
+  { id: 'gateway', label: 'Local', available: true },
 ];
 
 const DEFAULT_MODE: LatencyMode = LATENCY_DIMENSIONS.find((d) => d.available)?.id ?? 'pop';
@@ -62,7 +58,21 @@ export function LatencyChart({ height = 260, history, isLoading = false }: Laten
       const label = formatTimeLabel(data.timestamp);
       if (!label) return;
 
-      const latencyValue = data.popPingLatencyMs;
+      // 根据当前模式选择延迟数据源
+      let latencyValue: number;
+      switch (mode) {
+        case 'public':
+          latencyValue = data.publicPingLatencyMs ?? 0;
+          break;
+        case 'gateway':
+          latencyValue = data.localGatewayLatencyMs ?? 0;
+          break;
+        case 'pop':
+        default:
+          latencyValue = data.popPingLatencyMs;
+          break;
+      }
+
       const index = time.length;
 
       time.push(label);
@@ -77,7 +87,7 @@ export function LatencyChart({ height = 260, history, isLoading = false }: Laten
     });
 
     setChartData({ time, latency, loss, satellites });
-  }, [history]);
+  }, [history, mode]);
 
   const option = {
     backgroundColor: 'transparent',

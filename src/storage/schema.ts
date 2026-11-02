@@ -22,8 +22,9 @@
  * v2: latest_obstruction_map 增加 source 列(标记遮挡图是实测还是模拟)
  * v3: telemetry_hourly 增加 state 分布列(online_sec/offline_sec/searching_sec/booting_sec)
  * v4: 性能索引 - (state, ts) 和 (currently_obstructed, ts)
+ * v5: telemetry_samples 增加 public_ping_ms 和 local_gateway_ms 列
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
@@ -48,7 +49,9 @@ export const DDL = `
     satellite_id        INTEGER,
     uptime_s            INTEGER,
     dish_temp_c         REAL,
-    psu_temp_c          REAL
+    psu_temp_c          REAL,
+    public_ping_ms      REAL,     -- 公网 Ping 延迟（探针节点 ICMP）
+    local_gateway_ms    REAL      -- 本地网关延迟（默认网关 ICMP）
   );
 
   -- 索引: 状态过滤 + 时间范围查询（中断统计、在线率计算）

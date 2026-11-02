@@ -15,6 +15,9 @@ import { TelemetryStore } from '../storage/telemetryStore';
 import type { HistorySample, PruneResult, StorageStats } from '../storage/types';
 import { EventEmitter } from 'events';
 import path from 'path';
+import { runProbe } from '../core/probeRunner';
+import { pingDefaultGateway } from '../core/gatewayDetector';
+import type { ProbeNodeConfig } from '../config/manager';
 
 export interface CollectorConfig {
   interval: number;           // 采集间隔（毫秒）
@@ -24,6 +27,7 @@ export interface CollectorConfig {
   routerAddress?: string;     // Router 地址（用于 ICMP Ping 探测）
   enablePersistence?: boolean; // 是否持久化到磁盘
   dataDir?: string;           // 自定义数据目录（留空则用 app.getPath('userData')/data）
+  probeNodes?: ProbeNodeConfig[]; // 探针节点配置列表
 }
 
 export interface CollectorStats {
@@ -141,10 +145,12 @@ export class DataCollector extends EventEmitter {
         setTimeout(() => reject(new Error('Starlink 设备连接超时 (10s)')), 10000)
       );
       
-      // 并行采集 dish 遥测和 router 探活，两侧独立成败
+      // 并行采集 dish 遥测、router 探活、公网探针、本地网关
       const collectPromise = Promise.allSettled([
         this.client.getTelemetry(),
         this.routerProbe.probe(),
+        this.probePublicLatency(),
+        pingDefaultGateway(5), // 5 秒超时
       ]);
       
       const results = await Promise.race([
@@ -153,7 +159,7 @@ export class DataCollector extends EventEmitter {
       ]);
       
       // 解包 allSettled 结果
-      const [dishResult, routerResult] = results;
+      const [dishResult, routerResult, publicProbeResult, localGatewayResult] = results;
       
       // dish 失败时整帧失败（dish 是主数据源）
       if (dishResult.status === 'rejected') {
@@ -168,6 +174,20 @@ export class DataCollector extends EventEmitter {
       } else {
         console.warn('[Collector] Router 探测失败:', routerResult.reason);
         this.lastRouterProbe = null;
+      }
+      
+      // 补充公网 Ping 延迟
+      if (publicProbeResult.status === 'fulfilled' && publicProbeResult.value?.ok) {
+        telemetry.publicPingLatencyMs = publicProbeResult.value.rttMs ?? undefined;
+      } else if (publicProbeResult.status === 'rejected') {
+        console.warn('[Collector] 公网探针失败:', publicProbeResult.reason);
+      }
+      
+      // 补充本地网关延迟
+      if (localGatewayResult.status === 'fulfilled' && localGatewayResult.value?.ok) {
+        telemetry.localGatewayLatencyMs = localGatewayResult.value.rttMs ?? undefined;
+      } else if (localGatewayResult.status === 'rejected') {
+        console.warn('[Collector] 本地网关探测失败:', localGatewayResult.reason);
       }
       
       // 添加时间戳
@@ -379,6 +399,31 @@ export class DataCollector extends EventEmitter {
   clearBuffer() {
     this.buffer = [];
     console.log('[Collector] Buffer cleared');
+  }
+
+  /**
+   * 探测公网延迟（从配置的探针节点中选择 type=icmp 且 enabled=true 的首个节点）
+   */
+  private async probePublicLatency() {
+    if (!this.config.probeNodes || this.config.probeNodes.length === 0) {
+      return null;
+    }
+    
+    // 找第一个启用的 ICMP 探针节点
+    const publicNode = this.config.probeNodes.find(
+      n => n.type === 'icmp' && n.enabled && n.id !== 'local-gateway'
+    );
+    
+    if (!publicNode) {
+      return null;
+    }
+    
+    try {
+      return await runProbe(publicNode);
+    } catch (error) {
+      console.warn('[Collector] 公网探针执行失败:', error);
+      return null;
+    }
   }
 
   /**
