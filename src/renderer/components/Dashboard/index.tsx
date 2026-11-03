@@ -13,6 +13,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useDish, useDishHistory, useHistorySummary, type ObstructionData } from '../../hooks/useDish';
+import { useHandoffs } from '../../hooks/useHandoffs';
 import { useElementWidth } from '../../hooks/useElementWidth';
 import {
   analyzeObstructionMap,
@@ -61,6 +62,8 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState<TimeRange>('1h');
   // 图表数据在这里取一次, 两个图表共用 —— 避免各自发起 IPC 查询
   const { history, isLoading: historyLoading } = useDishHistory(TIME_RANGE_SECONDS[timeRange]);
+  // 卫星切换事件(★ 标记点) —— 来自 dishGetHistory 的 outages, 与 history 同一个时间窗
+  const handoffs = useHandoffs(TIME_RANGE_SECONDS[timeRange]);
   // 六张指标卡的走势序列：和图表共用同一份 history, 各取一条指标
   const metricSeries = useMemo(() => buildMetricSeries(history), [history]);
 
@@ -576,7 +579,12 @@ export default function Dashboard() {
         <div className="lg:col-span-7">
           <Card>
             <CardContent className="p-4">
-              <LatencyChart height={260} history={history} isLoading={historyLoading} />
+              <LatencyChart
+                height={260}
+                history={history}
+                isLoading={historyLoading}
+                handoffs={handoffs}
+              />
             </CardContent>
           </Card>
         </div>

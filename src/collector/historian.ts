@@ -18,7 +18,7 @@ import path from 'path';
 import { runProbe } from '../core/probeRunner';
 import { pingDefaultGateway } from '../core/gatewayDetector';
 import type { ProbeNodeConfig } from '../config/manager';
-import { analyzeOutages, summarizeOutageAnalysis, type HandoffEvent } from '../core/outageAnalyzer';
+import { analyzeOutages, summarizeOutageAnalysis, toEpochMs, type HandoffEvent } from '../core/outageAnalyzer';
 import type { Outage } from '../core/outageTypes';
 
 export interface CollectorConfig {
@@ -325,6 +325,43 @@ export class DataCollector extends EventEmitter {
   }
 
   /**
+   * 查询区间内的卫星切换事件。
+   *
+   * 供渲染层在「延迟与丢包走势」图上标注切换点。
+   *
+   * @param seconds 时间窗口(秒)
+   */
+  getHandoffs(seconds: number): Array<{
+    timestamp: number;
+    durationMs: number;
+    cause: string;
+    parsedCause: string;
+    isExplicit: boolean;
+  }> {
+    const now = Date.now();
+    const fromMs = now - seconds * 1000;
+
+    if (this.store) {
+      try {
+        return this.store.queryHandoffs(fromMs, now, 500);
+      } catch (error) {
+        console.error('[Collector] 查询卫星切换事件失败, 回落内存缓冲:', error);
+      }
+    }
+
+    // 回落: 从内存里的 handoff 事件缓冲取
+    return this.handoffEvents
+      .filter((h) => h.timestamp >= fromMs)
+      .map((h) => ({
+        timestamp: h.timestamp,
+        durationMs: h.durationMs,
+        cause: h.cause,
+        parsedCause: h.parsedCause,
+        isExplicit: h.isExplicit,
+      }));
+  }
+
+  /**
    * 获取指定时间范围的历史数据
    *
    * 优先走 SQLite(可跨重启、可超出一小时), 库不可用时回落到内存缓冲区。
@@ -489,37 +526,52 @@ export class DataCollector extends EventEmitter {
         // gRPC 客户端未初始化（首次采集前）
         return [];
       }
-      
+
       const history = await grpc.getHistory(8000);
-      const currentTimestamp = history.currentTimestamp as number | undefined;
       const outages = history.outages as Outage[] | undefined;
-      
-      if (!currentTimestamp || !Array.isArray(outages) || outages.length === 0) {
+
+      if (!Array.isArray(outages) || outages.length === 0) {
         return [];
       }
-      
-      // 如果 currentTimestamp 没变，说明没有新数据
-      if (currentTimestamp <= this.lastHistoryTimestamp) {
-        return [];
-      }
-      
+
       // 分析所有 outages
       const analysis = analyzeOutages(outages);
-      
-      // 只返回新增的切换事件（timestamp > lastHistoryTimestamp）
-      const newHandoffs = analysis.handoffs.filter(
-        h => h.timestamp > this.lastHistoryTimestamp * 1000
+      if (analysis.handoffs.length === 0) {
+        return [];
+      }
+
+      // 只返回新增的切换事件。
+      //
+      // ⚠️ 原来靠 `history.currentTimestamp` 做水位线, 但 DishyMock 的
+      // `buildHistory()` **根本不返回这个字段** ⇒ currentTimestamp 恒为 undefined
+      // ⇒ 这里每次都直接 return [] ⇒ 一条都检测不到。
+      //
+      // 改成**从 outage 数据自身推导水位线**: 取最新的那条 outage 的开始时间。
+      // 设备的历史窗口是滑动的, 新事件会出现在更靠前的位置;
+      // 用「已处理过的最新 outage 时间戳」当水位线, 只取比它更新的。
+      const latestOutageTs = Math.max(
+        ...analysis.handoffs.map((h) => h.timestamp),
+        ...analysis.otherOutages.map((o) => toEpochMs(o.startTimestamp))
       );
-      
-      // 更新时间戳
-      this.lastHistoryTimestamp = currentTimestamp;
-      
+
+      // 水位线没推进 ⇒ 没有新事件(避免重复写同一条)
+      if (latestOutageTs <= this.lastHistoryTimestamp) {
+        return [];
+      }
+
+      const newHandoffs = analysis.handoffs.filter(
+        (h) => h.timestamp > this.lastHistoryTimestamp
+      );
+
+      // 更新时间戳(毫秒级 epoch, 与 h.timestamp 同单位)
+      this.lastHistoryTimestamp = latestOutageTs;
+
       // 输出分析摘要
       if (newHandoffs.length > 0) {
         const summary = summarizeOutageAnalysis(analysis);
         console.log(`[Collector] Outage 分析: ${summary}`);
       }
-      
+
       return newHandoffs;
     } catch (error) {
       // getHistory 失败不影响主采集流程

@@ -272,6 +272,15 @@ ipcMain.handle('get-history-summary', (_event, seconds: number) => {
 });
 
 /**
+ * IPC 处理器：获取区间内的卫星切换事件
+ *
+ * 渲染层在「延迟与丢包走势」图上标注 ★ 卫星切换 点时用。
+ */
+ipcMain.handle('get-handoffs', (_event, seconds: number) => {
+  return collector?.getHandoffs(seconds) || [];
+});
+
+/**
  * IPC 处理器：获取历史库物理状态
  */
 ipcMain.handle('get-storage-stats', () => {

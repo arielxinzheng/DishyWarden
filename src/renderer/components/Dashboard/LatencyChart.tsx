@@ -6,6 +6,7 @@
 import ReactECharts from 'echarts-for-react';
 import { formatTimeLabel } from '../../../core/telemetry';
 import type { HistorySample } from '../../../storage/types';
+import type { HandoffEvent } from '../../../core/outageAnalyzer';
 import { useEffect, useState } from 'react';
 
 interface LatencyChartProps {
@@ -13,6 +14,21 @@ interface LatencyChartProps {
   /** 由上层统一获取, 组件只负责渲染, 不再自己发起查询 */
   history: HistorySample[];
   isLoading?: boolean;
+  /**
+   * 卫星切换事件(来自 dishGetHistory 的 outages)。
+   *
+   * ## 为什么需要这个 prop
+   *
+   * 之前切换点是从 `satelliteId` 的变化推出来的 ——
+   * 但**协议里根本没有 satelliteId 字段**(DishyMock 的 proto 没有,
+   * 真实设备也不提供), 实测该字段恒为 0 ⇒ `0 !== 0` 永远不成立
+   * ⇒ **图上一个切换点都不会出现**。
+   *
+   * 真正可靠的数据源是 `dishGetHistory` 返回的 `outages[]`:
+   * 设备在卫星切换时会记一条中断(cause = HANDOFF / SWITCHING /
+   * NO_DOWNLINK 等), 这才是「切换事件」的权威来源。
+   */
+  handoffs?: HandoffEvent[];
 }
 
 type LatencyMode = 'public' | 'pop' | 'gateway';
@@ -28,10 +44,10 @@ const LATENCY_DIMENSIONS: Array<{ id: LatencyMode; label: string; available: boo
 
 const DEFAULT_MODE: LatencyMode = LATENCY_DIMENSIONS.find((d) => d.available)?.id ?? 'pop';
 
-export function LatencyChart({ height = 260, history, isLoading = false }: LatencyChartProps) {
+export function LatencyChart({ height = 260, history, isLoading = false, handoffs = [] }: LatencyChartProps) {
   const [mode, setMode] = useState<LatencyMode>(DEFAULT_MODE);
-  const [chartData, setChartData] = useState<{ 
-    time: string[]; 
+  const [chartData, setChartData] = useState<{
+    time: string[];
     latency: number[];
     loss: number[];
     satellites: Array<[number, number]>;
@@ -50,9 +66,8 @@ export function LatencyChart({ height = 260, history, isLoading = false }: Laten
     const loss: number[] = [];
     const satellites: Array<[number, number]> = [];
 
-    // 卫星切换点 = satelliteId 发生变化的采样。
-    // 分桶/小时聚合结果不带 satelliteId, 这些范围下就不标切换点(不猜)。
-    let prevSatelliteId: number | undefined;
+    // 采样点的时间戳, 用来把 handoff 时间映射到 x 轴下标
+    const sampleTimestamps: number[] = [];
 
     history.forEach((data) => {
       const label = formatTimeLabel(data.timestamp);
@@ -73,21 +88,46 @@ export function LatencyChart({ height = 260, history, isLoading = false }: Laten
           break;
       }
 
-      const index = time.length;
-
       time.push(label);
       latency.push(latencyValue);
       // 丢包率（0..1 → 百分比），缺失样本按 0 处理
       loss.push((data.popPingDropRate ?? 0) * 100);
-
-      if (prevSatelliteId !== undefined && data.satelliteId !== undefined && data.satelliteId !== prevSatelliteId) {
-        satellites.push([index, latencyValue]);
-      }
-      if (data.satelliteId !== undefined) prevSatelliteId = data.satelliteId;
+      sampleTimestamps.push(data.timestamp);
     });
 
+    // 卫星切换点。
+    //
+    // 数据源是 `dishGetHistory` 的 outages[] —— 设备在切换时记一条中断。
+    //
+    // ⚠️ 原来靠 `satelliteId` 变化来判, 但**协议里没有这个字段**
+    // (DishyMock 的 proto 没有, 真实设备也不提供), 实测恒为 0
+    // ⇒ `0 !== 0` 永远不成立 ⇒ 图上一个点都不出现。
+    //
+    // 把 handoff 的时间戳映射到最近的采样下标(采样间隔 30s, 切换更密,
+    // 所以取**最近**的那个点, 而不是等一个精确匹配)。
+    if (handoffs.length > 0 && sampleTimestamps.length > 0) {
+      const usedIndices = new Set<number>();
+      for (const h of handoffs) {
+        let bestIndex = -1;
+        let bestDelta = Infinity;
+        for (let i = 0; i < sampleTimestamps.length; i++) {
+          const delta = Math.abs(sampleTimestamps[i] - h.timestamp);
+          if (delta < bestDelta) {
+            bestDelta = delta;
+            bestIndex = i;
+          }
+        }
+        // 超出采样窗口(比如 handoff 比历史还新)就不画
+        if (bestIndex < 0 || bestDelta > 5 * 60 * 1000) continue;
+        // 同一个采样点只标一次(避免密集切换叠成一个粗点)
+        if (usedIndices.has(bestIndex)) continue;
+        usedIndices.add(bestIndex);
+        satellites.push([bestIndex, latency[bestIndex]]);
+      }
+    }
+
     setChartData({ time, latency, loss, satellites });
-  }, [history, mode]);
+  }, [history, mode, handoffs]);
 
   const option = {
     backgroundColor: 'transparent',

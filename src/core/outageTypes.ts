@@ -19,6 +19,38 @@ export interface Outage {
 }
 
 /**
+ * 规整 gRPC 传过来的 outage 数值字段。
+ *
+ * ## 为什么需要
+ *
+ * protobuf 的 `int64`/`uint64` 在 JSON 序列化后是**字符串** ——
+ * DishyMock 实测 `startTimestamp: "1793671076044"`, `durationMs: "2109"`。
+ * 而 `Outage` 类型把它们声明成 number, 于是：
+ * - `sum + h.durationMs` 变成**字符串拼接** ⇒ 平均时长算出 `3.77e+222`
+ * - `durationMs <= 10000` 的比较会因字符串参与而走出错结果
+ *
+ * 所以类型上放宽成 `number | string`, 由 `normalizeOutage()` 统一转成 number。
+ */
+export type RawOutage = Omit<Outage, 'startTimestamp' | 'durationMs'> & {
+  startTimestamp: number | string;
+  durationMs: number | string;
+};
+
+/** 把 raw outage 规整成字段类型正确的 Outage */
+export function normalizeOutage(raw: RawOutage): Outage {
+  const num = (v: number | string): number => {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return {
+    ...raw,
+    startTimestamp: num(raw.startTimestamp),
+    durationMs: num(raw.durationMs),
+  };
+}
+
+/**
  * Outage 原因分类
  * 
  * 从 sparky8512 的实现中提取的主要 cause 类型：
@@ -37,6 +69,14 @@ export interface Outage {
  * - UNKNOWN: 未知原因
  */
 export enum OutageCause {
+  /**
+   * 明确的卫星切换标识（DishyMock 发的是 HANDOFF / SWITCHING）。
+   *
+   * ⚠️ 之前这两个值不在枚举里 ⇒ `parseOutageCause('HANDOFF')` 落到 UNKNOWN,
+   * 于是「明确切换」和「原因未知」在 UI 上无法区分。
+   */
+  HANDOFF = 'HANDOFF',
+  SWITCHING = 'SWITCHING',
   BOOTING = 'BOOTING',
   STOWED = 'STOWED',
   THERMAL_SHUTDOWN = 'THERMAL_SHUTDOWN',
@@ -136,6 +176,8 @@ export function parseOutageCause(causeStr: string): OutageCause {
   }
   
   // 模糊匹配
+  if (upper.includes('HANDOFF') || upper.includes('HANDOVER')) return OutageCause.HANDOFF;
+  if (upper.includes('SWITCHING') || upper.includes('SATELLITE_CHANGE')) return OutageCause.SWITCHING;
   if (upper.includes('BOOT')) return OutageCause.BOOTING;
   if (upper.includes('STOW')) return OutageCause.STOWED;
   if (upper.includes('THERMAL') || upper.includes('OVERHEAT')) return OutageCause.THERMAL_SHUTDOWN;

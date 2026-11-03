@@ -7,9 +7,11 @@
 
 import {
   Outage,
+  RawOutage,
   OutageCause,
   isHandoffOutage,
   parseOutageCause,
+  normalizeOutage,
   HANDOFF_MAX_DURATION_MS,
 } from './outageTypes';
 
@@ -27,6 +29,31 @@ export interface HandoffEvent {
   parsedCause: OutageCause;
   /** 是否为明确的切换标识（vs 隐式推断） */
   isExplicit: boolean;
+}
+
+/**
+ * 把 outage 的开始时间戳规整成**毫秒级 epoch**。
+ *
+ * ## 单位约定
+ *
+ * DishyMock 的 `outages[].startTimestamp` 发的是**毫秒**
+ * （其 `src/state/types.ts` 明确写着「若 ≤1e12 会被被测方乘 1000, 所以必须填毫秒」）。
+ * 真实设备也用毫秒。
+ *
+ * 所以这里**不能再乘 1000** —— 之前乘了一次,
+ * 时间戳变成 `1793671076044000`（公元 58000 年）,
+ * 于是所有事件都落在时间窗之外, 图表上一个点都没有。
+ *
+ * 防御：若拿到的是**秒**级（< 1e11 约 1973 年后到 5138 年前的秒级时间戳
+ * 数量级会落在 1e9 ~ 1e11），补齐到毫秒。
+ */
+export function toEpochMs(startTimestamp: unknown): number {
+  const n = typeof startTimestamp === 'number'
+    ? startTimestamp
+    : Number(startTimestamp);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  // 秒级时间戳量级: 1e9 (2001年) ~ 1e11 (5138年); 毫秒级: 1e12 以上
+  return n < 1e11 ? n * 1000 : n;
 }
 
 /**
@@ -50,35 +77,40 @@ export interface OutageAnalysis {
  * @returns 分析结果
  */
 export function analyzeOutages(
-  outages: Outage[],
+  outages: RawOutage[],
 ): OutageAnalysis {
   const handoffs: HandoffEvent[] = [];
   const otherOutages: Outage[] = [];
 
-  for (const outage of outages) {
-    if (isHandoffOutage(outage)) {
-      // 转换为毫秒级时间戳
-      const timestampMs = outage.startTimestamp * 1000;
-      
+  for (const raw of outages) {
+    // 规整数值字段(protobuf 的 int64 序列化成字符串)
+    const normalized: Outage = normalizeOutage(raw);
+    const startTimestamp = normalized.startTimestamp;
+    const durationMs = normalized.durationMs;
+
+    if (isHandoffOutage(normalized)) {
+      // 规整成毫秒级 epoch(原始数据已是毫秒, 不要再乘 1000)
+      const timestampMs = toEpochMs(startTimestamp);
+
       // 兼容 DishyMock (triggered) 和真实设备 (cause)
-      const causeStr = outage.cause || outage.triggered || 'UNKNOWN';
-      
+      const causeStr = normalized.cause || normalized.triggered || 'UNKNOWN';
+
       // 判断是否为明确的切换标识
       const causeUpper = causeStr.toUpperCase();
-      const isExplicit = 
+      const isExplicit =
         causeUpper.includes('HANDOFF') ||
         causeUpper.includes('SWITCHING') ||
         causeUpper.includes('HANDOVER');
 
       handoffs.push({
         timestamp: timestampMs,
-        durationMs: outage.durationMs,
+        durationMs,
         cause: causeStr,
         parsedCause: parseOutageCause(causeStr),
         isExplicit,
       });
     } else {
-      otherOutages.push(outage);
+      otherOutages.push(normalized);
     }
   }
 
@@ -137,7 +169,13 @@ export function calculateAverageHandoffDuration(
 ): number | null {
   if (handoffs.length === 0) return null;
   
-  const totalDuration = handoffs.reduce((sum, h) => sum + h.durationMs, 0);
+  // ⚠️ 累加前显式转 number ——
+  //   protobuf 的 int64 序列化成字符串, 直接 `sum + h.durationMs`
+  //   会变成字符串拼接(0 + "2109" = "02109"), 平均时长算出 3.77e+222 这种垃圾值。
+  const totalDuration = handoffs.reduce(
+    (sum, h) => sum + (Number.isFinite(h.durationMs) ? h.durationMs : 0),
+    0
+  );
   return totalDuration / handoffs.length;
 }
 

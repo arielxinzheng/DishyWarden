@@ -8,6 +8,7 @@ import type { AppConfig, CollectorConfig, PrometheusConfig, GrafanaConfig, Probe
 import type { HistorySample, HistorySummary, PruneResult, StorageStats, ObstructionEvent } from '../storage/types';
 import type { RouterProbeResult } from '../core/routerProbeTypes';
 import type { ProbeResult, ProbeNodeState } from '../core/probeRunner';
+import type { HandoffEvent } from '../core/outageAnalyzer';
 
 /**
  * Electron API 接口定义
@@ -80,6 +81,9 @@ export interface ElectronAPI {
 
   // 取所有探针节点的当前状态
   getProbeStates: () => Promise<ProbeNodeState[]>;
+
+  // 取区间内的卫星切换事件(渲染层标注 ★ 卫星切换 点用)
+  getHandoffs: (seconds: number) => Promise<HandoffEvent[]>;
 
   // 手动探测某个节点一次
   probeNodeNow: (nodeId: string) => Promise<ProbeResult | null>;
@@ -207,6 +211,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('update-probe-config', config),
 
   getProbeStates: () => ipcRenderer.invoke('get-probe-states'),
+
+  getHandoffs: (seconds: number) => ipcRenderer.invoke('get-handoffs', seconds),
 
   probeNodeNow: (nodeId: string) => ipcRenderer.invoke('probe-node-now', nodeId),
 
