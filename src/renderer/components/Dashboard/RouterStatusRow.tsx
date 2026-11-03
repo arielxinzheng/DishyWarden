@@ -20,6 +20,7 @@
 import { useEffect, useState } from 'react';
 import { Router, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import type { RouterProbeResult } from '../../../core/routerProbeTypes';
+import { isValidProbe } from './routerProbeShape';
 
 export function RouterStatusRow() {
   const [probe, setProbe] = useState<RouterProbeResult | null>(null);
@@ -34,7 +35,19 @@ export function RouterStatusRow() {
         if (typeof window === 'undefined' || !window.electronAPI?.getRouterProbe) return;
         const result = await window.electronAPI.getRouterProbe();
         if (!cancelled) {
-          setProbe(result);
+          // ⚠️ **IPC 返回值的类型只在编译期存在, 运行时没人校验** ——
+          //   `getRouterProbe()` 声明返回 `RouterProbeResult | null`,
+          //   但那只是 TypeScript 的承诺。实际拿到的可能是
+          //   `undefined`(handler 没返回)、`[]`(探针 stub 返回了别的形状),
+          //   或是缺字段的对象。
+          //
+          //   之前直接 `setProbe(result)` 然后在渲染里
+          //   `probe.rttMs !== null ? probe.rttMs.toFixed(2)` ——
+          //   `undefined !== null` **为真** ⇒ 对 undefined 调 .toFixed()
+          //   ⇒ TypeError ⇒ 整页被 ErrorBoundary 接管。
+          //
+          //   所以这里做**形状校验**, 不合格就当"没有数据"。
+          setProbe(isValidProbe(result) ? result : null);
           setError(null);
         }
       } catch (e) {
@@ -88,10 +101,17 @@ export function RouterStatusRow() {
           <span className="text-xs text-slate-300 truncate">
             路由器
             <span className="text-muted-foreground ml-1.5 font-mono">
-              {probe.rttMs !== null ? `RTT ${probe.rttMs.toFixed(2)}ms` : 'RTT —'}
+              {/* ⚠️ 用 `!= null` 而不是 `!== null` ——
+                  后者对 `undefined` 为真, 会对 undefined 调 .toFixed() 崩掉。
+                  `isValidProbe` 已经挡住形状不对的值, 这里再兜一层数值。 */}
+              {probe.rttMs != null && Number.isFinite(probe.rttMs)
+                ? `RTT ${probe.rttMs.toFixed(2)}ms`
+                : 'RTT —'}
             </span>
             <span className="text-muted-foreground ml-1.5">
-              丢包 {(probe.packetLoss * 100).toFixed(0)}%
+              丢包 {Number.isFinite(probe.packetLoss)
+                ? (probe.packetLoss * 100).toFixed(0)
+                : '0'}%
             </span>
           </span>
         </div>
@@ -116,7 +136,8 @@ export function RouterStatusRow() {
       {probe.timestamp && (
         <div className="mt-1 text-[10px] text-muted-foreground font-mono">
           {new Date(probe.timestamp).toLocaleTimeString('zh-CN', { hour12: false })} 采集
-          {probe.httpOk !== null && (
+          {/* ⚠️ 同样用 `!= null` —— `httpOk` 未定义时不应显示 HTTP 行 */}
+          {probe.httpOk != null && (
             <span className="ml-2">
               HTTP {probe.httpOk ? '正常' : '异常'}
             </span>
