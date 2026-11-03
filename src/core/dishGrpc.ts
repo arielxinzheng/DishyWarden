@@ -274,7 +274,7 @@ export class DishGrpcClient {
   /**
    * 拉取历史数据（包含 outages）
    * 
-   * 走 dishGetHistory 分支。响应包含：
+   * 走 getHistory 请求分支，响应在 dishGetHistory 键上。响应包含：
    * - currentTimestamp: 当前时间戳（秒）
    * - popPingLatencyMs: PoP ping 延迟数组
    * - downlinkThroughputBps: 下行吞吐量数组
@@ -285,7 +285,7 @@ export class DishGrpcClient {
    * - outages: 中断事件数组（关键：包含卫星切换）
    */
   async getHistory(timeoutMs = 8000): Promise<Record<string, unknown>> {
-    const res = await this.call({ id: Date.now() % 100000, dishGetHistory: {} }, timeoutMs);
+    const res = await this.call({ id: Date.now() % 100000, getHistory: {} }, timeoutMs);
     const history = res.dishGetHistory as Record<string, unknown> | undefined;
     if (!history) {
       throw new Error(`响应里没有 dishGetHistory (顶层键: ${Object.keys(res).join(', ')})`);
