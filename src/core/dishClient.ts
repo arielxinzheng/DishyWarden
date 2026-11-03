@@ -272,6 +272,17 @@ export class DishClient {
       if (v === true) alerts.push(k);
     }
 
+    // 原始值
+    const rawDropRate = num(status.popPingDropRate, prev?.popPingDropRate ?? 0);
+    const downlinkBps = num(status.downlinkThroughputBps, 0);
+
+    // 数据合理性检查：吞吐量高但丢包率 100% 是数据源异常
+    // 当下行 > 50 Mbps 且丢包率 >= 95% 时，修正为 0
+    const sanitizedDropRate = 
+      downlinkBps > 50e6 && rawDropRate >= 0.95
+        ? 0
+        : rawDropRate;
+
     const telemetry: TelemetryData = {
       // 协议里没有 state 枚举 (DishyMock proto 明确注明"被测方全程不读"),
       // 所以连接状态只能从实际链路指标推导 —— 见 deriveState()
@@ -279,8 +290,8 @@ export class DishClient {
       uptime: num(deviceState.uptimeS, prev?.uptime ?? 0),
 
       popPingLatencyMs: num(status.popPingLatencyMs, 0),
-      popPingDropRate: num(status.popPingDropRate, prev?.popPingDropRate ?? 0),
-      downlinkThroughputBps: num(status.downlinkThroughputBps, 0),
+      popPingDropRate: sanitizedDropRate,
+      downlinkThroughputBps: downlinkBps,
       uplinkThroughputBps: num(status.uplinkThroughputBps, 0),
 
       snr,
