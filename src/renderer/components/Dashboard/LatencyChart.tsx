@@ -13,7 +13,12 @@ import {
   showsSatelliteHandoffs,
   type LatencyMode,
 } from './latencyModes';
-import { useEffect, useState } from 'react';
+import {
+  computeLatencyAxisScale,
+  computeLatencyPeak,
+  quantizeAxisMax,
+} from './latencyAxis';
+import { useEffect, useRef, useState } from 'react';
 
 interface LatencyChartProps {
   height?: number;
@@ -39,6 +44,49 @@ interface LatencyChartProps {
 
 export function LatencyChart({ height = 260, history, isLoading = false, handoffs = [] }: LatencyChartProps) {
   const [mode, setMode] = useState<LatencyMode>(DEFAULT_MODE);
+  /**
+   * Y 轴目标量程（顶格 + 刻度间隔）。
+   *
+   * 两者必须**一起**定 —— 间隔是顶格的函数(ECharts 用 nice(span/splitNumber)),
+   * 顶格变了间隔就会跳, 刻度整排重排, 过渡就不是"平滑拉伸"而是闪烁。
+   */
+  const [targetScale, setTargetScale] = useState(() => computeLatencyAxisScale(0));
+  /**
+   * Y 轴**当前显示**的顶格。
+   *
+   * 用 rAF 缓动追向目标 ⇒ 标签切换 / 峰值变化时是"平滑拉伸",
+   * 而不是 ECharts 直接跳变。
+   */
+  const [axisMax, setAxisMax] = useState<number>(() => computeLatencyAxisScale(0).max);
+  /**
+   * 动画的**连续**进度值(不量化)。
+   *
+   * ⚠️ 必须与 `axisMax` 分开 ——
+   *   之前把量化后的值直接拿去缓动, 于是每帧的 diff 都是"跳一整格",
+   *   4 帧就跑完了, 看着是"跳变"而不是"拉伸"。
+   *   分开之后: 连续值负责缓动曲线, 显示值负责取整 ——
+   *   观感是平滑的台阶(每格一个间隔), 而不是几级瞬跳。
+   */
+  const animValueRef = useRef<number>(computeLatencyAxisScale(0).max);
+  /**
+   * 上一次**落定**时的刻度间隔。
+   *
+   * 用来在下一段过渡开始时选一个「不细于两端」的间隔:
+   * 缩小方向(如 200 → 10)若用目标的 2ms 细间隔, 会瞬出 85 个刻度 ——
+   * 既挤爆标签, ECharts 还会因避让而丢掉 0 标签。
+   */
+  const settledIntervalRef = useRef<number>(computeLatencyAxisScale(0).interval);
+  /**
+   * 本次过渡期间**钉死**的刻度间隔。
+   *
+   * 钉死 ⇒ 整个动画过程中网格线原地不动, 只有顶边在移动。
+   * 落定后交还给目标量程的自然间隔(见下面的 effectiveInterval)。
+   */
+  const [pinnedInterval, setPinnedInterval] = useState<number>(
+    () => computeLatencyAxisScale(0).interval,
+  );
+  /** 上一个目标量程 —— 用于识别「开始了一段新过渡」 */
+  const lastTargetRef = useRef<{ max: number; interval: number }>(targetScale);
   const [chartData, setChartData] = useState<{
     time: string[];
     latency: number[];
@@ -123,7 +171,80 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
     }
 
     setChartData({ time, latency, loss, satellites });
+
+    // Y 轴目标量程: 按当前可见数据的峰值取整(最小值恒为 0)
+    // 顶格与刻度间隔一起算 —— 间隔是顶格的函数, 分开算会各自漂移。
+    setTargetScale(computeLatencyAxisScale(computeLatencyPeak(latency)));
   }, [history, mode, handoffs]);
+
+  // 目标量程变化 ⇒ 开始新的一段过渡, 锁定这次的刻度间隔。
+  //
+  // ⚠️ 只在**目标变化**时算一次 —— 若放进动画 effect 里,
+  //   interval 会每帧被重算, 钉死就失效了。
+  //
+  // ⚠️ 用 `settledIntervalRef` 而不是「累积的最大值」——
+  //   累积会让间隔只增不减(50 → 100 → 200 …), 用几个来回后
+  //   顶格 10ms 的图也会用 200ms 的间隔, 标签只剩 [0, 10]。
+  useEffect(() => {
+    if (lastTargetRef.current.max === targetScale.max) return;
+    lastTargetRef.current = targetScale;
+    const pinned = Math.max(settledIntervalRef.current, targetScale.interval);
+    setPinnedInterval(pinned);
+  }, [targetScale]);
+
+  /**
+   * Y 轴顶格的平滑过渡。
+   *
+   * 用 rAF 每帧把显示值向目标逼近(指数缓动), 到位后停在精确值上 ——
+   * 最终标签一定落在阶梯值上, 中途只是过渡。
+   *
+   * 为什么不用 ECharts 的 universalTransition:
+   * 它只对**数据**做过渡, 坐标轴的 min/max 是直接赋值的, 会跳变。
+   */
+  useEffect(() => {
+    const targetMax = targetScale.max;
+    // 量化用**钉死的间隔**, 不用目标间隔 ——
+    //   缩小方向若用目标间隔, 中途的 max 会落在细间隔的格点上,
+    //   顶边标签碎成 2/4/6…; 钉死则全程都是同一把尺子。
+    const interval = pinnedInterval;
+    if (targetMax === axisMax) return;
+
+    let raf = 0;
+    const step = () => {
+      // 1) 连续值缓动(指数衰减, 每帧走完剩余量的 15%)
+      const next = animValueRef.current + (targetMax - animValueRef.current) * 0.15;
+      animValueRef.current = Math.abs(targetMax - next) < 0.01 ? targetMax : next;
+
+      // 2) 显示值量化到刻度间隔的整数倍
+      //
+      //    ⚠️ 必须量化, 不能让 max 停在非整刻度上 ——
+      //    ECharts 会把 extent[1](顶边)额外塞进刻度列表,
+      //    于是会出现:
+      //      max=10.40 → labels=[0,2,4,6,8,10,**10**]  ← 顶部标签重复
+      //      max=171.5 → labels=[**2**,4,...,170]        ← 底部 0 标签消失
+      //    量化后 max 永远是间隔的整数倍 ⇒ 顶边就是最后一个刻度,
+      //    不会重复也不会丢 0。
+      setAxisMax(quantizeAxisMax(animValueRef.current, interval, targetMax));
+
+      if (animValueRef.current !== targetMax) {
+        raf = requestAnimationFrame(step);
+      } else {
+        // 落定 ⇒ 记住这段量程的自然间隔, 供下一段过渡选间隔用。
+        settledIntervalRef.current = targetScale.interval;
+      }
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [targetScale, axisMax, pinnedInterval]);
+
+  /**
+   * 实际生效的刻度间隔。
+   *
+   * - 过渡中 ⇒ 用钉死的 `pinnedInterval`(网格线原地不动)
+   * - 落定后 ⇒ 用目标量程的自然间隔(与 ECharts 自己算的一致)
+   */
+  const effectiveInterval =
+    axisMax === targetScale.max ? targetScale.interval : pinnedInterval;
 
   const option = {
     backgroundColor: 'transparent',
@@ -171,8 +292,18 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
       {
         type: 'value',
         name: 'ms',
-        min: 20,
-        max: 100,
+        // ⚠️ 最小值**恒为 0** —— 底部必须是 0ms, 否则视觉上会暗示
+        //   "延迟从来没低于 20ms"。之前硬编码 min: 20 是错的。
+        min: 0,
+        // 顶格按可见数据的峰值动态取整(见 latencyAxis.ts)
+        max: axisMax,
+        // ⚠️ 刻度间隔**必须显式钉死** ——
+        //   ECharts 默认按 nice((max-min)/splitNumber) 现算间隔,
+        //   而 max 在动画途中是连续变化的小数 ⇒ 间隔会一路跳
+        //   (实测 10→50 的过渡里跳了 6 次: 2→3→5→10→20→30→50),
+        //   刻度整排重排 —— 看着像闪烁, 不是平滑拉伸。
+        //   钉死间隔后网格线原地不动, 只有顶边在移动。
+        interval: effectiveInterval,
         nameTextStyle: {
           color: '#64748b',
         },
@@ -183,7 +314,13 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
         },
         axisLabel: {
           color: '#64748b',
+          // 过渡途中的值已取整, 这里再兜一层, 保证标签是整数
+          formatter: (value: number) => String(Math.round(value)),
         },
+        // 轴范围变化时平滑过渡(ECharts 侧再加一道, 与 rAF 缓动叠加)
+        animation: true,
+        animationDuration: 300,
+        animationEasing: 'cubicOut',
       },
       {
         type: 'value',
