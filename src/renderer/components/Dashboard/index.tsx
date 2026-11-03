@@ -584,6 +584,7 @@ export default function Dashboard() {
                 history={history}
                 isLoading={historyLoading}
                 handoffs={handoffs}
+                timeRange={timeRange}
               />
             </CardContent>
           </Card>

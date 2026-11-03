@@ -18,6 +18,12 @@ import {
   computeLatencyPeak,
   quantizeAxisMax,
 } from './latencyAxis';
+import {
+  resolveHandoffsVisible,
+  withToggledOverride,
+  type HandoffOverrides,
+  type TimeRangeKey,
+} from './handoffVisibility';
 import { useEffect, useRef, useState } from 'react';
 
 interface LatencyChartProps {
@@ -25,6 +31,13 @@ interface LatencyChartProps {
   /** 由上层统一获取, 组件只负责渲染, 不再自己发起查询 */
   history: HistorySample[];
   isLoading?: boolean;
+  /**
+   * 全局时间范围 —— 决定卫星切换标记的**默认**可见性。
+   *
+   * 15m 默认开(事件稀疏), 1H/6H 默认关(事件密集会糊住折线)。
+   * 用户手动点过图例后, 以用户的选择为准。
+   */
+  timeRange?: TimeRangeKey;
   /**
    * 卫星切换事件(来自 dishGetHistory 的 outages)。
    *
@@ -42,8 +55,38 @@ interface LatencyChartProps {
   handoffs?: HandoffEvent[];
 }
 
-export function LatencyChart({ height = 260, history, isLoading = false, handoffs = [] }: LatencyChartProps) {
+export function LatencyChart({
+  height = 260,
+  history,
+  isLoading = false,
+  handoffs = [],
+  timeRange = '1h',
+}: LatencyChartProps) {
   const [mode, setMode] = useState<LatencyMode>(DEFAULT_MODE);
+  /**
+   * 用户对卫星切换标记的**手动**选择, **按时间范围分别记忆**。
+   *
+   * 某个键不存在 = 用户还没在这个范围点过图例 ⇒ 用该范围的默认值
+   * (`15m` 开 / `1h`、`6h` 关)。
+   *
+   * 为什么按范围分别记:
+   *   - 用户点图例必须**立刻见效** —— 点了没反应是坏的
+   *   - 但每个范围要保留自己的默认值 —— 否则在 15m 里点一下,
+   *     切到 1H 就会看到一堆密集的 ★ 糊住折线
+   */
+  const [handoffOverrides, setHandoffOverrides] = useState<HandoffOverrides>({});
+
+  /**
+   * 卫星切换标记当前是否显示。
+   *
+   * 三层判据(见 handoffVisibility.ts):
+   *   ① 延迟维度 —— Local(网关)模式**永远不显示**(本地链路不经卫星)
+   *   ② 时间范围 —— 15m 默认开, 1H/6H 默认关
+   *   ③ 用户手动 —— 该范围点过图例就以用户的选择为准
+   */
+  const handoffsVisible = resolveHandoffsVisible(timeRange, handoffOverrides);
+  /** 图层是否要画 —— Local 模式一律不画 */
+  const showHandoffSeries = showsSatelliteHandoffs(mode) && handoffsVisible;
   /**
    * Y 轴目标量程（顶格 + 刻度间隔）。
    *
@@ -149,7 +192,17 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
     //
     // ⚠️ Local(网关)模式下**必须清空** —— 本地链路不经卫星,
     // 标切换点是语义错误(会把本地故障误指向卫星)。
-    if (showsSatelliteHandoffs(mode) && handoffs.length > 0 && sampleTimestamps.length > 0) {
+    //
+    // ⚠️ 用户点掉图例时也必须清空 —— 需求是"星星瞬间消失",
+    // 只把 series 的 `show` 设成 false 的话, ECharts 仍会把它
+    // 算进 tooltip 的命中测试, 而且数据留在 option 里,
+    // 下一次 setOption 判定 series 列表变化时容易闪回。
+    // 清空数据 + 关图层, 两道都做。
+    if (
+      showHandoffSeries &&
+      handoffs.length > 0 &&
+      sampleTimestamps.length > 0
+    ) {
       const usedIndices = new Set<number>();
       for (const h of handoffs) {
         let bestIndex = -1;
@@ -175,7 +228,7 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
     // Y 轴目标量程: 按当前可见数据的峰值取整(最小值恒为 0)
     // 顶格与刻度间隔一起算 —— 间隔是顶格的函数, 分开算会各自漂移。
     setTargetScale(computeLatencyAxisScale(computeLatencyPeak(latency)));
-  }, [history, mode, handoffs]);
+  }, [history, mode, handoffs, showHandoffSeries]);
 
   // 目标量程变化 ⇒ 开始新的一段过渡, 锁定这次的刻度间隔。
   //
@@ -383,10 +436,13 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
         name: '卫星切换',
         type: 'scatter',
         data: chartData.satellites,
-        // Local(网关)模式下整个 series 都不画 ——
-        // 本地链路不经卫星, 标切换点是语义错误。
-        // 双保险: 数据已清空(见上面的 effect), 这里再关掉图层本身。
-        show: showsSatelliteHandoffs(mode),
+        // ⚠️ 图层显隐有两道闸:
+        //   ① Local(网关)模式 —— 本地链路不经卫星, 标切换点是语义错误
+        //   ② 用户点掉图例 —— 需求是"星星瞬间消失"
+        // 数据也已在上面的 effect 里清空(见 `showHandoffSeries` 判据),
+        // 这里再关掉图层本身 —— 双保险, 避免 setOption 判定 series 列表
+        // 变化时闪回。
+        show: showHandoffSeries,
         symbolSize: 11,
         itemStyle: {
           color: '#f59e0b',
@@ -447,11 +503,38 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
         <span className="px-2 py-0.5 rounded bg-danger-red/15 text-danger-red">
           丢包率 (%)
         </span>
-        {/* Local(网关)模式不显示该图例 —— 与图上的 series 保持一致 */}
+        {/*
+          卫星切换图例 —— **可点击**切换显隐。
+
+          Local(网关)模式不显示该图例 —— 与图上的 series 保持一致
+          (本地链路不经卫星, 标切换点是语义错误)。
+
+          点击行为:
+            开着 → 星星瞬间消失, 文字置灰 + 删除线
+            关着 → 星星重新浮现, 文字恢复高亮
+        */}
         {showsSatelliteHandoffs(mode) && (
-          <span className="px-2 py-0.5 rounded bg-warning-orange/15 text-warning-orange">
+          <button
+            type="button"
+            onClick={() =>
+              setHandoffOverrides(
+                withToggledOverride(handoffOverrides, timeRange, handoffsVisible),
+              )
+            }
+            aria-pressed={handoffsVisible}
+            title={
+              handoffsVisible
+                ? '点击隐藏卫星切换标记'
+                : '点击显示卫星切换标记'
+            }
+            className={`px-2 py-0.5 rounded transition-colors ${
+              handoffsVisible
+                ? 'bg-warning-orange/15 text-warning-orange'
+                : 'bg-muted/40 text-muted-foreground/50 line-through'
+            }`}
+          >
             ★ 卫星切换
-          </span>
+          </button>
         )}
       </div>
 
