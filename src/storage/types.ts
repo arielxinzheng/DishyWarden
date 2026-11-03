@@ -121,6 +121,21 @@ export interface StorageStats {
 export interface PruneResult {
   samples: number;
   hourly: number;
+  handoffs?: number;  // 卫星切换事件清理数量
+}
+
+/** 卫星切换事件 */
+export interface HandoffEvent {
+  /** 切换发生时间戳（毫秒级 epoch） */
+  timestamp: number;
+  /** 切换持续时长（毫秒） */
+  durationMs: number;
+  /** 原始 outage cause */
+  cause: string;
+  /** 解析后的 cause 枚举 */
+  parsedCause: string;
+  /** 是否为明确的切换标识（vs 隐式推断） */
+  isExplicit: boolean;
 }
 
 /** 遮挡事件 —— 连续 currently_obstructed = 1 的时段 */

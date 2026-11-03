@@ -573,6 +573,13 @@ export class DishClient {
   getConfig(): DishConfig {
     return { ...this.config };
   }
+  
+  /**
+   * 获取 gRPC 客户端实例（用于高级操作，如 getHistory）
+   */
+  getGrpcClient(): DishGrpcClient | null {
+    return this.grpc;
+  }
 }
 
 /**

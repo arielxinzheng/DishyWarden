@@ -24,6 +24,7 @@ import {
   SAMPLE_INTERVAL_MS,
   SAMPLE_RETENTION_DAYS,
   HOURLY_RETENTION_DAYS,
+  HANDOFF_RETENTION_DAYS,
 } from './schema';
 import type {
   HistoryQuery,
@@ -635,14 +636,146 @@ export class TelemetryStore {
   prune(now: number = Date.now()): PruneResult {
     const sampleCutoff = now - SAMPLE_RETENTION_DAYS * DAY_MS;
     const hourlyCutoff = now - HOURLY_RETENTION_DAYS * DAY_MS;
+    const handoffCutoff = now - HANDOFF_RETENTION_DAYS * DAY_MS;
 
     const samples = this.db.prepare('DELETE FROM telemetry_samples WHERE ts < ?').run(sampleCutoff);
     const hourly = this.db.prepare('DELETE FROM telemetry_hourly WHERE bucket_ts < ?').run(hourlyCutoff);
+    const handoffs = this.db.prepare('DELETE FROM satellite_handoffs WHERE ts < ?').run(handoffCutoff);
 
     this.db.pragma('wal_checkpoint(TRUNCATE)');
     this.db.pragma('optimize');
 
-    return { samples: samples.changes, hourly: hourly.changes };
+    return { 
+      samples: samples.changes, 
+      hourly: hourly.changes,
+      handoffs: handoffs.changes,
+    };
+  }
+
+  /**
+   * 写入卫星切换事件
+   * 
+   * @param handoff 卫星切换事件
+   */
+  appendHandoff(handoff: {
+    timestamp: number;
+    durationMs: number;
+    cause: string;
+    parsedCause: string;
+    isExplicit: boolean;
+  }): void {
+    const insert = this.db.prepare(`
+      INSERT OR REPLACE INTO satellite_handoffs 
+      (ts, duration_ms, cause, parsed_cause, is_explicit)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    
+    insert.run(
+      handoff.timestamp,
+      handoff.durationMs,
+      handoff.cause,
+      handoff.parsedCause,
+      handoff.isExplicit ? 1 : 0
+    );
+  }
+
+  /**
+   * 批量写入卫星切换事件
+   * 
+   * @param handoffs 卫星切换事件数组
+   */
+  appendHandoffs(handoffs: Array<{
+    timestamp: number;
+    durationMs: number;
+    cause: string;
+    parsedCause: string;
+    isExplicit: boolean;
+  }>): void {
+    if (handoffs.length === 0) return;
+    
+    const insert = this.db.prepare(`
+      INSERT OR REPLACE INTO satellite_handoffs 
+      (ts, duration_ms, cause, parsed_cause, is_explicit)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    
+    const transaction = this.db.transaction((events: typeof handoffs) => {
+      for (const event of events) {
+        insert.run(
+          event.timestamp,
+          event.durationMs,
+          event.cause,
+          event.parsedCause,
+          event.isExplicit ? 1 : 0
+        );
+      }
+    });
+    
+    transaction(handoffs);
+  }
+
+  /**
+   * 查询卫星切换事件历史
+   * 
+   * @param fromMs 起始时间 epoch ms
+   * @param toMs 结束时间 epoch ms
+   * @param limit 最多返回多少条事件（默认 100）
+   * @returns 切换事件列表，按时间倒序（最新的在前）
+   */
+  queryHandoffs(fromMs: number, toMs: number, limit: number = 100): Array<{
+    timestamp: number;
+    durationMs: number;
+    cause: string;
+    parsedCause: string;
+    isExplicit: boolean;
+  }> {
+    const rows = this.db
+      .prepare(`
+        SELECT ts, duration_ms, cause, parsed_cause, is_explicit
+        FROM satellite_handoffs
+        WHERE ts >= ? AND ts < ?
+        ORDER BY ts DESC
+        LIMIT ?
+      `)
+      .all(fromMs, toMs, limit);
+
+    return rows.map((r: any) => ({
+      timestamp: r.ts as number,
+      durationMs: r.duration_ms as number,
+      cause: r.cause as string,
+      parsedCause: r.parsed_cause as string,
+      isExplicit: (r.is_explicit as number) === 1,
+    }));
+  }
+
+  /**
+   * 统计卫星切换频率
+   * 
+   * @param fromMs 起始时间 epoch ms
+   * @param toMs 结束时间 epoch ms
+   * @returns 切换次数和平均持续时长
+   */
+  summarizeHandoffs(fromMs: number, toMs: number): {
+    count: number;
+    avgDurationMs: number | null;
+    explicitCount: number;
+  } {
+    const row = this.db
+      .prepare(`
+        SELECT 
+          COUNT(*) as count,
+          AVG(duration_ms) as avg_duration,
+          SUM(CASE WHEN is_explicit = 1 THEN 1 ELSE 0 END) as explicit_count
+        FROM satellite_handoffs
+        WHERE ts >= ? AND ts < ?
+      `)
+      .get(fromMs, toMs) as any;
+
+    return {
+      count: (row?.count as number) ?? 0,
+      avgDurationMs: typeof row?.avg_duration === 'number' ? row.avg_duration : null,
+      explicitCount: (row?.explicit_count as number) ?? 0,
+    };
   }
 
   close(): void {

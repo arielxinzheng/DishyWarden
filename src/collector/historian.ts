@@ -18,6 +18,8 @@ import path from 'path';
 import { runProbe } from '../core/probeRunner';
 import { pingDefaultGateway } from '../core/gatewayDetector';
 import type { ProbeNodeConfig } from '../config/manager';
+import { analyzeOutages, summarizeOutageAnalysis, type HandoffEvent } from '../core/outageAnalyzer';
+import type { Outage } from '../core/outageTypes';
 
 export interface CollectorConfig {
   interval: number;           // 采集间隔（毫秒）
@@ -37,6 +39,10 @@ export interface CollectorStats {
   lastFailureTime: Date | null;
   uptime: number;
   anomalyCount: number;
+  /** 检测到的卫星切换次数 */
+  handoffCount: number;
+  /** 最近一次卫星切换时间 */
+  lastHandoffTime: Date | null;
 }
 
 export class DataCollector extends EventEmitter {
@@ -51,6 +57,10 @@ export class DataCollector extends EventEmitter {
   private store: TelemetryStore | null = null;
   /** 最近一次路由器探测结果 */
   private lastRouterProbe: RouterProbeResult | null = null;
+  /** 最近一次 history 拉取的时间戳（秒），避免重复分析 */
+  private lastHistoryTimestamp = 0;
+  /** 检测到的卫星切换事件（内存缓存） */
+  private handoffEvents: HandoffEvent[] = [];
   
   private stats: CollectorStats = {
     totalSamples: 0,
@@ -59,6 +69,8 @@ export class DataCollector extends EventEmitter {
     lastFailureTime: null,
     uptime: 0,
     anomalyCount: 0,
+    handoffCount: 0,
+    lastHandoffTime: null,
   };
 
   constructor(config: Partial<CollectorConfig> = {}) {
@@ -146,12 +158,13 @@ export class DataCollector extends EventEmitter {
         setTimeout(() => reject(new Error('Starlink 设备连接超时 (10s)')), 10000)
       );
       
-      // 并行采集 dish 遥测、router 探活、公网探针、本地网关
+      // 并行采集 dish 遥测、router 探活、公网探针、本地网关、history（包含 outages）
       const collectPromise = Promise.allSettled([
         this.client.getTelemetry(),
         this.routerProbe.probe(),
         this.probePublicLatency(),
         pingDefaultGateway(5), // 5 秒超时
+        this.analyzeHandoffs(),  // 分析卫星切换
       ]);
       
       const results = await Promise.race([
@@ -160,7 +173,7 @@ export class DataCollector extends EventEmitter {
       ]);
       
       // 解包 allSettled 结果
-      const [dishResult, routerResult, publicProbeResult, localGatewayResult] = results;
+      const [dishResult, routerResult, publicProbeResult, localGatewayResult, handoffResult] = results;
       
       // dish 失败时整帧失败（dish 是主数据源）
       if (dishResult.status === 'rejected') {
@@ -189,6 +202,40 @@ export class DataCollector extends EventEmitter {
         telemetry.localGatewayLatencyMs = localGatewayResult.value.rttMs ?? undefined;
       } else if (localGatewayResult.status === 'rejected') {
         console.warn('[Collector] 本地网关探测失败:', localGatewayResult.reason);
+      }
+      
+      // 处理卫星切换分析结果
+      if (handoffResult.status === 'fulfilled' && handoffResult.value) {
+        const newHandoffs = handoffResult.value;
+        if (newHandoffs.length > 0) {
+          this.handoffEvents.push(...newHandoffs);
+          this.stats.handoffCount += newHandoffs.length;
+          this.stats.lastHandoffTime = new Date(newHandoffs[newHandoffs.length - 1].timestamp);
+          
+          // 发送卫星切换事件
+          this.emit('handoffs', newHandoffs);
+          
+          console.log(`[Collector] 检测到 ${newHandoffs.length} 次卫星切换`);
+          
+          // 写入数据库
+          if (this.store) {
+            try {
+              this.store.appendHandoffs(
+                newHandoffs.map(h => ({
+                  timestamp: h.timestamp,
+                  durationMs: h.durationMs,
+                  cause: h.cause,
+                  parsedCause: h.parsedCause,
+                  isExplicit: h.isExplicit,
+                }))
+              );
+            } catch (error) {
+              console.error('[Collector] 写入卫星切换事件失败:', error);
+            }
+          }
+        }
+      } else if (handoffResult.status === 'rejected') {
+        console.warn('[Collector] 卫星切换分析失败:', handoffResult.reason);
       }
       
       // 添加时间戳
@@ -430,10 +477,82 @@ export class DataCollector extends EventEmitter {
   }
 
   /**
+   * 分析卫星切换事件（从 dishGetHistory 的 outages 中提取）
+   * 
+   * 返回自上次分析以来新增的切换事件，避免重复计数
+   */
+  private async analyzeHandoffs(): Promise<HandoffEvent[]> {
+    try {
+      // 通过 DishClient 获取 gRPC 客户端
+      const grpc = this.client.getGrpcClient();
+      if (!grpc) {
+        // gRPC 客户端未初始化（首次采集前）
+        return [];
+      }
+      
+      const history = await grpc.getHistory(8000);
+      const currentTimestamp = history.currentTimestamp as number | undefined;
+      const outages = history.outages as Outage[] | undefined;
+      
+      if (!currentTimestamp || !Array.isArray(outages) || outages.length === 0) {
+        return [];
+      }
+      
+      // 如果 currentTimestamp 没变，说明没有新数据
+      if (currentTimestamp <= this.lastHistoryTimestamp) {
+        return [];
+      }
+      
+      // 分析所有 outages
+      const analysis = analyzeOutages(outages);
+      
+      // 只返回新增的切换事件（timestamp > lastHistoryTimestamp）
+      const newHandoffs = analysis.handoffs.filter(
+        h => h.timestamp > this.lastHistoryTimestamp * 1000
+      );
+      
+      // 更新时间戳
+      this.lastHistoryTimestamp = currentTimestamp;
+      
+      // 输出分析摘要
+      if (newHandoffs.length > 0) {
+        const summary = summarizeOutageAnalysis(analysis);
+        console.log(`[Collector] Outage 分析: ${summary}`);
+      }
+      
+      return newHandoffs;
+    } catch (error) {
+      // getHistory 失败不影响主采集流程
+      console.warn('[Collector] getHistory 失败:', error instanceof Error ? error.message : error);
+      return [];
+    }
+  }
+
+  /**
    * 获取最近一次路由器探测结果
    */
   getRouterProbeResult(): RouterProbeResult | null {
     return this.lastRouterProbe;
+  }
+  
+  /**
+   * 获取检测到的卫星切换事件
+   * 
+   * @param seconds 时间范围（秒），默认 3600（1小时）
+   * @returns 时间范围内的切换事件
+   */
+  getHandoffEvents(seconds = 3600): HandoffEvent[] {
+    const cutoff = Date.now() - seconds * 1000;
+    return this.handoffEvents.filter(h => h.timestamp >= cutoff);
+  }
+  
+  /**
+   * 清空卫星切换事件缓存
+   */
+  clearHandoffEvents(): void {
+    this.handoffEvents = [];
+    this.stats.handoffCount = 0;
+    this.stats.lastHandoffTime = null;
   }
 }
 

@@ -23,14 +23,18 @@
  * v3: telemetry_hourly 增加 state 分布列(online_sec/offline_sec/searching_sec/booting_sec)
  * v4: 性能索引 - (state, ts) 和 (currently_obstructed, ts)
  * v5: telemetry_samples 增加 public_ping_ms 和 local_gateway_ms 列
+ * v6: 增加 satellite_handoffs 表，记录卫星切换事件
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
 
 /** 小时聚合保留天数 */
 export const HOURLY_RETENTION_DAYS = 400;
+
+/** 卫星切换事件保留天数 */
+export const HANDOFF_RETENTION_DAYS = 30;
 
 /** 采样间隔假设(毫秒), 用于估算流量与判断是否需要分桶 */
 export const SAMPLE_INTERVAL_MS = 30_000;
@@ -102,4 +106,16 @@ export const DDL = `
     -- 区分, 用户会把演示数据当成设备实测结果。
     source TEXT NOT NULL DEFAULT 'real'
   );
+
+  -- 卫星切换事件表（保留 30 天）
+  CREATE TABLE IF NOT EXISTS satellite_handoffs (
+    ts          INTEGER PRIMARY KEY,  -- 切换发生时间戳 (epoch ms)
+    duration_ms INTEGER NOT NULL,     -- 切换持续时长（毫秒）
+    cause       TEXT    NOT NULL,     -- 原始 outage cause 字符串
+    parsed_cause TEXT   NOT NULL,     -- 解析后的 OutageCause 枚举值
+    is_explicit INTEGER NOT NULL      -- 是否为明确的切换标识（1=是，0=否）
+  );
+
+  -- 索引: 时间范围查询（图表标记点、频率统计）
+  CREATE INDEX IF NOT EXISTS idx_handoffs_ts ON satellite_handoffs(ts);
 `;
