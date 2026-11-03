@@ -401,13 +401,28 @@ export class AlertManager extends EventEmitter {
         enabled: true,
         severity: 'warning',
         condition: (data) => {
-          // 判断逻辑：高丢包 + 低SNR + 无明显遮挡 = 很可能是天气因素
-          const highDropRate = (data.popPingDropRate || 0) > 0.10; // 10% 丢包
+          // 排除明显的断连/启动状态 - 这些不是天气问题
+          if (data.state === 'SEARCHING' || 
+              data.state === 'BOOTING' || 
+              data.state === 'OFFLINE' ||
+              data.state === 'STOWED') {
+            return false;
+          }
+
+          // 排除极端情况：100% 丢包通常是断线，不是天气
+          // 天气影响一般是部分丢包（20-80%）
+          const dropRate = data.popPingDropRate || 0;
+          if (dropRate >= 0.95) {
+            return false;
+          }
+
+          // 判断逻辑：中高丢包 + 低SNR + 无明显遮挡 = 很可能是天气因素
+          const moderateDropRate = dropRate > 0.10 && dropRate < 0.95; // 10-95% 丢包
           const lowSnr = (data.snr || 0) < 15; // SNR < 15 dB（考虑遮挡图基线值）
           const notObstructed = !data.currentlyObstructed && (data.fractionObstructed || 0) < 0.05; // 遮挡率 < 5%
           
           // 同时满足三个条件才判定为天气影响
-          return data.state === 'ONLINE' && highDropRate && lowSnr && notObstructed;
+          return data.state === 'ONLINE' && moderateDropRate && lowSnr && notObstructed;
         },
         summary: (data) => {
           const dropRate = ((data.popPingDropRate || 0) * 100).toFixed(1);
