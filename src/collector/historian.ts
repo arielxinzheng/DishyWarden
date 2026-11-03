@@ -536,6 +536,17 @@ export class DataCollector extends EventEmitter {
 
       // 分析所有 outages
       const analysis = analyzeOutages(outages);
+      
+      // 发出非切换类的 outage 事件（供告警系统使用）
+      if (analysis.otherOutages.length > 0) {
+        const newOutages = analysis.otherOutages.filter(
+          (o) => toEpochMs(o.startTimestamp) > this.lastHistoryTimestamp
+        );
+        if (newOutages.length > 0) {
+          this.emit('outages', newOutages);
+        }
+      }
+      
       if (analysis.handoffs.length === 0) {
         return [];
       }

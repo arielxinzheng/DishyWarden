@@ -675,6 +675,28 @@ export class AlertManager extends EventEmitter {
           '如果是 DishyMock 测试环境，确认 mock 进程正在运行',
         ],
       },
+
+      // 卫星无调度/容量不足（NO_SCHEDULE outage）
+      {
+        id: 'no_satellite_schedule',
+        name: '卫星无调度/容量不足',
+        enabled: true,
+        severity: 'warning',
+        condition: () => {
+          // 此规则不通过遥测数据触发，由 checkOutages() 独立检查
+          return false;
+        },
+        summary: () => '卫星网络容量不足，暂时无法分配调度',
+        description: () => '区域卫星网络拥塞或容量受限，可能影响连接质量',
+        evidence: () => ({}),
+        recommendations: [
+          '这是卫星网络容量受限的正常现象',
+          '通常在用户密集区域的高峰时段发生',
+          '等待网络负载降低，系统会自动恢复',
+          '如频繁发生，可能是所在区域用户数超过容量',
+          '考虑在非高峰时段使用以获得更好体验',
+        ],
+      },
     ];
 
     rules.forEach((rule) => {
@@ -846,6 +868,91 @@ export class AlertManager extends EventEmitter {
         });
         this.emit('alert:resolved', existing);
         console.log(`[AlertManager] Collector heartbeat restored`);
+      }
+    }
+  }
+
+  /**
+   * 检查 outage 事件并触发相应告警
+   * 
+   * @param outages - 从 dishGetHistory 获取的非切换类 outage 事件
+   */
+  async checkOutages(outages: Array<{ 
+    startTimestamp: number; 
+    durationMs: number; 
+    cause?: string;
+    triggered?: string;
+  }>): Promise<void> {
+    const now = new Date().toISOString();
+
+    // 检查 NO_SCHEDULE outage
+    const noScheduleOutages = outages.filter(o => {
+      const causeStr = (o.cause || o.triggered || '').toUpperCase();
+      return causeStr.includes('NO_SCHEDULE') || causeStr.includes('SCHEDULE');
+    });
+
+    if (noScheduleOutages.length > 0) {
+      const rule = this.rules.get('no_satellite_schedule');
+      if (!rule || !rule.enabled) return;
+
+      const alertKey = 'no_satellite_schedule:starlink';
+      
+      // 计算总持续时长
+      const totalDurationMs = noScheduleOutages.reduce((sum, o) => sum + o.durationMs, 0);
+      const avgDurationMs = totalDurationMs / noScheduleOutages.length;
+
+      const alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'> = {
+        alert_key: alertKey,
+        alert_type: 'no_satellite_schedule',
+        severity: 'warning',
+        status: 'ongoing',
+        first_seen: now,
+        last_seen: now,
+        occurrence_count: noScheduleOutages.length,
+        last_notified_at: null,
+        notification_count: 0,
+        summary: rule.summary({} as TelemetryData),
+        description: rule.description({} as TelemetryData),
+        evidence: JSON.stringify({
+          outage_count: noScheduleOutages.length,
+          total_duration_ms: totalDurationMs,
+          avg_duration_ms: avgDurationMs,
+          latest_timestamp: Math.max(...noScheduleOutages.map(o => o.startTimestamp)),
+        }),
+        recommendations: JSON.stringify(rule.recommendations),
+      };
+
+      const result = this.db.upsertAlert(alert);
+
+      if (result === 'new') {
+        const record = this.db.getAlertByKey(alertKey)!;
+        await this.sendNotification({ type: 'new', alert: record });
+        this.db.markNotified(alertKey);
+        this.emit('alert:new', record);
+        console.log(`[AlertManager] NO_SCHEDULE 告警: ${noScheduleOutages.length} 次, 平均 ${avgDurationMs.toFixed(0)}ms`);
+      } else if (result === 'ongoing') {
+        this.emit('alert:update', { alertKey });
+      }
+    } else {
+      // 检查是否需要解除告警
+      const alertKey = 'no_satellite_schedule:starlink';
+      const existing = this.db.getAlertByKey(alertKey);
+      if (existing && existing.status === 'ongoing') {
+        const duration = this.calculateDuration(existing.first_seen, now);
+
+        this.db.upsertAlert({
+          ...existing,
+          status: 'resolved',
+          last_seen: now,
+        });
+
+        await this.sendNotification({
+          type: 'resolved',
+          alert: { ...existing, status: 'resolved', last_seen: now },
+          duration,
+        });
+        this.emit('alert:resolved', existing);
+        console.log(`[AlertManager] NO_SCHEDULE 告警已恢复`);
       }
     }
   }

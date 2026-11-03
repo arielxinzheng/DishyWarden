@@ -64,6 +64,55 @@ function createWindow() {
 }
 
 /**
+ * 安全地给渲染层推消息。
+ *
+ * ## 为什么不能只用 `mainWindow.isDestroyed()`
+ *
+ * `webContents.send()` 内部走的是 `webContents.mainFrame`(`WebFrameMain`),
+ * 而**窗口活着不代表 frame 活着**:
+ *
+ * - 渲染进程崩溃 ⇒ frame 死, 但 window 与 webContents 都还"活着"
+ * - 退出时 GPU 进程被 SIGTERM ⇒ network service 重启 ⇒ frame 被回收
+ *
+ * 实测(强杀渲染进程后):
+ * ```
+ *   win.isDestroyed()               = false   ← 窗口活着
+ *   win.webContents.isDestroyed()   = false   ← webContents 也活着
+ *   win.webContents.mainFrame       → 访问即抛 / send 抛
+ *     "Render frame was disposed before WebFrameMain could be accessed"
+ * ```
+ *
+ * ⇒ 守卫必须**再查一层 frame**。
+ *
+ * @param channel IPC 频道
+ * @param payload  负载
+ * @returns 是否真的发出去了
+ */
+function sendToRenderer(channel: string, payload: unknown): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+
+  const wc = mainWindow.webContents;
+  if (wc.isDestroyed()) return false;
+
+  // frame 层守卫 —— 这一层才是真正会抛错的地方
+  try {
+    if (wc.mainFrame.isDestroyed()) return false;
+  } catch {
+    // 连 mainFrame 都访问不到 ⇒ frame 已经没了
+    return false;
+  }
+
+  try {
+    wc.send(channel, payload);
+    return true;
+  } catch (e) {
+    // 竞态: 查完 frame 之后、send 之前, frame 可能正好被回收
+    console.warn(`[Main] 推送到渲染层失败(${channel}):`, e);
+    return false;
+  }
+}
+
+/**
  * 启动后台服务（数据采集器 + Prometheus exporter + Prometheus）
  */
 async function startBackgroundServices() {
@@ -93,9 +142,7 @@ async function startBackgroundServices() {
     // 监听采集事件
     collector.on('data', (data) => {
       // 发送数据到渲染进程
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('telemetry-update', data);
-      }
+      sendToRenderer('telemetry-update', data);
 
       // 告警检查
       if (alertManager) {
@@ -107,8 +154,16 @@ async function startBackgroundServices() {
 
     collector.on('anomalies', (anomalies) => {
       console.log('[Main] Detected anomalies:', anomalies);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('anomalies-detected', anomalies);
+      sendToRenderer('anomalies-detected', anomalies);
+    });
+
+    // 监听 outage 事件（非切换类中断）
+    collector.on('outages', (outages) => {
+      console.log(`[Main] 检测到 ${outages.length} 个 outage 事件`);
+      if (alertManager) {
+        alertManager.checkOutages(outages).catch((err) => {
+          console.error('[Main] Outage check error:', err);
+        });
       }
     });
 
@@ -130,9 +185,7 @@ async function startBackgroundServices() {
           : result.error ?? '未知错误')
       );
       // 实时推给渲染层(设置页的状态灯)
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('probe-result', result);
-      }
+      sendToRenderer('probe-result', result);
     });
     probeRunner.start();
 
@@ -176,16 +229,12 @@ async function startBackgroundServices() {
     // 监听告警事件
     alertManager.on('alert:new', (alert) => {
       console.log('[Main] New alert:', alert.summary);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('alert-new', alert);
-      }
+      sendToRenderer('alert-new', alert);
     });
 
     alertManager.on('alert:resolved', (alert) => {
       console.log('[Main] Alert resolved:', alert.summary);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('alert-resolved', alert);
-      }
+      sendToRenderer('alert-resolved', alert);
     });
 
     console.log('[Main] Alert manager started');
@@ -381,16 +430,12 @@ ipcMain.handle('update-notification-config', (_event, config) => {
     // 重新绑定事件监听
     alertManager.on('alert:new', (alert) => {
       console.log('[Main] New alert:', alert.summary);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('alert-new', alert);
-      }
+      sendToRenderer('alert-new', alert);
     });
 
     alertManager.on('alert:resolved', (alert) => {
       console.log('[Main] Alert resolved:', alert.summary);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('alert-resolved', alert);
-      }
+      sendToRenderer('alert-resolved', alert);
     });
   }
 
