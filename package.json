@@ -87,6 +87,7 @@
   "build": {
     "appId": "com.slmonitor.app",
     "productName": "SLMonitor",
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },

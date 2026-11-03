@@ -13,8 +13,9 @@ export interface Outage {
   startTimestamp: number;
   /** 中断持续时长（毫秒） */
   durationMs: number;
-  /** 中断原因标识符 */
-  cause: string;
+  /** 中断原因标识符（DishyMock 字段名为 triggered，真实设备可能为 cause） */
+  triggered?: string;
+  cause?: string;
 }
 
 /**
@@ -99,18 +100,19 @@ export const HANDOFF_MAX_DURATION_MS = 10000; // 10 秒
  * @returns 是否为卫星切换
  */
 export function isHandoffOutage(outage: Outage): boolean {
-  const { cause, durationMs } = outage;
+  const causeStr = outage.cause || outage.triggered || '';
+  const { durationMs } = outage;
   
   // 1. 明确的切换标识符
   if (HANDOFF_INDICATORS.some(indicator => 
-    cause.toUpperCase().includes(indicator)
+    causeStr.toUpperCase().includes(indicator)
   )) {
     return true;
   }
   
   // 2. 隐式识别：短时中断 + 可能的 cause
   if (durationMs <= HANDOFF_MAX_DURATION_MS) {
-    const causeUpper = cause.toUpperCase();
+    const causeUpper = causeStr.toUpperCase();
     return IMPLICIT_HANDOFF_CAUSES.some(implicitCause => 
       causeUpper.includes(implicitCause)
     );

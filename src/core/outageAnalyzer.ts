@@ -60,8 +60,11 @@ export function analyzeOutages(
       // 转换为毫秒级时间戳
       const timestampMs = outage.startTimestamp * 1000;
       
+      // 兼容 DishyMock (triggered) 和真实设备 (cause)
+      const causeStr = outage.cause || outage.triggered || 'UNKNOWN';
+      
       // 判断是否为明确的切换标识
-      const causeUpper = outage.cause.toUpperCase();
+      const causeUpper = causeStr.toUpperCase();
       const isExplicit = 
         causeUpper.includes('HANDOFF') ||
         causeUpper.includes('SWITCHING') ||
@@ -70,8 +73,8 @@ export function analyzeOutages(
       handoffs.push({
         timestamp: timestampMs,
         durationMs: outage.durationMs,
-        cause: outage.cause,
-        parsedCause: parseOutageCause(outage.cause),
+        cause: causeStr,
+        parsedCause: parseOutageCause(causeStr),
         isExplicit,
       });
     } else {
