@@ -261,6 +261,23 @@ export class ProbeRunner extends EventEmitter {
   private timers = new Map<string, NodeJS.Timeout>();
   private states = new Map<string, ProbeNodeState>();
   private running = false;
+  /**
+   * 已停止标记。
+   *
+   * ⚠️ `stop()` 只清掉**定时器**, 但**在飞的那次探测还在跑** ——
+   * `runProbe()` 是异步的(带超时, 最长几秒), 它 resolve 之后
+   * `probeAndRecord` 仍会 `emit('result')`。
+   *
+   * 退出时序:
+   *   1. `before-quit` ⇒ `stopBackgroundServices()` ⇒ `probeRunner.stop()`
+   *   2. 但窗口/渲染进程此时可能已被销毁(GPU 被 SIGTERM ⇒
+   *      network service 重启 ⇒ frame 被回收)
+   *   3. 在飞的那次探测 resolve ⇒ emit ⇒ 往已销毁的 frame 推
+   *      ⇒ "Error sending from webFrameMain: Render frame was disposed"
+   *
+   * ⇒ 用这个标记让在飞的结果**直接丢弃**, 不再 emit。
+   */
+  private stopped = false;
 
   constructor(config: ProbeConfig) {
     super();
@@ -277,12 +294,17 @@ export class ProbeRunner extends EventEmitter {
   start(): void {
     if (this.running) return;
     this.running = true;
+    // 重启 ⇒ 清掉停止标记(上一次 stop() 置的)
+    this.stopped = false;
     this.scheduleAll();
   }
 
   /** 停止所有定时器 */
   stop(): void {
     this.running = false;
+    // ⚠️ 置位 stopped ⇒ 在飞的那次探测 resolve 后**不再 emit**
+    //    (否则会往已销毁的渲染层推, 见 stopped 字段的注释)
+    this.stopped = true;
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
   }
@@ -320,6 +342,11 @@ export class ProbeRunner extends EventEmitter {
 
   private async probeAndRecord(node: ProbeNodeConfig): Promise<void> {
     const result = await runProbe(node);
+
+    // ⚠️ 探测期间可能已经 stop() 了(退出流程) ——
+    //   此时不该再 emit: 渲染层可能已销毁, 推过去会抛
+    //   "Render frame was disposed before WebFrameMain could be accessed"。
+    if (this.stopped) return;
 
     const prev = this.states.get(node.id);
     const consecutiveFailures = result.ok ? 0 : (prev?.consecutiveFailures ?? 0) + 1;
