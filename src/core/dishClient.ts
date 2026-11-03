@@ -102,7 +102,22 @@ export interface TelemetryData {
   wifiClientCount?: number;              // 连接的 WiFi 客户端数量
   
   // 告警
-  alerts: string[];
+  alerts?: {
+    installPending?: boolean;
+    movingFastInHelloMobile?: boolean;
+    unexpectedLocation?: boolean;
+    [key: string]: boolean | undefined;
+  };
+  
+  // 服务状态
+  classOfService?: string;         // 服务等级: STANDARD, RESTRICTED, SUSPENDED, etc.
+  disablementCode?: string;        // 禁用代码: NOT_ACTIVATED, SERVICE_RESTRICTED, ACCOUNT_SUSPENDED, etc.
+  
+  // 设备问题列表
+  dishIssues?: Array<{
+    type: string;                 // 问题类型: SERVICE_RESTRICTION, etc.
+    [key: string]: unknown;
+  }>;
 }
 
 /**
@@ -265,12 +280,33 @@ export class DishClient {
     const currentlyObstructed = obstructionStats.currentlyObstructed === true;
     const fractionObstructed = num(obstructionStats.fractionObstructed, 0);
 
-    // 告警列表: dish 用 alerts 结构体, 这里摊平成字符串数组
+    // 告警列表: dish 用 alerts 结构体, 保留原始对象结构
     const alertObj = (status.alerts ?? {}) as Record<string, unknown>;
-    const alerts: string[] = [];
+    const alerts: Record<string, boolean> = {};
     for (const [k, v] of Object.entries(alertObj)) {
-      if (v === true) alerts.push(k);
+      if (typeof v === 'boolean') {
+        alerts[k] = v;
+      } else if (v === true) {
+        alerts[k] = true;
+      }
     }
+
+    // 服务状态
+    const classOfService = typeof status.classOfService === 'string' 
+      ? status.classOfService 
+      : prev?.classOfService;
+    
+    const disablementCode = typeof status.disablementCode === 'string'
+      ? status.disablementCode
+      : prev?.disablementCode;
+    
+    // 设备问题列表
+    const dishIssues = Array.isArray(status.dishIssues)
+      ? (status.dishIssues as Array<Record<string, unknown>>).map(issue => ({
+          type: typeof issue.type === 'string' ? issue.type : 'UNKNOWN',
+          ...issue,
+        }))
+      : prev?.dishIssues;
 
     // 原始值
     const rawDropRate = num(status.popPingDropRate, prev?.popPingDropRate ?? 0);
@@ -389,6 +425,9 @@ export class DishClient {
       ),
       
       alerts,
+      classOfService,
+      disablementCode,
+      dishIssues,
     };
 
     telemetry.state = this.deriveState(status, telemetry);

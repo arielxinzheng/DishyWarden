@@ -19,6 +19,31 @@ export interface AlertRule {
   description: (telemetry: TelemetryData) => string;
   evidence: (telemetry: TelemetryData) => Record<string, unknown>;
   recommendations: string[];
+  /**
+   * 这条规则的**生命周期由谁管理**。
+   *
+   * - `'telemetry'`(默认)—— 由 `checkTelemetry()` 负责:
+   *   condition 为真则触发, 为假则自动 resolve。
+   * - `'outages'` —— 由 `checkOutages()` 独立负责。
+   *   `checkTelemetry()` **完全跳过**这条规则(不触发也不 resolve)。
+   *
+   * ## 为什么需要这个标记
+   *
+   * 遥测驱动的规则, condition 恒为 false 时走 else 分支自动 resolve ——
+   * 这是合理的(条件不成立了嘛)。
+   *
+   * 但**非遥测驱动**的规则(如 `no_satellite_schedule`,
+   * 它的数据源是 `dishGetHistory` 的 outages, 不是遥测样本)
+   * 如果也走这条路径, 就会出现:
+   *
+   *   t+0ms   checkTelemetry  ⇒ condition=false ⇒ **resolve**
+   *   t+2s    checkOutages    ⇒ 有 NO_SCHEDULE ⇒ **重新置回 ongoing**
+   *
+   * ⇒ 告警每 30 秒闪一下就消失, 历史记录里全是短命的告警。
+   *
+   * 这正是踩过的坑(见 DEVELOPMENT-STATUS.md 踩坑备忘)。
+   */
+  managedBy?: 'telemetry' | 'outages';
 }
 
 export class AlertManager extends EventEmitter {
@@ -343,8 +368,21 @@ export class AlertManager extends EventEmitter {
         enabled: true,
         severity: 'warning',
         condition: (data) => {
-          // 在线状态下, 下行速率 < 5 Mbps 视为异常
-          const lowDownlink = data.state === 'ONLINE' && (data.downlinkThroughputBps || 0) < 5 * 1024 * 1024;
+          // 排除特殊状态：服务受限、未激活、账号暂停
+          const hasSpecialStatus = 
+            data.classOfService === 'RESTRICTED' ||
+            data.classOfService === 'SUSPENDED' ||
+            data.disablementCode === 'NOT_ACTIVATED' ||
+            data.disablementCode === 'SERVICE_RESTRICTED' ||
+            data.disablementCode === 'ACCOUNT_SUSPENDED' ||
+            data.alerts?.installPending === true;
+
+          // 在线状态下, 下行速率 < 5 Mbps 视为异常（排除特殊状态）
+          const lowDownlink = 
+            data.state === 'ONLINE' && 
+            (data.downlinkThroughputBps || 0) < 5 * 1024 * 1024 &&
+            !hasSpecialStatus;
+            
           return lowDownlink;
         },
         summary: (data) => {
@@ -676,12 +714,149 @@ export class AlertManager extends EventEmitter {
         ],
       },
 
+      // 服务受限（账户/区域限制）
+      {
+        id: 'service_restricted',
+        name: '服务受限',
+        enabled: true,
+        severity: 'warning',
+        managedBy: 'telemetry',
+        condition: (telemetry: TelemetryData): boolean => {
+          // 检查服务等级是否受限
+          const isRestricted = telemetry.classOfService === 'RESTRICTED';
+          
+          // 检查是否存在 SERVICE_RESTRICTION 问题
+          const hasRestrictionIssue = telemetry.dishIssues?.some(
+            (issue) => issue.type === 'SERVICE_RESTRICTION'
+          ) ?? false;
+
+          return isRestricted || hasRestrictionIssue;
+        },
+        getDetails: (telemetry: TelemetryData) => {
+          return {
+            class_of_service: telemetry.classOfService,
+            downlink_throughput_mbps: (telemetry.downlinkThroughputBps / 1_000_000).toFixed(2),
+            uplink_throughput_mbps: (telemetry.uplinkThroughputBps / 1_000_000).toFixed(2),
+            dish_issues: telemetry.dishIssues?.map(i => i.type) || [],
+          };
+        },
+        recommendations: [
+          '检查 Starlink 账户状态和订阅计划',
+          '确认当前区域是否有服务限制或政策变更',
+          '查看账单支付状态',
+          '检查是否超出数据配额或公平使用政策',
+          '联系 Starlink 客服确认服务权限',
+        ],
+      },
+
+      // 服务未激活
+      {
+        id: 'service_not_activated',
+        name: '服务未激活',
+        enabled: true,
+        severity: 'critical',
+        managedBy: 'telemetry',
+        condition: (telemetry: TelemetryData): boolean => {
+          // 检查是否未激活
+          const notActivated = telemetry.disablementCode === 'NOT_ACTIVATED';
+          
+          // 检查 alerts.installPending
+          const installPending = telemetry.alerts?.installPending === true;
+
+          return notActivated || installPending;
+        },
+        getDetails: (telemetry: TelemetryData) => {
+          return {
+            disablement_code: telemetry.disablementCode,
+            install_pending: telemetry.alerts?.installPending,
+            class_of_service: telemetry.classOfService,
+          };
+        },
+        recommendations: [
+          '完成 Starlink 账户激活流程',
+          '登录 Starlink 账户确认服务订阅状态',
+          '确认设备已正确绑定到账户',
+          '检查账户邮箱中的激活邮件',
+          '联系 Starlink 客服完成激活',
+        ],
+      },
+
+      // 位置异常/移动中
+      {
+        id: 'location_policy_violation',
+        name: '位置异常',
+        enabled: true,
+        severity: 'warning',
+        managedBy: 'telemetry',
+        condition: (telemetry: TelemetryData): boolean => {
+          // 检查移动过快
+          const movingFast = telemetry.alerts?.movingFastInHelloMobile === true;
+          
+          // 检查位置异常
+          const unexpectedLocation = telemetry.alerts?.unexpectedLocation === true;
+
+          return movingFast || unexpectedLocation;
+        },
+        getDetails: (telemetry: TelemetryData) => {
+          return {
+            moving_fast: telemetry.alerts?.movingFastInHelloMobile,
+            unexpected_location: telemetry.alerts?.unexpectedLocation,
+            class_of_service: telemetry.classOfService,
+          };
+        },
+        recommendations: [
+          '确认设备是否在服务区域内使用',
+          '检查是否超出移动服务的速度限制',
+          '如果设备已固定，等待系统更新位置信息',
+          '非移动套餐不支持在移动中使用',
+          '联系 Starlink 客服确认服务区域',
+        ],
+      },
+
+      // 账号异常/暂停
+      {
+        id: 'account_suspended',
+        name: '账号异常',
+        enabled: true,
+        severity: 'critical',
+        managedBy: 'telemetry',
+        condition: (telemetry: TelemetryData): boolean => {
+          // 检查账号暂停
+          const suspended = telemetry.classOfService === 'SUSPENDED';
+          
+          // 检查 disablement code
+          const accountSuspended = telemetry.disablementCode === 'ACCOUNT_SUSPENDED';
+
+          return suspended || accountSuspended;
+        },
+        getDetails: (telemetry: TelemetryData) => {
+          return {
+            class_of_service: telemetry.classOfService,
+            disablement_code: telemetry.disablementCode,
+            downlink_throughput_mbps: (telemetry.downlinkThroughputBps / 1_000_000).toFixed(2),
+            uplink_throughput_mbps: (telemetry.uplinkThroughputBps / 1_000_000).toFixed(2),
+          };
+        },
+        recommendations: [
+          '检查 Starlink 账户支付状态',
+          '确认账单是否逾期未支付',
+          '查看账户是否因违反服务条款被暂停',
+          '登录 Starlink 账户查看详细信息',
+          '联系 Starlink 客服恢复服务',
+        ],
+      },
+
       // 卫星无调度/容量不足（NO_SCHEDULE outage）
       {
         id: 'no_satellite_schedule',
         name: '卫星无调度/容量不足',
         enabled: true,
         severity: 'warning',
+        // ⚠️ 生命周期由 checkOutages() 独立管理, 不是遥测驱动的规则。
+        //   不加这个标记的话, checkTelemetry() 会因为 condition() 恒为 false
+        //   而在每轮采集里把它 resolve 掉, 2 秒后 checkOutages 又置回 ongoing
+        //   ⇒ 告警在页面上"闪一下就消失"。
+        managedBy: 'outages',
         condition: () => {
           // 此规则不通过遥测数据触发，由 checkOutages() 独立检查
           return false;
@@ -715,6 +890,13 @@ export class AlertManager extends EventEmitter {
 
     for (const [ruleId, rule] of this.rules.entries()) {
       if (!rule.enabled) continue;
+
+      // ⚠️ **跳过由 checkOutages() 管理的规则** ——
+      //   这些规则不是遥测驱动的(数据源是 dishGetHistory 的 outages),
+      //   它们的 condition 恒为 false。若在这里也走 else 分支,
+      //   每轮采集都会把 ongoing 的告警 resolve 掉,
+      //   2 秒后 checkOutages 又置回 ongoing ⇒ 告警"闪一下就消失"。
+      if (rule.managedBy === 'outages') continue;
 
       try {
         const shouldAlert = rule.condition(telemetry);
@@ -896,17 +1078,25 @@ export class AlertManager extends EventEmitter {
       if (!rule || !rule.enabled) return;
 
       const alertKey = 'no_satellite_schedule:starlink';
-      
+
       // 计算总持续时长
       const totalDurationMs = noScheduleOutages.reduce((sum, o) => sum + o.durationMs, 0);
       const avgDurationMs = totalDurationMs / noScheduleOutages.length;
+
+      // ⚠️ **保留首次出现的时间** ——
+      //   原来每次都写 `first_seen: now`, 于是告警的"持续时长"永远从
+      //   上一轮开始算, 抖动巨大。首次出现的时间应该延续。
+      const existing = this.db.getAlertByKey(alertKey);
+      const firstSeen = existing && existing.status === 'ongoing'
+        ? existing.first_seen
+        : now;
 
       const alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'> = {
         alert_key: alertKey,
         alert_type: 'no_satellite_schedule',
         severity: 'warning',
         status: 'ongoing',
-        first_seen: now,
+        first_seen: firstSeen,
         last_seen: now,
         occurrence_count: noScheduleOutages.length,
         last_notified_at: null,
