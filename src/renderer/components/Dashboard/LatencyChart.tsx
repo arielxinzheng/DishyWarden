@@ -527,11 +527,38 @@ export function LatencyChart({
                 ? '点击隐藏卫星切换标记'
                 : '点击显示卫星切换标记'
             }
-            className={`px-2 py-0.5 rounded transition-colors ${
-              handoffsVisible
-                ? 'bg-warning-orange/15 text-warning-orange'
-                : 'bg-muted/40 text-muted-foreground/50 line-through'
-            }`}
+            /*
+             * 关闭态的视觉：**整体降级**, 不加删除线。
+             *
+             * 为什么不用删除线: 删除线让文字"碎掉", 读起来像
+             * 「这个功能被废弃了」, 而不是「我暂时把它藏起来了」。
+             * 用户随时能点回来, 文字要保持干净完整。
+             *
+             * 为什么用 opacity 而不是固定暗灰色:
+             *   - 关闭态要「与背景融为一体」⇒ 半透明正好,
+             *     固定色还得挑一个跟卡片背景匹配的颜色, 换主题就失配
+             *   - hover 提亮到 70% 时, 用 opacity 才能**连续过渡**
+             *     (固定色 → 固定色没有中间态)
+             *
+             * hover 一定要留:
+             *   全暗的按钮看着像 disabled(不可点), 用户不敢点。
+             *   提亮 + cursor-pointer 明确表达「我只是隐藏了, 随时能点亮」。
+             *
+             * ⚠️ 颜色用 `accent-yellow`(#f59e0b) 而不是 `warning-orange` ——
+             *   `accent-yellow` 与图上星标的 itemStyle 色**完全一致**,
+             *   图例和星星是同一个色, 视觉上才对应。
+             *   而 `warning-orange` 在本项目里曾因 Tailwind v4 不加载
+             *   tailwind.config.js 而**整个失效**(见 index.css 的 @theme 注释)。
+             */
+            className={`px-2 py-0.5 rounded cursor-pointer select-none
+              transition-opacity duration-150
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-ring
+              ${
+                handoffsVisible
+                  ? 'bg-accent-yellow/15 text-accent-yellow opacity-100'
+                  : // 关闭态: 30% 基础透明度, hover 提到 70%
+                    'bg-muted/40 text-accent-yellow opacity-30 hover:opacity-70'
+              }`}
           >
             ★ 卫星切换
           </button>

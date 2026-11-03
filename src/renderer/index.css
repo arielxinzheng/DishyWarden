@@ -5,12 +5,33 @@
   --color-ink-900: #131313;
   --color-ink-800: #1a1a1a;
   --color-ink-700: #242424;
-  
+
   --color-accent-green: #10b981;
   --color-accent-blue: #3b82f6;
   --color-accent-yellow: #f59e0b;
-  
+
   --color-danger-red: #ef4444;
+
+  /* ⚠️ 这两个颜色**必须**在这里声明 ——
+   *
+   * Tailwind v4 **不自动加载 `tailwind.config.js`** —— v4 改用 CSS 里的
+   * `@theme` 作为唯一的配置入口。config 文件里定义的
+   * `warning.orange` / `sky.blue` 不会生成任何 CSS 规则,
+   * 于是 `text-warning-orange` 这类类名**静默失效**:
+   * 元素照常渲染, 只是颜色退回继承值。
+   *
+   * 实测: `text-warning-orange` 的 computed color 是
+   * `rgb(248, 250, 252)`(继承的前景色, 近白), 不是橙色。
+   *
+   * ⇒ 全项目 23 处 `warning-orange` + 9 处 `sky-blue` 全都是无效样式。
+   * 在这里补上变量, 一次性治好全部调用点。
+   *
+   * 颜色值与 `tailwind.config.js` 保持一致:
+   *   warning.orange = #f97316   (Tailwind orange-500)
+   *   sky.blue       = #38bdf8   (Tailwind sky-400)
+   */
+  --color-warning-orange: #f97316;
+  --color-sky-blue: #38bdf8;
 }
 
 @layer base {
