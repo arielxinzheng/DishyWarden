@@ -7,6 +7,12 @@ import ReactECharts from 'echarts-for-react';
 import { formatTimeLabel } from '../../../core/telemetry';
 import type { HistorySample } from '../../../storage/types';
 import type { HandoffEvent } from '../../../core/outageAnalyzer';
+import {
+  LATENCY_DIMENSIONS,
+  DEFAULT_MODE,
+  showsSatelliteHandoffs,
+  type LatencyMode,
+} from './latencyModes';
 import { useEffect, useState } from 'react';
 
 interface LatencyChartProps {
@@ -30,19 +36,6 @@ interface LatencyChartProps {
    */
   handoffs?: HandoffEvent[];
 }
-
-type LatencyMode = 'public' | 'pop' | 'gateway';
-
-/**
- * 延迟维度可选项。
- */
-const LATENCY_DIMENSIONS: Array<{ id: LatencyMode; label: string; available: boolean }> = [
-  { id: 'public', label: 'Public', available: true },
-  { id: 'pop', label: 'PoP', available: true },
-  { id: 'gateway', label: 'Local', available: true },
-];
-
-const DEFAULT_MODE: LatencyMode = LATENCY_DIMENSIONS.find((d) => d.available)?.id ?? 'pop';
 
 export function LatencyChart({ height = 260, history, isLoading = false, handoffs = [] }: LatencyChartProps) {
   const [mode, setMode] = useState<LatencyMode>(DEFAULT_MODE);
@@ -105,7 +98,10 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
     //
     // 把 handoff 的时间戳映射到最近的采样下标(采样间隔 30s, 切换更密,
     // 所以取**最近**的那个点, 而不是等一个精确匹配)。
-    if (handoffs.length > 0 && sampleTimestamps.length > 0) {
+    //
+    // ⚠️ Local(网关)模式下**必须清空** —— 本地链路不经卫星,
+    // 标切换点是语义错误(会把本地故障误指向卫星)。
+    if (showsSatelliteHandoffs(mode) && handoffs.length > 0 && sampleTimestamps.length > 0) {
       const usedIndices = new Set<number>();
       for (const h of handoffs) {
         let bestIndex = -1;
@@ -250,6 +246,10 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
         name: '卫星切换',
         type: 'scatter',
         data: chartData.satellites,
+        // Local(网关)模式下整个 series 都不画 ——
+        // 本地链路不经卫星, 标切换点是语义错误。
+        // 双保险: 数据已清空(见上面的 effect), 这里再关掉图层本身。
+        show: showsSatelliteHandoffs(mode),
         symbolSize: 11,
         itemStyle: {
           color: '#f59e0b',
@@ -310,9 +310,12 @@ export function LatencyChart({ height = 260, history, isLoading = false, handoff
         <span className="px-2 py-0.5 rounded bg-danger-red/15 text-danger-red">
           丢包率 (%)
         </span>
-        <span className="px-2 py-0.5 rounded bg-warning-orange/15 text-warning-orange">
-          ★ 卫星切换
-        </span>
+        {/* Local(网关)模式不显示该图例 —— 与图上的 series 保持一致 */}
+        {showsSatelliteHandoffs(mode) && (
+          <span className="px-2 py-0.5 rounded bg-warning-orange/15 text-warning-orange">
+            ★ 卫星切换
+          </span>
+        )}
       </div>
 
       {/* ECharts图表 */}
