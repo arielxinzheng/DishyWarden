@@ -121,29 +121,60 @@ export class AlertDatabase {
       return 'resolved';
     } else if (existing.status === 'resolved' && alert.status === 'ongoing') {
       // 告警重新激活（从 resolved 到 ongoing）
-      const stmt = this.db.prepare(`
-        UPDATE alerts
-        SET status = ?,
-            first_seen = ?,
-            last_seen = ?,
-            occurrence_count = 1,
-            summary = ?,
-            description = ?,
-            evidence = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE alert_key = ?
-      `);
+      // 如果恢复时间在 5 分钟内，保留原 occurrence_count（视为抖动/间歇性问题）
+      const lastSeenTime = new Date(existing.last_seen).getTime();
+      const nowTime = new Date(alert.last_seen).getTime();
+      const isRecent = nowTime - lastSeenTime < 5 * 60 * 1000; // 5 分钟
 
-      stmt.run(
-        alert.status,
-        alert.first_seen,
-        alert.last_seen,
-        alert.summary,
-        alert.description,
-        alert.evidence,
-        alert.alert_key
-      );
-      return 'new'; // 视为新告警，触发通知
+      if (isRecent) {
+        // 短时间内重新激活，保留计数
+        const stmt = this.db.prepare(`
+          UPDATE alerts
+          SET status = ?,
+              last_seen = ?,
+              occurrence_count = occurrence_count + 1,
+              summary = ?,
+              description = ?,
+              evidence = ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE alert_key = ?
+        `);
+
+        stmt.run(
+          alert.status,
+          alert.last_seen,
+          alert.summary,
+          alert.description,
+          alert.evidence,
+          alert.alert_key
+        );
+        return 'ongoing'; // 视为持续问题，不重新通知
+      } else {
+        // 长时间后重新激活，重置计数
+        const stmt = this.db.prepare(`
+          UPDATE alerts
+          SET status = ?,
+              first_seen = ?,
+              last_seen = ?,
+              occurrence_count = 1,
+              summary = ?,
+              description = ?,
+              evidence = ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE alert_key = ?
+        `);
+
+        stmt.run(
+          alert.status,
+          alert.first_seen,
+          alert.last_seen,
+          alert.summary,
+          alert.description,
+          alert.evidence,
+          alert.alert_key
+        );
+        return 'new'; // 视为新告警，触发通知
+      }
     } else {
       // 持续触发
       const stmt = this.db.prepare(`
