@@ -207,9 +207,19 @@ async function probeDns(node: ProbeNodeConfig): Promise<ProbeResult> {
  * 对于 `dns_dual` 类型，target 格式为 `domain|baseline_dns`，例如：
  * - `google.com|8.8.8.8`
  * - `apple.com|1.1.1.1`
+ *
+ * 也支持第三段 `domain|baseline_dns|user_dns`，显式指定**用户态**解析器：
+ * - `example.com|127.0.0.1:9254|127.0.0.1:9253`
+ *
+ * 第三段的作用是**测试**用的 —— 让被测方能打到假 DNS 服务器,
+ * 从而造出「用户态坏 / 基准态好」这种组合。
+ * 生产环境不填第三段 ⇒ 用户态走系统默认 DNS（真实语义）。
+ *
+ * ⚠️ `user_dns` 支持 `ip:port` 语法（Node 的 `dns.Resolver.setServers` 支持），
+ *   所以假 DNS 可以跑在非标准端口上。
  */
 async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
-  const [domain, baselineDns] = node.target.split('|');
+  const [domain, baselineDns, userDns] = node.target.split('|');
   if (!domain || !baselineDns) {
     return {
       nodeId: node.id,
@@ -221,9 +231,11 @@ async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
   }
 
   // 并行执行双轨探测
+  //
+  // 用户态: 显式指定了 user_dns 就用它, 否则用系统默认 DNS(null)。
   const [userResult, baselineResult] = await Promise.all([
-    probeDnsSingle(domain, null, node.timeoutSec),
-    probeDnsSingle(domain, baselineDns, node.timeoutSec),
+    probeDnsSingle(domain, userDns?.trim() || null, node.timeoutSec),
+    probeDnsSingle(domain, baselineDns.trim(), node.timeoutSec),
   ]);
 
   // 整体判定：用户态成功才算成功(基准态仅用于对照)
