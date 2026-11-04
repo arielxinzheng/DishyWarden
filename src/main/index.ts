@@ -402,6 +402,28 @@ ipcMain.handle('get-active-alerts', () => {
 });
 
 /**
+ * IPC 处理器：获取最新 DNS 探测结果
+ */
+ipcMain.handle('get-latest-dns-probe', () => {
+  if (!probeRunner) return null;
+  
+  // 查找 DNS 探测节点（id 为 dns-dual-check）
+  const dnsState = probeRunner.getState('dns-dual-check');
+  if (!dnsState || !dnsState.last) return null;
+  
+  const result = dnsState.last;
+  // 确保有 dualDns 数据
+  if (!result.dualDns) return null;
+  
+  return {
+    node_id: result.nodeId,
+    timestamp: result.ts,
+    user_dns: result.dualDns.user,
+    baseline_dns: result.dualDns.baseline,
+  };
+});
+
+/**
  * IPC 处理器：获取告警历史
  */
 ipcMain.handle('get-alert-history', (_event, params: {

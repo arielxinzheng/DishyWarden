@@ -38,6 +38,7 @@ import { StatusStrip, SLICE_PLANS, fitStatusSlots, STATUS_GAP } from './StatusSt
 import { RouterStatusRow } from './RouterStatusRow';
 import { buildMetricSeries, peakOf } from './metricSeries';
 import { Drawer } from '../ui/drawer';
+import { DnsStatusCard } from './DnsStatusCard';
 
 type TimeRange = '15m' | '1h' | '6h';
 type RefreshInterval = '30s' | '1m' | 'manual';
@@ -596,7 +597,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 第二行：吞吐量和路由跟踪 */}
+      {/* 第二行：吞吐量、路由跟踪和 DNS 监控 */}
       <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
         {/* 左侧：吞吐量 - 占 7/10 宽度 */}
         <div className="lg:col-span-7">
@@ -610,11 +611,12 @@ export default function Dashboard() {
           </Card>
         </div>
         
-        {/* 右侧：路由器状态 + 路由跟踪 - 占 3/10 宽度 */}
+        {/* 右侧：路由器状态 + 路由跟踪 + DNS 监控 - 占 3/10 宽度 */}
         <div className="lg:col-span-3 space-y-3">
           {/* 路由器状态行 —— 需求文档 2.1.2 的数据出口, 放在路由跟踪上方 */}
           <RouterStatusRow />
           <RouteTraceCard />
+          <DnsStatusCard />
         </div>
       </div>
     </div>

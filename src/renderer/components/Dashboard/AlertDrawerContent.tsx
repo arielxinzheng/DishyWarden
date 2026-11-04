@@ -8,6 +8,7 @@ import { Badge } from '../ui/badge';
 import { AlertTriangle, Info, AlertCircle } from 'lucide-react';
 import type { AlertRecord } from '../../../alerting/database';
 import { parseRecommendations } from '../../lib/alertFormat';
+import { DnsAlertDetail } from './DnsAlertDetail';
 
 interface AlertDrawerContentProps {
   alerts: AlertRecord[];
@@ -73,6 +74,13 @@ export function AlertDrawerContent({ alerts }: AlertDrawerContentProps) {
               <AlertDescription className="text-base leading-relaxed">
                 {alert.description}
               </AlertDescription>
+
+              {/* DNS 告警详情 - 双轨探测对比 */}
+              {alert.alert_key.startsWith('dns_') && alert.evidence && (
+                <div className="mt-4">
+                  <DnsAlertDetail evidence={alert.evidence} />
+                </div>
+              )}
 
               {/* 建议处理 - 抽屉内完整展开，不折叠 */}
               {(() => {

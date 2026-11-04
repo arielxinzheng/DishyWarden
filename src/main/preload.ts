@@ -126,6 +126,14 @@ export interface ElectronAPI {
 
   // 获取遮挡事件历史
   getObstructionEvents: (fromMs: number, toMs: number, limit?: number) => Promise<ObstructionEvent[]>;
+
+  // 获取最新 DNS 探测结果
+  getLatestDnsProbe: () => Promise<{
+    node_id: string;
+    timestamp: number;
+    user_dns: { ok: boolean; rtt_ms: number | null; error?: string; resolved_ip?: string };
+    baseline_dns: { ok: boolean; rtt_ms: number | null; error?: string; resolved_ip?: string };
+  } | null>;
 }
 
 /**
@@ -237,4 +245,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getObstructionEvents: (fromMs: number, toMs: number, limit?: number) =>
     ipcRenderer.invoke('get-obstruction-events', fromMs, toMs, limit),
+
+  getLatestDnsProbe: () => ipcRenderer.invoke('get-latest-dns-probe'),
 } as ElectronAPI);
