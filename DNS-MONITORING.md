@@ -86,6 +86,41 @@ curl -X POST http://127.0.0.1:9201/api/scenarios/dns_dual_recovered/activate
 
 **告警需要连续 3 次失败才触发**（探测间隔 60s ⇒ 约 3 分钟）。
 
+#### 2.3.1 实测结果（2026-11-04 验证）
+
+Electron 16:03 重启后，用真实链路跑通：
+
+```
+t=5s   ok=true  用户态=OK        基准态=OK        连续失败=0
+t=10s  ok=false 用户态=ENOTFOUND 基准态=OK        连续失败=1
+t=20s  ok=false 用户态=ENOTFOUND 基准态=OK        连续失败=2
+t=30s  ok=false 用户态=ENOTFOUND 基准态=OK        连续失败=3
+```
+
+告警触发内容：
+
+```
+alert_key   dns_failure:dns-dual-check   status=ongoing   occ=3
+标题        ⚠️ 网页无法加载 (域名解析失败)
+描述        诊断结果：基础网络畅通，但您的当前域名服务器无响应。
+evidence    {"node_id":"dns-dual-check","consecutive_failures":3,
+             "user_dns":{"ok":false,"rtt_ms":null,"error":"ENOTFOUND"},
+             "baseline_dns":{"ok":true,"rtt_ms":2,"resolved_ip":"127.0.0.1"}}
+```
+
+恢复路径（切 `dns_dual_recovered`）：告警**自动**置为 `resolved`。
+
+另一种归因（切 `dns_dual_both_broken`）：
+
+```
+描述        诊断结果：网络层故障或目标域名不存在。
+user_dns      ok=false  ETIMEOUT
+baseline_dns  ok=false  ETIMEOUT
+```
+
+> 验证时把探针间隔临时改成 10s 以缩短等待（连续 3 次失败约 30s），
+> 验证完记得改回 60s。
+
 #### 2.4 直接控制两轨（不走场景）
 
 ```bash
