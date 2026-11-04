@@ -61,6 +61,20 @@ example.com|127.0.0.1:9254|127.0.0.1:9253
 
 #### 2.2 激活场景
 
+> **也可以直接点控制台页面**：`http://127.0.0.1:9201/` → 「链路与性能」分组
+> → 找到对应场景 → 点「触发」。**控制台页面与 API 等价**，
+> 页面点「触发」就是调 `POST /api/scenarios/<id>/activate`。
+>
+> 页面上的 DNS 相关场景：
+>
+> | 卡片标题 | 场景 id | 效果 |
+> |---|---|---|
+> | DNS 异常 | `dns` | 用户态延迟 6s（打穿超时），基准态正常 |
+> | DNS 双轨: 用户态故障 | `dns_dual_user_broken` | 用户态 NXDOMAIN，基准态正常 |
+> | DNS 双轨: 双轨均故障 | `dns_dual_both_broken` | 两轨都超时 |
+> | DNS 双轨: 用户态延迟高 | `dns_dual_slow` | 用户态 +800ms，**不告警** |
+> | DNS 双轨: 已恢复 | `dns_dual_recovered` | 两轨正常，告警解除 |
+
 ```bash
 # 用户态坏 / 基准态好 ⇒ 应归因「本地 DNS 配置问题」
 curl -X POST http://127.0.0.1:9201/api/scenarios/dns_dual_user_broken/activate
@@ -120,6 +134,34 @@ baseline_dns  ok=false  ETIMEOUT
 
 > 验证时把探针间隔临时改成 10s 以缩短等待（连续 3 次失败约 30s），
 > 验证完记得改回 60s。
+
+#### 2.3.2 单轨「DNS 异常」场景（2026-11-04 改造后实测）
+
+「DNS 异常」场景原本是 `alerts.dns=true` 字段补丁 + 单轨假 DNS，
+但**单轨探针触发不了 DNS 告警** —— `checkDnsProbe()` 第一行就是
+`if (!probeResult.dualDns) return;`。已改造成双轨（用户态延迟 6s）。
+
+控制台点「DNS 异常」→「触发」后实测：
+
+```
+alert_key   dns_failure:dns-dual-check   status=ongoing   occ=1
+标题        ⚠️ 网页无法加载 (域名解析失败)
+描述        诊断结果：基础网络畅通，但您的当前域名服务器无响应。
+evidence    {"consecutive_failures":3,
+             "user_dns":{"ok":false,"rtt_ms":null,"error":"ETIMEOUT"},
+             "baseline_dns":{"ok":true,"rtt_ms":1,"resolved_ip":"127.0.0.1"}}
+```
+
+`ETIMEOUT` 证明 6s 延迟确实打穿了 5s 超时阈值；
+`baseline_dns.ok=true` 证明归因正确落在「本地 DNS 配置问题」。
+
+> `alerts.dns` 这个字段在 **SLMonitor** 侧是**落库但无人消费**的
+> （写进 `telemetry_samples.alerts_json`，但没有任何规则或 UI 读它），
+> 所以针对 SLMonitor 的场景不再置位它。
+>
+> ⚠️ 这只针对 SLMonitor。`alerts.dns` 对 Starlink 自己的固件/云端消费者
+> 是**通的**（`classifyAlert("dns")` → internet/warning）。
+> 详见 DishyMock `src/scenarios/link.ts` 与 DESIGN.md §"DNS 的两条路径"。
 
 #### 2.4 直接控制两轨（不走场景）
 
