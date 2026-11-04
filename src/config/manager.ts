@@ -40,9 +40,10 @@ export interface GrafanaConfig {
  *
  * - `icmp` —— ICMP Ping(路由器状态监控用的就是它)
  * - `dns`  —— DNS 解析(域名能不能解析出来)
+ * - `dns_dual` —— 双轨 DNS 探测(用户态 DNS vs 公网基准 DNS)
  * - `tls`  —— TLS 握手(证书链正不正常)
  */
-export type ProbeType = 'icmp' | 'dns' | 'tls';
+export type ProbeType = 'icmp' | 'dns' | 'dns_dual' | 'tls';
 
 /**
  * 一个探针节点。
@@ -132,7 +133,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   alertThresholds: {
     highLatencyMs: 100,
-    highPacketLoss: 0.1,
+    highPacketLoss: 0.05, // 丢包率告警阈值: 5%（8% 丢包体验已很差）
   },
   probe: {
     // 路由跟踪目标: example.com 是 RFC 2606 保留域名, 稳定可达且语义中立
@@ -161,6 +162,15 @@ const DEFAULT_CONFIG: AppConfig = {
         name: 'DNS 解析',
         target: '8.8.8.8',
         type: 'dns',
+        intervalSec: 60,
+        timeoutSec: 5,
+        enabled: true,
+      },
+      {
+        id: 'dns-dual-check',
+        name: 'DNS 双轨探测',
+        target: 'google.com|8.8.8.8',
+        type: 'dns_dual',
         intervalSec: 60,
         timeoutSec: 5,
         enabled: true,

@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import { AlertDatabase, type AlertRecord } from './database';
 import { Notifier, type NotificationConfig, type NotificationContext } from './notifier';
 import type { TelemetryData } from '../core/dishClient';
+import { hasAlert, readServiceState } from '../core/serviceState';
 import type { AlertThresholds } from '../config/manager';
 
 export interface AlertRule {
@@ -55,6 +56,11 @@ export class AlertManager extends EventEmitter {
   private thresholds: AlertThresholds;
   private lastCollectorSuccess: Date | null = null;
   private heartbeatStartTime: Date = new Date(); // 心跳检查启动时间
+  // DNS 探针状态追踪（连续失败计数）
+  private dnsProbeFailures: Map<string, number> = new Map();
+  private dnsProbeLastResults: Map<string, any> = new Map();
+  // 用于依赖压制判断的 ICMP 探针状态
+  private icmpProbeStates: Map<string, { reachable: boolean; consecutiveFailures: number }> = new Map();
 
   constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds, dbPath?: string) {
     super();
@@ -154,14 +160,14 @@ export class AlertManager extends EventEmitter {
         name: '天线过热降频',
         enabled: true,
         severity: 'warning',
-        condition: (data) => data.alerts?.includes('thermalThrottle') || false,
+        condition: (data) => hasAlert(data, 'thermalThrottle') || false,
         summary: () => '天线温度过高,已启动降频保护',
         description: (data) => {
           const temp = data.dishTemperature?.toFixed(1) || 'N/A';
           return `当前温度: ${temp}°C, 高温导致性能下降`;
         },
         evidence: (data) => ({
-          thermal_throttle: data.alerts?.includes('thermalThrottle'),
+          thermal_throttle: hasAlert(data, 'thermalThrottle'),
           dish_temperature: data.dishTemperature,
           psu_temperature: data.powerSupplyTemperature,
         }),
@@ -223,17 +229,17 @@ export class AlertManager extends EventEmitter {
         name: '天线电机异常',
         enabled: true,
         severity: 'critical',
-        condition: (data) => data.alerts?.includes('motorsStow') || false,
+        condition: (data) => hasAlert(data, 'motorsStow') || false,
         summary: () => '天线电机收起或卡死',
         description: (data) => {
-          const isHeating = data.alerts?.includes('isHeating');
+          const isHeating = hasAlert(data, 'isHeating');
           return isHeating 
             ? '检测到电机异常, 系统正在加热解冻' 
             : '天线电机无法正常工作, 可能被手动收起或因结冰卡死';
         },
         evidence: (data) => ({
-          motors_stow: data.alerts?.includes('motorsStow'),
-          is_heating: data.alerts?.includes('isHeating'),
+          motors_stow: hasAlert(data, 'motorsStow'),
+          is_heating: hasAlert(data, 'isHeating'),
           dish_temperature: data.dishTemperature,
           all_alerts: data.alerts,
         }),
@@ -285,13 +291,13 @@ export class AlertManager extends EventEmitter {
         name: '天线结冰加热中',
         enabled: true,
         severity: 'warning',
-        condition: (data) => data.alerts?.includes('isHeating') || false,
+        condition: (data) => hasAlert(data, 'isHeating') || false,
         summary: () => '天线检测到结冰, 正在自动加热',
         description: (data) => `当前温度: ${data.dishTemperature?.toFixed(1)}°C, 系统正在除冰`,
         evidence: (data) => ({
-          is_heating: data.alerts?.includes('isHeating'),
+          is_heating: hasAlert(data, 'isHeating'),
           dish_temperature: data.dishTemperature,
-          motors_stow: data.alerts?.includes('motorsStow'),
+          motors_stow: hasAlert(data, 'motorsStow'),
         }),
         recommendations: [
           '系统自动加热除冰中, 通常 15-30 分钟内完成',
@@ -308,9 +314,9 @@ export class AlertManager extends EventEmitter {
         severity: 'warning',
         condition: (data) => {
           // 检测到 slowEthernetSpeeds 告警，或实测速率 < 500 Mbps
-          const hasAlert = data.alerts?.includes('slowEthernetSpeeds') || false;
+          const flagged = hasAlert(data, 'slowEthernetSpeeds');
           const lowSpeed = (data.ethSpeedMbps ?? 0) > 0 && (data.ethSpeedMbps ?? 0) < 500;
-          return hasAlert || lowSpeed;
+          return flagged || lowSpeed;
         },
         summary: (data) => {
           const speed = data.ethSpeedMbps;
@@ -325,7 +331,7 @@ export class AlertManager extends EventEmitter {
           eth_speed_mbps: data.ethSpeedMbps,
           eth_duplex: data.ethDuplex,
           downlink_mbps: (data.downlinkThroughputBps || 0) / 1024 / 1024,
-          slow_ethernet_alert: data.alerts?.includes('slowEthernetSpeeds'),
+          slow_ethernet_alert: hasAlert(data, 'slowEthernetSpeeds'),
         }),
         recommendations: [
           '检查网线是否为 Cat5e/Cat6 千兆网线',
@@ -342,11 +348,11 @@ export class AlertManager extends EventEmitter {
         name: '线缆连接异常',
         enabled: true,
         severity: 'critical',
-        condition: (data) => data.alerts?.includes('connectivity') || false,
+        condition: (data) => hasAlert(data, 'connectivity') || false,
         summary: () => '天线到路由器链路不稳定',
         description: () => 'PoE 线缆连接异常，链路间歇中断',
         evidence: (data) => ({
-          connectivity_alert: data.alerts?.includes('connectivity'),
+          connectivity_alert: hasAlert(data, 'connectivity'),
           state: data.state,
           uptime_s: data.uptime,
           latency_ms: data.popPingLatencyMs,
@@ -368,22 +374,14 @@ export class AlertManager extends EventEmitter {
         enabled: true,
         severity: 'warning',
         condition: (data) => {
-          // 排除特殊状态：服务受限、未激活、账号暂停
-          const hasSpecialStatus = 
-            data.classOfService === 'RESTRICTED' ||
-            data.classOfService === 'SUSPENDED' ||
-            data.disablementCode === 'NOT_ACTIVATED' ||
-            data.disablementCode === 'SERVICE_RESTRICTED' ||
-            data.disablementCode === 'ACCOUNT_SUSPENDED' ||
-            data.alerts?.installPending === true;
+          // 服务受限 / 未激活 / 账号暂停时，低速率是**结果**不是**原因** ——
+          // 交给各自的专属规则报，这里再报一次只是噪音。
+          // 判据来自 readServiceState()，与专属规则共用同一份，避免
+          // "一处排除、一处不认" 造成两边都不报的黑洞。
+          if (readServiceState(data).limited) return false;
 
-          // 在线状态下, 下行速率 < 5 Mbps 视为异常（排除特殊状态）
-          const lowDownlink = 
-            data.state === 'ONLINE' && 
-            (data.downlinkThroughputBps || 0) < 5 * 1024 * 1024 &&
-            !hasSpecialStatus;
-            
-          return lowDownlink;
+          // 在线状态下, 下行速率 < 5 Mbps 视为异常
+          return data.state === 'ONLINE' && (data.downlinkThroughputBps || 0) < 5 * 1024 * 1024;
         },
         summary: (data) => {
           const downMbps = ((data.downlinkThroughputBps || 0) / 1024 / 1024).toFixed(1);
@@ -506,7 +504,7 @@ export class AlertManager extends EventEmitter {
         evidence: (data) => ({
           dish_temperature: data.dishTemperature,
           psu_temperature: data.powerSupplyTemperature,
-          thermal_throttle: data.alerts?.includes('thermalThrottle'),
+          thermal_throttle: hasAlert(data, 'thermalThrottle'),
         }),
         recommendations: [
           '改善设备通风散热条件',
@@ -719,25 +717,29 @@ export class AlertManager extends EventEmitter {
         id: 'service_restricted',
         name: '服务受限',
         enabled: true,
-        severity: 'warning',
+        severity: 'critical',
         managedBy: 'telemetry',
-        condition: (telemetry: TelemetryData): boolean => {
-          // 检查服务等级是否受限
-          const isRestricted = telemetry.classOfService === 'RESTRICTED';
-          
-          // 检查是否存在 SERVICE_RESTRICTION 问题
-          const hasRestrictionIssue = telemetry.dishIssues?.some(
-            (issue) => issue.type === 'SERVICE_RESTRICTION'
-          ) ?? false;
-
-          return isRestricted || hasRestrictionIssue;
+        // 判据来自 readServiceState()，与 low_throughput 的排除条件同源。
+        condition: (telemetry: TelemetryData): boolean => readServiceState(telemetry).restricted,
+        summary: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
+          const reason = state.disablementCode ?? state.classOfService ?? '未知原因';
+          return `服务受限 (${reason})`;
         },
-        getDetails: (telemetry: TelemetryData) => {
+        description: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
+          const downMbps = ((telemetry.downlinkThroughputBps || 0) / 1_000_000).toFixed(2);
+          return `当前下行仅 ${downMbps} Mbps：设备已连上卫星，但账户/区域策略限制了下发。` +
+            `服务等级 ${state.classOfService ?? '未知'}，禁用代码 ${state.disablementCode ?? '未知'}`;
+        },
+        evidence: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
           return {
-            class_of_service: telemetry.classOfService,
+            class_of_service: state.classOfService,
+            disablement_code: state.disablementCode,
+            dish_issues: telemetry.dishIssues?.map((i) => i.type) || [],
             downlink_throughput_mbps: (telemetry.downlinkThroughputBps / 1_000_000).toFixed(2),
             uplink_throughput_mbps: (telemetry.uplinkThroughputBps / 1_000_000).toFixed(2),
-            dish_issues: telemetry.dishIssues?.map(i => i.type) || [],
           };
         },
         recommendations: [
@@ -756,20 +758,18 @@ export class AlertManager extends EventEmitter {
         enabled: true,
         severity: 'critical',
         managedBy: 'telemetry',
-        condition: (telemetry: TelemetryData): boolean => {
-          // 检查是否未激活
-          const notActivated = telemetry.disablementCode === 'NOT_ACTIVATED';
-          
-          // 检查 alerts.installPending
-          const installPending = telemetry.alerts?.installPending === true;
-
-          return notActivated || installPending;
+        condition: (telemetry: TelemetryData): boolean => readServiceState(telemetry).notActivated,
+        summary: () => '服务未激活，无法接入卫星网络',
+        description: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
+          return `设备已上电并连上卫星，但账户尚未激活。禁用代码 ${state.disablementCode ?? '未知'}`;
         },
-        getDetails: (telemetry: TelemetryData) => {
+        evidence: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
           return {
-            disablement_code: telemetry.disablementCode,
-            install_pending: telemetry.alerts?.installPending,
-            class_of_service: telemetry.classOfService,
+            disablement_code: state.disablementCode,
+            install_pending: hasAlert(telemetry, 'installPending'),
+            class_of_service: state.classOfService,
           };
         },
         recommendations: [
@@ -788,22 +788,26 @@ export class AlertManager extends EventEmitter {
         enabled: true,
         severity: 'warning',
         managedBy: 'telemetry',
-        condition: (telemetry: TelemetryData): boolean => {
-          // 检查移动过快
-          const movingFast = telemetry.alerts?.movingFastInHelloMobile === true;
-          
-          // 检查位置异常
-          const unexpectedLocation = telemetry.alerts?.unexpectedLocation === true;
-
-          return movingFast || unexpectedLocation;
+        condition: (telemetry: TelemetryData): boolean =>
+          readServiceState(telemetry).locationViolation,
+        summary: (telemetry: TelemetryData) =>
+          hasAlert(telemetry, 'movingFastInHelloMobile')
+            ? '设备移动速度超出套餐限制'
+            : '设备位置与服务区域不符',
+        description: (telemetry: TelemetryData) => {
+          const moving = hasAlert(telemetry, 'movingFastInHelloMobile');
+          const wrongPlace = hasAlert(telemetry, 'unexpectedLocation');
+          const reasons = [
+            moving && '移动速度超限',
+            wrongPlace && '位置与登记地不符',
+          ].filter(Boolean);
+          return `位置策略校验未通过: ${reasons.join(' / ') || '原因未知'}`;
         },
-        getDetails: (telemetry: TelemetryData) => {
-          return {
-            moving_fast: telemetry.alerts?.movingFastInHelloMobile,
-            unexpected_location: telemetry.alerts?.unexpectedLocation,
-            class_of_service: telemetry.classOfService,
-          };
-        },
+        evidence: (telemetry: TelemetryData) => ({
+          moving_fast_in_hello_mobile: hasAlert(telemetry, 'movingFastInHelloMobile'),
+          unexpected_location: hasAlert(telemetry, 'unexpectedLocation'),
+          class_of_service: readServiceState(telemetry).classOfService,
+        }),
         recommendations: [
           '确认设备是否在服务区域内使用',
           '检查是否超出移动服务的速度限制',
@@ -820,19 +824,17 @@ export class AlertManager extends EventEmitter {
         enabled: true,
         severity: 'critical',
         managedBy: 'telemetry',
-        condition: (telemetry: TelemetryData): boolean => {
-          // 检查账号暂停
-          const suspended = telemetry.classOfService === 'SUSPENDED';
-          
-          // 检查 disablement code
-          const accountSuspended = telemetry.disablementCode === 'ACCOUNT_SUSPENDED';
-
-          return suspended || accountSuspended;
+        condition: (telemetry: TelemetryData): boolean => readServiceState(telemetry).suspended,
+        summary: () => 'Starlink 账号已暂停服务',
+        description: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
+          return `账户被暂停，设备无法提供网络。禁用代码 ${state.disablementCode ?? '未知'}`;
         },
-        getDetails: (telemetry: TelemetryData) => {
+        evidence: (telemetry: TelemetryData) => {
+          const state = readServiceState(telemetry);
           return {
-            class_of_service: telemetry.classOfService,
-            disablement_code: telemetry.disablementCode,
+            class_of_service: state.classOfService,
+            disablement_code: state.disablementCode,
             downlink_throughput_mbps: (telemetry.downlinkThroughputBps / 1_000_000).toFixed(2),
             uplink_throughput_mbps: (telemetry.uplinkThroughputBps / 1_000_000).toFixed(2),
           };
@@ -843,6 +845,32 @@ export class AlertManager extends EventEmitter {
           '查看账户是否因违反服务条款被暂停',
           '登录 Starlink 账户查看详细信息',
           '联系 Starlink 客服恢复服务',
+        ],
+      },
+
+      // 设备漫游中
+      {
+        id: 'roaming',
+        name: '设备漫游中',
+        enabled: true,
+        severity: 'warning',
+        managedBy: 'telemetry',
+        condition: (telemetry: TelemetryData): boolean => hasAlert(telemetry, 'roaming'),
+        summary: () => '设备正在漫游状态',
+        description: () =>
+          '设备已离开注册服务地址，正在使用漫游服务。漫游可能导致性能降级或产生额外费用。',
+        evidence: (telemetry: TelemetryData) => ({
+          roaming: hasAlert(telemetry, 'roaming'),
+          class_of_service: telemetry.classOfService,
+          downlink_mbps: (telemetry.downlinkThroughputBps / 1e6).toFixed(2),
+          uplink_mbps: (telemetry.uplinkThroughputBps / 1e6).toFixed(2),
+        }),
+        recommendations: [
+          '确认设备是否被授权移动（如房车、船舶移动套餐）',
+          '检查账户套餐是否包含漫游服务',
+          '如为固定部署设备，检查设备是否被移动或盗窃',
+          '查看账单确认漫游费用',
+          '如需固定服务，将设备移回注册地址',
         ],
       },
 
@@ -1144,6 +1172,181 @@ export class AlertManager extends EventEmitter {
         this.emit('alert:resolved', existing);
         console.log(`[AlertManager] NO_SCHEDULE 告警已恢复`);
       }
+    }
+  }
+
+  /**
+   * 检查 DNS 探针状态并触发告警
+   *
+   * 从 ProbeRunner 接收探针结果，维护连续失败计数，
+   * 根据「连续 3 次失败」触发告警，并实施依赖压制逻辑。
+   */
+  checkDnsProbe(probeResult: any): void {
+    // 只处理 dns_dual 类型探针
+    if (!probeResult.dualDns) return;
+
+    const nodeId = probeResult.nodeId;
+    const now = new Date().toISOString();
+
+    // 存储最新探针结果（用于告警详情）
+    this.dnsProbeLastResults.set(nodeId, probeResult);
+
+    // 更新连续失败计数
+    if (!probeResult.ok) {
+      const failures = (this.dnsProbeFailures.get(nodeId) || 0) + 1;
+      this.dnsProbeFailures.set(nodeId, failures);
+
+      // 连续 3 次失败触发告警
+      if (failures >= 3) {
+        this.triggerDnsAlert(nodeId, probeResult, now);
+      }
+    } else {
+      // 探测成功，重置计数并尝试解除告警
+      this.dnsProbeFailures.set(nodeId, 0);
+      this.resolveDnsAlert(nodeId, now);
+    }
+  }
+
+  /**
+   * 更新 ICMP 探针状态（供依赖压制逻辑使用）
+   */
+  updateIcmpProbeState(nodeId: string, reachable: boolean, consecutiveFailures: number): void {
+    this.icmpProbeStates.set(nodeId, { reachable, consecutiveFailures });
+  }
+
+  /**
+   * 触发 DNS 告警（带依赖压制逻辑）
+   */
+  private triggerDnsAlert(nodeId: string, probeResult: any, now: string): void {
+    // 依赖压制：检查底层 ICMP 是否已断开
+    const publicPingState = this.icmpProbeStates.get('public-ping');
+    const localGatewayState = this.icmpProbeStates.get('local-gateway');
+
+    // 如果公网 Ping 或本地网关彻底断开（连续失败 >= 3），压制 DNS 告警
+    if (
+      (publicPingState && publicPingState.consecutiveFailures >= 3) ||
+      (localGatewayState && localGatewayState.consecutiveFailures >= 3)
+    ) {
+      console.log(`[AlertManager] DNS 告警被压制：底层网络已断开 (${nodeId})`);
+      return;
+    }
+
+    const alertKey = `dns_failure:${nodeId}`;
+    const { dualDns } = probeResult;
+    const userOk = dualDns.user.ok;
+    const baselineOk = dualDns.baseline.ok;
+
+    // 归因分析
+    let summary = '⚠️ 网页无法加载 (域名解析失败)';
+    let description = '';
+    const recommendations: string[] = [];
+
+    if (!userOk && baselineOk) {
+      // 场景 1：用户 DNS 故障，基准 DNS 正常
+      description = '诊断结果：基础网络畅通，但您的当前域名服务器无响应。';
+      recommendations.push(
+        '建议您在 WiFi 路由器或设备设置中，将 DNS 手动修改为 8.8.8.8 或 1.1.1.1',
+        '如果问题持续，请联系您的网络服务提供商'
+      );
+    } else if (!userOk && !baselineOk) {
+      // 场景 2：双轨探测均失败
+      if (localGatewayState && !localGatewayState.reachable) {
+        description = '诊断结果：检测到本地局域网严重拥堵导致解析请求被丢弃。';
+        recommendations.push(
+          '请检查当前是否有设备正在进行大规模下载、云盘上传或测速',
+          '尝试重启路由器以释放网络资源'
+        );
+      } else {
+        description = '诊断结果：网络层故障或目标域名不存在。';
+        recommendations.push(
+          '检查设备的网络连接状态',
+          '确认 Starlink 天线状态正常',
+          '等待片刻后重试'
+        );
+      }
+    }
+
+    const existing = this.db.getAlertByKey(alertKey);
+    const firstSeen = existing && existing.status === 'ongoing' ? existing.first_seen : now;
+
+    const alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'> = {
+      alert_key: alertKey,
+      alert_type: 'dns_failure',
+      severity: 'warning',
+      status: 'ongoing',
+      first_seen: firstSeen,
+      last_seen: now,
+      occurrence_count: this.dnsProbeFailures.get(nodeId) || 3,
+      last_notified_at: null,
+      notification_count: 0,
+      summary,
+      description,
+      evidence: JSON.stringify({
+        node_id: nodeId,
+        consecutive_failures: this.dnsProbeFailures.get(nodeId),
+        user_dns: {
+          ok: dualDns.user.ok,
+          rtt_ms: dualDns.user.rttMs,
+          error: dualDns.user.error,
+          resolved_ip: dualDns.user.resolvedIp,
+        },
+        baseline_dns: {
+          ok: dualDns.baseline.ok,
+          rtt_ms: dualDns.baseline.rttMs,
+          error: dualDns.baseline.error,
+          resolved_ip: dualDns.baseline.resolvedIp,
+        },
+      }),
+      recommendations: JSON.stringify(recommendations),
+    };
+
+    const result = this.db.upsertAlert(alert);
+
+    if (result === 'new') {
+      const record = this.db.getAlertByKey(alertKey)!;
+      void this.sendNotification({ type: 'new', alert: record });
+      this.db.markNotified(alertKey);
+      this.emit('alert:new', record);
+      console.log(`[AlertManager] DNS 告警触发: ${nodeId}, 连续失败 ${this.dnsProbeFailures.get(nodeId)} 次`);
+    } else if (result === 'ongoing') {
+      this.emit('alert:update', { alertKey });
+    }
+  }
+
+  /**
+   * 解除 DNS 告警
+   */
+  private resolveDnsAlert(nodeId: string, now: string): void {
+    const alertKey = `dns_failure:${nodeId}`;
+    const existing = this.db.getAlertByKey(alertKey);
+
+    if (existing && existing.status === 'ongoing') {
+      const duration = this.calculateDuration(existing.first_seen, now);
+      
+      // 使用 upsertAlert 标记为 resolved
+      this.db.upsertAlert({
+        alert_key: alertKey,
+        alert_type: 'dns_failure',
+        severity: 'warning',
+        status: 'resolved',
+        first_seen: existing.first_seen,
+        last_seen: now,
+        occurrence_count: existing.occurrence_count,
+        last_notified_at: existing.last_notified_at,
+        notification_count: existing.notification_count,
+        summary: existing.summary,
+        description: 'DNS 解析已恢复正常',
+        evidence: existing.evidence,
+        recommendations: existing.recommendations,
+      });
+
+      void this.sendNotification({
+        type: 'resolved',
+        alert: { ...existing, status: 'resolved', last_seen: now },
+        duration,
+      });
+      this.emit('alert:resolved', existing);
+      console.log(`[AlertManager] DNS 告警已恢复: ${nodeId}`);
     }
   }
 

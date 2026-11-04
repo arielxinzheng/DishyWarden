@@ -52,6 +52,23 @@ export interface ProbeResult {
   detail?: string;
   /** 探测时刻 epoch ms */
   ts: number;
+  /** 双轨 DNS 探测数据(仅 dns_dual 类型) */
+  dualDns?: {
+    /** 用户态探测(使用系统默认 DNS) */
+    user: {
+      ok: boolean;
+      rttMs: number | null;
+      error?: string;
+      resolvedIp?: string;
+    };
+    /** 基准态探测(使用公网 DNS 如 8.8.8.8) */
+    baseline: {
+      ok: boolean;
+      rttMs: number | null;
+      error?: string;
+      resolvedIp?: string;
+    };
+  };
 }
 
 /** 节点的最新状态(给 UI 显示) */
@@ -173,6 +190,124 @@ async function probeDns(node: ProbeNodeConfig): Promise<ProbeResult> {
 }
 
 /**
+ * 执行双轨 DNS 探测(用户态 vs 基准态)。
+ *
+ * 用于诊断：DNS 解析失败是【用户本地 DNS 故障】还是【域名本身/网络问题】。
+ *
+ * ## 探针逻辑
+ * - **用户态探针**：使用系统默认 DNS 解析目标域名
+ * - **基准态探针**：强制使用公网可靠 DNS(如 8.8.8.8/1.1.1.1) 解析相同域名
+ *
+ * ## 判定规则
+ * - 用户态失败 + 基准态成功 ⇒ 本地 DNS 配置问题
+ * - 两者都失败 ⇒ 网络层故障或域名不存在
+ * - 用户态成功但延迟明显高于基准态 ⇒ 本地 DNS 性能差
+ *
+ * ## node.target 约定
+ * 对于 `dns_dual` 类型，target 格式为 `domain|baseline_dns`，例如：
+ * - `google.com|8.8.8.8`
+ * - `apple.com|1.1.1.1`
+ */
+async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
+  const [domain, baselineDns] = node.target.split('|');
+  if (!domain || !baselineDns) {
+    return {
+      nodeId: node.id,
+      ok: false,
+      rttMs: null,
+      error: 'dns_dual 类型的 target 格式错误，应为 "domain|baseline_dns"',
+      ts: Date.now(),
+    };
+  }
+
+  // 并行执行双轨探测
+  const [userResult, baselineResult] = await Promise.all([
+    probeDnsSingle(domain, null, node.timeoutSec),
+    probeDnsSingle(domain, baselineDns, node.timeoutSec),
+  ]);
+
+  // 整体判定：用户态成功才算成功(基准态仅用于对照)
+  const ok = userResult.ok;
+  const rttMs = userResult.rttMs;
+  const error = userResult.error;
+
+  // 生成详情文案
+  let detail = '';
+  if (ok && baselineResult.ok) {
+    const delta = (userResult.rttMs ?? 0) - (baselineResult.rttMs ?? 0);
+    if (delta > 100) {
+      detail = `用户 DNS 延迟明显高于基准 (+${delta.toFixed(0)}ms)`;
+    } else {
+      detail = `双轨探测正常`;
+    }
+  } else if (!ok && baselineResult.ok) {
+    detail = `用户 DNS 故障，但基准 DNS 正常 → 本地 DNS 配置问题`;
+  } else if (!ok && !baselineResult.ok) {
+    detail = `双轨探测均失败 → 网络层故障或域名不存在`;
+  }
+
+  return {
+    nodeId: node.id,
+    ok,
+    rttMs,
+    error,
+    detail,
+    ts: Date.now(),
+    dualDns: {
+      user: {
+        ok: userResult.ok,
+        rttMs: userResult.rttMs,
+        error: userResult.error,
+        resolvedIp: userResult.resolvedIp,
+      },
+      baseline: {
+        ok: baselineResult.ok,
+        rttMs: baselineResult.rttMs,
+        error: baselineResult.error,
+        resolvedIp: baselineResult.resolvedIp,
+      },
+    },
+  };
+}
+
+/**
+ * 单次 DNS 解析(内部辅助函数，供 probeDnsDual 调用)。
+ *
+ * @param domain 要解析的域名
+ * @param server DNS 服务器地址(null 表示使用系统默认)
+ * @param timeoutSec 超时秒数
+ */
+async function probeDnsSingle(
+  domain: string,
+  server: string | null,
+  timeoutSec: number
+): Promise<{
+  ok: boolean;
+  rttMs: number | null;
+  error?: string;
+  resolvedIp?: string;
+}> {
+  const started = Date.now();
+  try {
+    const resolver = new dns.Resolver({ timeout: timeoutSec * 1000, tries: 1 });
+    if (server) resolver.setServers([server]);
+    const addresses = await resolver.resolve4(domain);
+    return {
+      ok: true,
+      rttMs: Date.now() - started,
+      resolvedIp: addresses[0],
+    };
+  } catch (error: unknown) {
+    const err = error as NodeJS.ErrnoException;
+    return {
+      ok: false,
+      rttMs: null,
+      error: err?.code || err?.message || '解析失败',
+    };
+  }
+}
+
+/**
  * 执行一次 TLS 握手探测。
  *
  * 握手成功 + 证书有效 ⇒ 通; 证书过期 / 主机名不匹配 ⇒ 失败(这正是要抓的)。
@@ -235,6 +370,8 @@ export async function runProbe(node: ProbeNodeConfig): Promise<ProbeResult> {
       return probeIcmp(node);
     case 'dns':
       return probeDns(node);
+    case 'dns_dual':
+      return probeDnsDual(node);
     case 'tls':
       return probeTls(node);
     default:

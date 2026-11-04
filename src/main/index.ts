@@ -176,7 +176,7 @@ async function startBackgroundServices() {
 
     // 启动探针节点管理(需求文档 2.1.3 网络连通性探测)
     probeRunner = new ProbeRunner(config.probe);
-    probeRunner.on('result', (result) => {
+    probeRunner.on('result', (result, state) => {
       const tag = result.ok ? 'OK' : 'FAIL';
       console.log(
         `[Probe] ${tag} ${result.nodeId}: ` +
@@ -186,6 +186,22 @@ async function startBackgroundServices() {
       );
       // 实时推给渲染层(设置页的状态灯)
       sendToRenderer('probe-result', result);
+
+      // 将探针结果传递给告警管理器
+      if (alertManager) {
+        // DNS 双轨探测
+        if (result.dualDns) {
+          alertManager.checkDnsProbe(result);
+        }
+        // ICMP 探针状态（供依赖压制逻辑使用）
+        if (state.nodeId === 'public-ping' || state.nodeId === 'local-gateway') {
+          alertManager.updateIcmpProbeState(
+            state.nodeId,
+            state.reachable,
+            state.consecutiveFailures
+          );
+        }
+      }
     });
     probeRunner.start();
 
