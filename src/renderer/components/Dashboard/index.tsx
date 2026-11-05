@@ -42,6 +42,9 @@ import { assessStaleness } from './dataGaps';
 import { RouterStatusRow } from './RouterStatusRow';
 import { buildMetricSeries, peakOf } from './metricSeries';
 import { Drawer } from '../ui/drawer';
+// 场景 A: 首次安装采集失败 → 全屏 Setup 引导页(拦截渲染, 见 firstInstall.ts 的判定)
+import { isFirstInstallFailure, type ZeroDataStorageStats } from './firstInstall';
+import SetupGuide from './SetupGuide';
 
 type TimeRange = '15m' | '1h' | '6h';
 type RefreshInterval = '30s' | '1m' | 'manual';
@@ -194,6 +197,41 @@ export default function Dashboard() {
     });
   }, [activeAlerts]);
 
+  // ── 场景 A: 首次安装采集失败 ─────────────────────────────────────────
+  // 历史库统计(判定 Day 0 需要 sampleCount) + 设备地址(引导页展示当前目标)
+  const [storageStats, setStorageStats] = useState<ZeroDataStorageStats | null>(null);
+  const [dishEndpoint, setDishEndpoint] = useState('192.168.100.1:9200');
+
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [stats, cfg] = await Promise.all([
+          window.electronAPI.getStorageStats(),
+          window.electronAPI.getConfig(),
+        ]);
+        if (cancelled) return;
+        if (stats) setStorageStats(stats);
+        const addr = `${cfg.collector.dishAddress}:${cfg.collector.dishPort}`;
+        setDishEndpoint(addr);
+      } catch (err) {
+        // 拿不到统计 ⇒ isFirstInstallFailure 返回 false, 走原有降级 UI
+        console.warn('[Dashboard] 读取库统计/设备地址失败:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 判定要拿到 storageStats 之后才有结论; 拿不到(仍为 null)按非首次安装降级
+  const isFirstInstall = isFirstInstallFailure(
+    !!error && !telemetry,
+    storageStats
+  );
+
+  // 引导页期间的「正在重试」状态: useDish.isLoading 恰好表达这个
+  const setupIsRetrying = isLoading;
+
   // 判断是否有严重告警 (基于可见告警)
   const hasCriticalAlerts = useMemo(() => {
     return visibleAlerts.some((alert) => alert.severity === 'critical');
@@ -218,6 +256,35 @@ export default function Dashboard() {
     await refresh();
     setTimeout(() => setIsRefreshing(false), 500);
   };
+
+  // ── 场景 A 拦截渲染 ────────────────────────────────────────────────
+  // 首次安装 + gRPC 连接失败 ⇒ 全屏 Setup 引导页, 绝不渲染
+  // 全 0 的「残疾仪表盘」。必须放在 loading 分支**之后**: 首次尝试
+  // 连接期间(isLoading && !telemetry)先走原有的「正在连接」转圈,
+  // 失败落定后才进引导页 —— 否则页面会在加载瞬间闪引导页。
+  //
+  // 本分支 return 的位置在横幅渲染之前, 因此活跃告警横幅/陈旧横幅/
+  // 刚恢复卡片在这里都不会出现 —— 系统还没跑起来, 没有告警概念。
+  if (isFirstInstall) {
+    const handleSetupRetry = async () => {
+      // 先刷新本地状态(清 error 进入「正在重试」视觉), 再触发主进程立即采集
+      await refresh();
+      if (window.electronAPI?.retryDishConnection) {
+        await window.electronAPI.retryDishConnection();
+      }
+      // 真实结果走 telemetry-update 事件: 成功 ⇒ telemetry 到达, 引导页自动消失;
+      // 失败 ⇒ error 维持, 引导页仍在。这里不需要轮询。
+    };
+    return (
+      <SetupGuide
+        error={error}
+        isRetrying={setupIsRetrying}
+        connectTarget={dishEndpoint}
+        onRetry={handleSetupRetry}
+        onOpenSettings={() => navigate('/settings')}
+      />
+    );
+  }
 
   if (isLoading && !telemetry) {
     return (

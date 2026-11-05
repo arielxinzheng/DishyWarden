@@ -388,6 +388,25 @@ ipcMain.handle('update-collector-config', (_event, config) => {
 });
 
 /**
+ * IPC 处理器：立即重试设备连接（场景 A 引导页的「重试连接」按钮）
+ *
+ * `updateConfig({})` 传空对象 = 配置不变但强制 stop()/start() ——
+ * start() 会立刻 collect() 一次, 结果经既有事件流回渲染层:
+ *   成功 → collector 'data' → 'telemetry-update' → 引导页自动消失
+ *   失败 → collect() 抛错被 catch, 渲染层靠下一次 getLatestTelemetry
+ *          仍拿不到数据维持 error 态
+ *
+ * ⚠️ `historian.collect()` 失败只 emit('error') 打日志, 不产生新遥测 ——
+ * 所以渲染层的判定依据仍然是「是否收到 telemetry-update」, 与
+ * 本 IPC 的返回值无关。返回值只表示「已触发重试」。
+ */
+ipcMain.handle('retry-dish-connection', () => {
+  if (!collector) return { success: false, error: 'collector 未初始化' };
+  collector.updateConfig({});
+  return { success: true };
+});
+
+/**
  * IPC 处理器：获取 Prometheus 状态
  */
 ipcMain.handle('get-prometheus-status', () => {

@@ -64,7 +64,10 @@ export interface ElectronAPI {
   
   // 更新采集器配置
   updateCollectorConfig: (config: any) => Promise<{ success: boolean }>;
-  
+
+  // 立即重试设备连接（场景 A 引导页用; 触发一次真实采集, 结果走 telemetry-update 事件）
+  retryDishConnection: () => Promise<{ success: boolean; error?: string }>;
+
   // 监听遥测数据更新
   onTelemetryUpdate: (callback: (data: TelemetryData) => void) => () => void;
   
@@ -200,6 +203,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCollectorStats: () => ipcRenderer.invoke('get-collector-stats'),
   
   updateCollectorConfig: (config: any) => ipcRenderer.invoke('update-collector-config', config),
+
+  retryDishConnection: () => ipcRenderer.invoke('retry-dish-connection'),
   
   onTelemetryUpdate: (callback: (data: TelemetryData) => void) => {
     const listener = (_event: any, data: TelemetryData) => callback(data);
