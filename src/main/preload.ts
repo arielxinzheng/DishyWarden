@@ -66,6 +66,9 @@ export interface ElectronAPI {
     deviceId?: string;
   }) => Promise<{ success: boolean; error?: string }>;
 
+  // 撤销误报标记
+  unmarkFalsePositive: (alertKey: string) => Promise<{ success: boolean; error?: string }>;
+
   // 获取告警历史（包括已恢复）
   getAlertHistory: (params: {
     limit?: number;
@@ -212,6 +215,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     alertKey: string;
     deviceId?: string;
   }) => ipcRenderer.invoke('mark-false-positive', params),
+
+  unmarkFalsePositive: (alertKey: string) => ipcRenderer.invoke('unmark-false-positive', alertKey),
 
   getAlertHistory: (params: {
     limit?: number;

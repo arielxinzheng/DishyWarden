@@ -1408,6 +1408,9 @@ export class AlertManager extends EventEmitter {
 
   /**
    * 标记告警为误报
+   *
+   * 语义：用户否认该事件真实发生过。告警立即终结、移入历史，
+   * 终态为 false_positive 而非 resolved，并从此刻起冻结快照。
    */
   markFalsePositive(alertKey: string, deviceId?: string): void {
     this.db.markFalsePositive(alertKey);
@@ -1418,6 +1421,14 @@ export class AlertManager extends EventEmitter {
       timestamp: new Date().toISOString(),
       tag: 'User_Marked_False_Positive',
     })}`);
+  }
+
+  /**
+   * 撤销误报，把告警退回活跃列表
+   */
+  unmarkFalsePositive(alertKey: string): void {
+    this.db.unmarkFalsePositive(alertKey);
+    console.log(`[AlertManager] 撤销误报标记: ${alertKey}`);
   }
 
   /**

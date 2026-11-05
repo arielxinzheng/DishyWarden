@@ -8,12 +8,26 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 
+/**
+ * 告警生命周期状态。
+ *
+ *   new ──► ongoing ──(条件消失)──► resolved
+ *            │
+ *            └──(用户标记误报)────► false_positive
+ *
+ * resolved 与 false_positive 都是终态，区别在于：
+ * - resolved      物理故障真实发生过，duration 有意义
+ * - false_positive 用户判定"根本没发生过"，duration 无意义
+ *                  且该行作为负样本永久冻结，不再被采集覆盖
+ */
+export type AlertStatus = 'new' | 'ongoing' | 'resolved' | 'false_positive';
+
 export interface AlertRecord {
   id?: number;
   alert_key: string;
   alert_type: string;
   severity: 'critical' | 'warning' | 'info';
-  status: 'new' | 'ongoing' | 'resolved';
+  status: AlertStatus;
   first_seen: string;
   last_seen: string;
   occurrence_count: number;
@@ -21,12 +35,13 @@ export interface AlertRecord {
   notification_count: number;
   summary: string;
   description: string;
-  evidence: string; // JSON string
+  evidence: string; // JSON string — 触发瞬间的快照，误报时作为负样本保留
   recommendations: string; // JSON string
   // 降噪字段
   snooze_until?: string | null; // ISO 时间戳, 忽略直到该时刻
   snooze_type?: 'temporary' | 'until_resolved' | null; // 忽略类型
-  marked_false_positive?: boolean; // 是否标记为误报
+  // 注: 旧版有 marked_false_positive 布尔列，已由 status='false_positive' 取代。
+  // 数据库列仍保留（避免迁移风险），但代码中不再作为真值来源，无任何读取方。
 }
 
 export type Severity = AlertRecord['severity'];
@@ -111,14 +126,34 @@ export class AlertDatabase {
         this.db.exec(column.ddl);
       }
     }
+
+    // 旧版的「误报」只是一个布尔标记，告警仍停留在活跃列表里。
+    // 新状态机把误报提升为独立终态，把存量数据回填过去，避免两套真值并存。
+    this.db.exec(`
+      UPDATE alerts
+      SET status = 'false_positive',
+          marked_false_positive = 0,
+          snooze_until = NULL,
+          snooze_type = NULL
+      WHERE marked_false_positive = 1
+        AND status <> 'false_positive';
+    `);
   }
 
   /**
    * 记录或更新告警
-   * @returns 'new' | 'ongoing' | 'resolved'
+   * @returns 'new' | 'ongoing' | 'resolved' | 'false_positive'
+   *          false_positive 表示该行已被用户标记误报，本次写入被忽略
    */
-  upsertAlert(alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'>): 'new' | 'ongoing' | 'resolved' {
+  upsertAlert(alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'>): AlertStatus {
     const existing = this.getAlertByKey(alert.alert_key);
+
+    // 误报是终态：整行冻结，作为阈值调优的负样本原样保留。
+    // 不能让流程落到下面的「持续触发」分支——那样 evidence 会被每轮采集
+    // 覆盖成新快照、occurrence_count 无限增长，负样本就废了。
+    if (existing && existing.status === 'false_positive') {
+      return 'false_positive';
+    }
 
     if (!existing) {
       // 新告警
@@ -305,19 +340,46 @@ export class AlertDatabase {
   }
 
   /**
-   * 标记告警为误报
+   * 标记告警为误报 —— 把告警推入终态 false_positive。
+   *
+   * 与「忽略」的本质区别：忽略只是暂时不提醒，告警仍在生命周期内；
+   * 误报是用户否认该事件发生过，因此直接终结活跃生命周期、移入历史。
+   *
+   * evidence 字段不动：它保存着触发瞬间的延迟/丢包/探针状态，
+   * 是后续调阈值的负样本，必须原样留在库里。
    */
   markFalsePositive(alertKey: string): void {
+    // last_seen 冻结在标记时刻，让历史列表按 last_seen 排序时位置合理；
+    // 同时清空 snooze 字段，避免「已终态 + 仍在忽略中」这种矛盾状态。
     const stmt = this.db.prepare(`
       UPDATE alerts
-      SET marked_false_positive = 1,
+      SET status = 'false_positive',
+          marked_false_positive = 0,
           snooze_until = NULL,
-          snooze_type = 'until_resolved',
+          snooze_type = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE alert_key = ?
+        AND status IN ('new', 'ongoing')
     `);
 
     stmt.run(alertKey);
+  }
+
+  /**
+   * 撤销误报标记，把告警退回活跃生命周期。
+   * 没有这个出口，误点一次就会让该规则永久失效。
+   */
+  unmarkFalsePositive(alertKey: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE alerts
+      SET status = 'ongoing',
+          last_seen = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE alert_key = ?
+        AND status = 'false_positive'
+    `);
+
+    stmt.run(new Date().toISOString(), alertKey);
   }
 
   /**
@@ -342,6 +404,10 @@ export class AlertDatabase {
 
   /**
    * 清理已恢复的历史告警
+   *
+   * 只清理 resolved。false_positive 永不过期——它是规则引擎的负样本，
+   * 删掉就再也没法回头调阈值了。
+   *
    * @param daysToKeep 保留天数
    */
   cleanupResolvedAlerts(daysToKeep = 30): number {

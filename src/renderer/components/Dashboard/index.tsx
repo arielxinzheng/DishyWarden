@@ -149,11 +149,9 @@ export default function Dashboard() {
   }, []);
 
   // 过滤出未被忽略的告警 (用于横幅展示)
+  // 注: 误报告警 status='false_positive'，getActiveAlerts() 已不返回，无需在此过滤
   const visibleAlerts = useMemo(() => {
     return activeAlerts.filter(alert => {
-      // 标记为误报的不显示
-      if (alert.marked_false_positive) return false;
-      
       // 本次忽略的不显示
       if (alert.snooze_type === 'until_resolved') return false;
       

@@ -17,6 +17,8 @@ import {
   BellOff,
   MoreVertical,
   Bell,
+  Ban,
+  Undo2,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
@@ -46,12 +48,15 @@ const STATUS_LABEL: Record<Status, string> = {
   new: '新建',
   ongoing: '持续中',
   resolved: '已恢复',
+  false_positive: '🚫 已标记误报',
 };
 
 const STATUS_CLASS: Record<Status, string> = {
   new: 'text-red-400',
   ongoing: 'text-orange-400',
   resolved: 'text-green-400',
+  // 误报用中性灰：这是"作废"，不是"出过故障"，不该用告警色
+  false_positive: 'text-slate-400',
 };
 
 function AlertCard({ 
@@ -59,16 +64,22 @@ function AlertCard({
   onSnooze,
   onUnsnooze,
   onMarkFalsePositive,
+  onUnmarkFalsePositive,
 }: { 
   alert: AlertRecord;
   onSnooze: (alertKey: string, type: 'temporary' | 'until_resolved', durationMs?: number) => Promise<void>;
   onUnsnooze: (alertKey: string) => Promise<void>;
   onMarkFalsePositive: (alertKey: string) => Promise<void>;
+  onUnmarkFalsePositive: (alertKey: string) => Promise<void>;
 }) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   
   const meta = SEVERITY_META[alert.severity] ?? SEVERITY_META.info;
   const Icon = meta.icon;
+
+  // 误报终态：整卡作废化。它不再是"故障"，而是一条被用户否定的记录，
+  // 因此不参与忽略/恢复等任何生命周期语义。
+  const isVoided = alert.status === 'false_positive';
 
   const recommendations = useMemo(
     () => parseRecommendations(alert.recommendations),
@@ -85,9 +96,8 @@ function AlertCard({
     [alert.first_seen, alert.last_seen]
   );
 
-  // 检查是否被忽略
+  // 检查是否被忽略（误报已由 isVoided 单独处理，不在此列）
   const isSnoozed = useMemo(() => {
-    if (alert.marked_false_positive) return true;
     if (alert.snooze_type === 'until_resolved') return true;
     if (alert.snooze_until) {
       const snoozeUntil = new Date(alert.snooze_until).getTime();
@@ -126,15 +136,19 @@ function AlertCard({
     <Alert
       className={cn(
         'border-l-4 transition-all',
-        isSnoozed && 'opacity-50 border-l-slate-500 bg-slate-500/5',
-        !isSnoozed && alert.severity === 'critical' && 'border-l-red-500 bg-red-500/5',
-        !isSnoozed && alert.severity === 'warning' && 'border-l-yellow-500 bg-yellow-500/5',
-        !isSnoozed && alert.severity === 'info' && 'border-l-blue-500 bg-blue-500/5',
-        alert.status === 'resolved' && 'opacity-70'
+        // 误报：作废化 —— 整体降到 40% 不透明度，灰色左边框，不参与严重度配色
+        isVoided && 'opacity-40 border-l-slate-600 bg-slate-600/5',
+        !isVoided && isSnoozed && 'opacity-50 border-l-slate-500 bg-slate-500/5',
+        !isVoided && !isSnoozed && alert.severity === 'critical' && 'border-l-red-500 bg-red-500/5',
+        !isVoided && !isSnoozed && alert.severity === 'warning' && 'border-l-yellow-500 bg-yellow-500/5',
+        !isVoided && !isSnoozed && alert.severity === 'info' && 'border-l-blue-500 bg-blue-500/5',
+        !isVoided && alert.status === 'resolved' && 'opacity-70'
       )}
     >
       <div className="flex items-start gap-3 pl-7">
-        {isSnoozed ? (
+        {isVoided ? (
+          <Ban className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
+        ) : isSnoozed ? (
           <BellOff className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
         ) : (
           <Icon className={cn('mt-0.5 h-5 w-5 shrink-0', meta.className)} />
@@ -142,7 +156,15 @@ function AlertCard({
 
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <AlertTitle className="mb-0 text-base">{alert.summary}</AlertTitle>
+            <AlertTitle
+              className={cn(
+                'mb-0 text-base',
+                // 误报标题加删除线：这条告警已被用户否认
+                isVoided && 'line-through text-muted-foreground'
+              )}
+            >
+              {alert.summary}
+            </AlertTitle>
             <div className="flex items-center gap-1.5">
               <Badge variant={alert.severity === 'critical' ? 'destructive' : 'secondary'}>
                 {SEVERITY_META[alert.severity]?.label ?? alert.severity}
@@ -151,8 +173,8 @@ function AlertCard({
                 {STATUS_LABEL[alert.status] ?? alert.status}
               </span>
               
-              {/* 操作按钮 */}
-              {alert.status !== 'resolved' && (
+              {/* 操作按钮：终态（已恢复 / 已标记误报）不参与降噪操作 */}
+              {alert.status !== 'resolved' && !isVoided && (
                 <div className="relative">
                   {isSnoozed ? (
                     <button
@@ -184,6 +206,18 @@ function AlertCard({
                   )}
                 </div>
               )}
+
+              {/* 误报终态的唯一出口：误点后可撤销，否则该规则永久失效 */}
+              {isVoided && (
+                <button
+                  onClick={() => onUnmarkFalsePositive(alert.alert_key)}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title="撤销误报标记，退回活跃告警"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  撤销
+                </button>
+              )}
             </div>
           </div>
 
@@ -201,9 +235,10 @@ function AlertCard({
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground">
             <span>首次 {new Date(alert.first_seen).toLocaleString('zh-CN')}</span>
-            <span>最近 {new Date(alert.last_seen).toLocaleString('zh-CN')}</span>
+            {/* 误报没有物理故障的时间线：恢复时刻与持续时长都无意义，显示占位符 */}
+            <span>最近 {isVoided ? '-' : new Date(alert.last_seen).toLocaleString('zh-CN')}</span>
             <span>触发 {alert.occurrence_count} 次</span>
-            {duration && <span>持续 {duration}</span>}
+            {isVoided ? <span>持续 -</span> : duration && <span>持续 {duration}</span>}
             <span className="font-mono">{alert.alert_type}</span>
           </div>
 
@@ -316,13 +351,11 @@ export default function AlertsPage() {
   // 按忽略状态和严重程度排序: 未忽略的置顶, 已忽略的沉底
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      // 判断忽略状态
-      const aIsSnoozed = 
-        a.marked_false_positive || 
+      // 判断忽略状态（误报已不在活跃列表，这里只需处理限时/本次忽略）
+      const aIsSnoozed =
         a.snooze_type === 'until_resolved' ||
         (a.snooze_until && new Date(a.snooze_until).getTime() > Date.now());
-      const bIsSnoozed = 
-        b.marked_false_positive || 
+      const bIsSnoozed =
         b.snooze_type === 'until_resolved' ||
         (b.snooze_until && new Date(b.snooze_until).getTime() > Date.now());
       
@@ -354,11 +387,18 @@ export default function AlertsPage() {
   const handleMarkFalsePositive = async (alertKey: string) => {
     if (!window.electronAPI?.markFalsePositive) return;
 
+    // 成功后主进程广播 alerts-changed，本页重拉；
+    // 该告警会从活跃列表消失，出现在历史记录的「已标记误报」里
     const result = await window.electronAPI.markFalsePositive({ alertKey });
     if (result.success) {
       // TODO: 显示 Toast 提示
       console.log('感谢反馈，已为您清除该提示，我们将持续优化检测算法。');
     }
+  };
+
+  const handleUnmarkFalsePositive = async (alertKey: string) => {
+    if (!window.electronAPI?.unmarkFalsePositive) return;
+    await window.electronAPI.unmarkFalsePositive(alertKey);
   };
 
   const counts = useMemo(
@@ -484,6 +524,7 @@ export default function AlertsPage() {
                 onSnooze={handleSnooze}
                 onUnsnooze={handleUnsnooze}
                 onMarkFalsePositive={handleMarkFalsePositive}
+                onUnmarkFalsePositive={handleUnmarkFalsePositive}
               />
             ))}
           </div>

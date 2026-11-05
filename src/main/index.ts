@@ -437,6 +437,21 @@ ipcMain.handle('unsnooze-alert', (_event, alertKey: string) => {
 });
 
 /**
+ * IPC 处理器：撤销误报标记（把告警退回活跃列表）
+ */
+ipcMain.handle('unmark-false-positive', (_event, alertKey: string) => {
+  if (!alertManager) return { success: false, error: 'AlertManager 未初始化' };
+
+  try {
+    alertManager.unmarkFalsePositive(alertKey);
+    sendToRenderer('alerts-changed', { alertKey, action: 'unmark-false-positive' });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : '操作失败' };
+  }
+});
+
+/**
  * IPC 处理器：标记误报
  */
 ipcMain.handle('mark-false-positive', (_event, params: {
