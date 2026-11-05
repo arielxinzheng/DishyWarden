@@ -24,6 +24,7 @@ import {
   type HandoffOverrides,
   type TimeRangeKey,
 } from './handoffVisibility';
+import { buildTimeGrid, findNullRuns, gapMarkArea, type IndexRun } from './dataGaps';
 import { useEffect, useRef, useState } from 'react';
 
 interface LatencyChartProps {
@@ -31,6 +32,16 @@ interface LatencyChartProps {
   /** 由上层统一获取, 组件只负责渲染, 不再自己发起查询 */
   history: HistorySample[];
   isLoading?: boolean;
+  /**
+   * 图表时间窗 —— 必须与「状态色块条」**完全一致**。
+   *
+   * 为什么不让组件自己算 `Date.now() - range`:
+   *   状态条和折线要视觉对齐(看到红块, 往右看折线就有尖刺),
+   *   两个组件各自取 now 会差出几百毫秒 ⇒ 断流的灰带和灰块错位。
+   *   由上层派生一次、两边共用, 是 X 轴对齐的前提。
+   */
+  fromMs: number;
+  toMs: number;
   /**
    * 全局时间范围 —— 决定卫星切换标记的**默认**可见性。
    *
@@ -59,6 +70,8 @@ export function LatencyChart({
   height = 260,
   history,
   isLoading = false,
+  fromMs,
+  toMs,
   handoffs = [],
   timeRange = '1h',
 }: LatencyChartProps) {
@@ -132,52 +145,53 @@ export function LatencyChart({
   const lastTargetRef = useRef<{ max: number; interval: number }>(targetScale);
   const [chartData, setChartData] = useState<{
     time: string[];
-    latency: number[];
-    loss: number[];
+    latency: Array<number | null>;
+    loss: Array<number | null>;
     satellites: Array<[number, number]>;
+    /** 断流区间(栅格下标) —— 用来画"无数据"灰带 */
+    gaps: IndexRun[];
   }>({
     time: [],
     latency: [],
     loss: [],
     satellites: [],
+    gaps: [],
   });
 
   useEffect(() => {
-    if (history.length === 0) return;
+    if (!(toMs > fromMs)) return;
+
+    // 等时间栅格: 每个采样周期一格, 没数据的格子 sample = null。
+    //
+    // ⚠️ 为什么不再 `history.forEach` 逐样本画点 ——
+    //    样本数组只包含**有数据的时刻**, 断流期间一个条目都没有。
+    //    逐点 push 的话, 断流前后两个点会被 ECharts 直接连成一条直线,
+    //    视觉上"什么都没发生"; 更糟的是字段缺失时原来走 `?? 0` 兜底,
+    //    会把"没采到"画成"延迟 0ms" —— 那是极速, 是最严重的误导。
+    //
+    //    改栅格之后: 断流区是一段 null ⇒ 折线**物理断开**,
+    //    且断口宽度严格等于真实时长(31 分钟就占 31 分钟的图面宽)。
+    const grid = buildTimeGrid(history, fromMs, toMs);
 
     const time: string[] = [];
-    const latency: number[] = [];
-    const loss: number[] = [];
+    const latency: Array<number | null> = [];
+    const loss: Array<number | null> = [];
     const satellites: Array<[number, number]> = [];
 
-    // 采样点的时间戳, 用来把 handoff 时间映射到 x 轴下标
-    const sampleTimestamps: number[] = [];
+    // 栅格的时间戳, 用来把 handoff 时间映射到 x 轴下标
+    const sampleTimestamps: number[] = grid.map((cell) => cell.ts);
 
-    history.forEach((data) => {
-      const label = formatTimeLabel(data.timestamp);
-      if (!label) return;
-
-      // 根据当前模式选择延迟数据源
-      let latencyValue: number;
-      switch (mode) {
-        case 'public':
-          latencyValue = data.publicPingLatencyMs ?? 0;
-          break;
-        case 'gateway':
-          latencyValue = data.localGatewayLatencyMs ?? 0;
-          break;
-        case 'pop':
-        default:
-          latencyValue = data.popPingLatencyMs;
-          break;
+    for (const cell of grid) {
+      time.push(formatTimeLabel(cell.ts) ?? '');
+      if (!cell.sample) {
+        // 断流: 两个序列都留 null, 折线在此断开
+        latency.push(null);
+        loss.push(null);
+        continue;
       }
-
-      time.push(label);
-      latency.push(latencyValue);
-      // 丢包率（0..1 → 百分比），缺失样本按 0 处理
-      loss.push((data.popPingDropRate ?? 0) * 100);
-      sampleTimestamps.push(data.timestamp);
-    });
+      latency.push(pickLatency(cell.sample, mode));
+      loss.push(toLossPercent(cell.sample.popPingDropRate));
+    }
 
     // 卫星切换点。
     //
@@ -216,19 +230,25 @@ export function LatencyChart({
         }
         // 超出采样窗口(比如 handoff 比历史还新)就不画
         if (bestIndex < 0 || bestDelta > 5 * 60 * 1000) continue;
+        // ⚠️ 断流处的格子没有延迟值可挂 —— 星星标在 null 上会被
+        //    ECharts 静默丢弃, 但 tooltip 命中测试仍会算它,
+        //    所以显式跳过。
+        const y = latency[bestIndex];
+        if (y === null) continue;
         // 同一个采样点只标一次(避免密集切换叠成一个粗点)
         if (usedIndices.has(bestIndex)) continue;
         usedIndices.add(bestIndex);
-        satellites.push([bestIndex, latency[bestIndex]]);
+        satellites.push([bestIndex, y]);
       }
     }
 
-    setChartData({ time, latency, loss, satellites });
+    setChartData({ time, latency, loss, satellites, gaps: findNullRuns(latency) });
 
     // Y 轴目标量程: 按当前可见数据的峰值取整(最小值恒为 0)
     // 顶格与刻度间隔一起算 —— 间隔是顶格的函数, 分开算会各自漂移。
+    // 峰值计算会跳过 null(断流处), 见 latencyAxis.computeLatencyPeak。
     setTargetScale(computeLatencyAxisScale(computeLatencyPeak(latency)));
-  }, [history, mode, handoffs, showHandoffSeries]);
+  }, [history, mode, handoffs, showHandoffSeries, fromMs, toMs]);
 
   // 目标量程变化 ⇒ 开始新的一段过渡, 锁定这次的刻度间隔。
   //
@@ -309,17 +329,27 @@ export function LatencyChart({
         color: '#e2e8f0',
       },
       formatter: (params: any) => {
-        let result = `${params[0].axisValue}<br/>`;
-        params.forEach((item: any) => {
+        const items: any[] = Array.isArray(params) ? params : [params];
+        const axisValue = items.length > 0 ? items[0].axisValue : '';
+        const rows: string[] = [];
+
+        for (const item of items) {
+          // ⚠️ 断流处的值是 null —— 直接 `.toFixed()` 会在渲染期抛异常,
+          //    异常会冒到 ErrorBoundary 把整页换成白屏。
+          if (item.value === null || item.value === undefined) continue;
+
           if (item.seriesName === '延迟') {
-            result += `${item.marker}延迟: ${item.value.toFixed(1)} ms<br/>`;
+            rows.push(`${item.marker}延迟: ${Number(item.value).toFixed(1)} ms`);
           } else if (item.seriesName === '丢包率') {
-            result += `${item.marker}丢包率: ${item.value.toFixed(2)}%<br/>`;
+            rows.push(`${item.marker}丢包率: ${Number(item.value).toFixed(2)}%`);
           } else if (item.seriesName === '卫星切换') {
-            result += `★ 卫星切换<br/>`;
+            rows.push('★ 卫星切换');
           }
-        });
-        return result;
+        }
+
+        // 该时刻一个值都没有 ⇒ 明确说"数据缺失", 别留一个空 tooltip
+        if (rows.length === 0) return `${axisValue}<br/>数据缺失 (No Data)`;
+        return `${axisValue}<br/>${rows.join('<br/>')}`;
       },
     },
     grid: {
@@ -394,11 +424,24 @@ export function LatencyChart({
         type: 'line',
         smooth: true,
         symbol: 'none',
+        // ⚠️ **必须显式关掉** —— 断流处是 null, 连起来就等于
+        //    "假装没有中断, 直接从断流前连到断流后"。
+        //    关掉之后折线在 null 处物理断开, 留白即"无数据"。
+        connectNulls: false,
         data: chartData.latency,
         lineStyle: {
           color: '#4ade80',
           width: 2.5,
         },
+        // 断流底纹 —— 灰色半透明带 + "无数据"标注。
+        //
+        // 为什么光靠"折线断开"不够: 断开只说明"这里没有线",
+        // 但用户分不清是"没数据"还是"图表坏了"。灰带把这段区间
+        // **显式圈出来**, 语义就确定了。
+        //
+        // 配置本身在 `dataGaps.gapMarkArea` —— 吞吐图用的是同一份,
+        // 免得两个图的灰带颜色/最小宽度各自漂移。
+        markArea: gapMarkArea(chartData.gaps),
         areaStyle: {
           color: {
             type: 'linear',
@@ -425,6 +468,8 @@ export function LatencyChart({
         yAxisIndex: 1,
         smooth: true,
         symbol: 'none',
+        // 同上: 断流处必须断开, 否则会画出一条"跨断流区"的假丢包曲线
+        connectNulls: false,
         data: chartData.loss,
         lineStyle: {
           color: '#ef4444',
@@ -455,7 +500,31 @@ export function LatencyChart({
     ],
   };
 
-  if (isLoading || chartData.time.length === 0) {
+  /**
+   * 最后一个**有值**的点。
+   *
+   * 不能用 `series[series.length - 1]` —— 断流时末尾全是 null,
+   * 那样底部会显示 "NaN ms"。这里回退到最近一次真实采集,
+   * 它可能就是几十分钟前的值 —— 所以陈旧提示必须和它一起出现
+   * (见 Dashboard 顶部的"数据陈旧"横幅)。
+   */
+  const lastIdx = lastNonNullIndex(chartData.latency);
+  const lastLossIdx = lastNonNullIndex(chartData.loss);
+  const lastLatency = lastIdx >= 0 ? chartData.latency[lastIdx] : null;
+  const lastLoss = lastLossIdx >= 0 ? chartData.loss[lastLossIdx] : null;
+  const hasAnySample = lastLatency !== null || lastLoss !== null;
+
+  /** 末尾空档一直延伸到窗口右边界 ⇒ 采集仍在中断中 */
+  const trailingGap =
+    chartData.time.length > 0 &&
+    chartData.gaps.some((run) => run.to === chartData.time.length - 1);
+
+  /** 最后一条数据的时刻标签 —— 断流时用来说明"这些数字是什么时候的" */
+  const lastSampleLabel = chartData.time[lastIdx >= 0 ? lastIdx : lastLossIdx] ?? '—';
+
+  // 整窗一个样本都没有 ⇒ 不画空图。整屏灰带会让人以为渲染坏了,
+  // 明确写"暂无数据"更诚实。
+  if (isLoading || !hasAnySample) {
     return (
       <div
         style={{ height }}
@@ -570,13 +639,62 @@ export function LatencyChart({
 
       {/* 底部状态信息 */}
       <div className="mt-2 flex items-center gap-2 text-xs text-slate-400 border-t border-slate-700/40 pt-2">
-        <span className="w-2 h-2 rounded-full bg-accent-green shrink-0" />
+        {/* 圆点跟随"最新数据是否还在更新" —— 绿=正在采集, 灰=已断流 */}
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${
+            trailingGap ? 'bg-slate-500' : 'bg-accent-green'
+          }`}
+        />
         <span>
-          当前 {mode === 'public' ? '公网' : mode === 'pop' ? 'PoP' : '网关'}延迟: {' '}
-          {chartData.latency.length > 0 ? chartData.latency[chartData.latency.length - 1].toFixed(1) : '—'} ms，
-          丢包率: {chartData.loss.length > 0 ? chartData.loss[chartData.loss.length - 1].toFixed(2) : '—'}%
+          {trailingGap
+            ? `数据缺失 · 最后采集于 ${lastSampleLabel}（延迟 ${formatMs(lastLatency)} ms / 丢包 ${formatPct(lastLoss)}%）`
+            : `当前 ${mode === 'public' ? '公网' : mode === 'pop' ? 'PoP' : '网关'}延迟: ${formatMs(lastLatency)} ms，丢包率: ${formatPct(lastLoss)}%`}
         </span>
       </div>
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * 纯函数
+ * ------------------------------------------------------------------ */
+
+/**
+ * 按当前维度取延迟值。
+ *
+ * ⚠️ **缺失必须返回 null, 绝不能兜成 0** ——
+ *   0ms 的语义是"极速", 把"这个维度没采到"画成"好得离谱",
+ *   而且会把 Y 轴峰值和整条折线一起污染。
+ */
+function pickLatency(sample: HistorySample, mode: LatencyMode): number | null {
+  const raw =
+    mode === 'gateway'
+      ? sample.localGatewayLatencyMs
+      : mode === 'public'
+        ? sample.publicPingLatencyMs
+        : sample.popPingLatencyMs;
+
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+}
+
+/** 丢包率 0..1 → 百分比。缺失同样返回 null, 理由同上 */
+function toLossPercent(rate: number | undefined): number | null {
+  return typeof rate === 'number' && Number.isFinite(rate) ? rate * 100 : null;
+}
+
+/** 最后一个非 null 值的下标; 全空返回 -1 */
+function lastNonNullIndex(values: Array<number | null>): number {
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i] !== null) return i;
+  }
+  return -1;
+}
+
+/** 底栏展示用 —— null 显示为破折号, 而不是 NaN */
+function formatMs(value: number | null): string {
+  return value === null ? '—' : value.toFixed(1);
+}
+
+function formatPct(value: number | null): string {
+  return value === null ? '—' : value.toFixed(2);
 }

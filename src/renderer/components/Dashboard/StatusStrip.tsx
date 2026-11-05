@@ -21,9 +21,24 @@
  * | 出现过 **1 次** OFFLINE | 🔴 红 | Critical —— 只要断过就是断过 |
  * | 没断过, 但有 SEARCHING/BOOTING/高延迟 | 🟡 黄 | Warning —— 服务降级 |
  * | 100% 完美无异常 | 🟢 绿 | Online |
+ * | **该时段完全没有采样** | ⬜ 灰 | Unknown —— 采集中断, 状态未知 |
  *
  * 关键点: **"1 秒钟断网"也算断网**。所以不能用"占比过半"来判断,
  * 必须"出现过即命中"。这是"最差状态优先"而不是"多数表决"。
+ *
+ * ## 灰色(Unknown)与 carry-forward 的分工
+ *
+ * 早先的实现里, 空 slot 一律沿用前一片状态 —— 理由是"连接状态是持续量,
+ * 没采到新数据不等于状态变了"。这个假设**只在空隙很短时成立**:
+ *
+ * | 空隙长度 | 含义 | 处理 |
+ * |---|---|---|
+ * | < 3 个采集周期(90s) | 定时器抖动 / 偶发丢点 | carry-forward, 沿用前一片 |
+ * | ≥ 90s | 采集器没在工作 ⇒ **状态不可知** | 灰色 Unknown |
+ *
+ * 90s 这个阈值与折线图共用同一份判据(`dataGaps.gapToleranceMs`),
+ * 所以"折线断开的地方"和"色块变灰的地方"必然是同几段时间。
+ * 否则会出现"折线断了但色块一片绿" —— 同一张仪表盘自相矛盾。
  *
  * ## 视觉规则
  *
@@ -41,6 +56,7 @@
  */
 
 import type { HistorySample } from '../../../storage/types';
+import { findGaps, isInGap } from './dataGaps';
 import { StatusTooltip, useStatusTooltip } from './StatusTooltip';
 
 /** 状态语义色 —— 与仪表盘其它卡片的用色保持一致 */
@@ -48,11 +64,12 @@ export const STATUS_COLORS = {
   online: '#4ade80',    // 绿
   degraded: '#fbbf24',  // 黄(降级: 搜星中/启动中/高延迟)
   offline: '#ef4444',   // 红(断网)
-  empty: '#334155',     // 暗灰(无数据)
+  unknown: '#64748b',   // 中灰(采集中断 ⇒ 状态不可知)
+  empty: '#334155',     // 暗灰(既无数据也无前情: 窗口开头就没有任何采样)
 } as const;
 
 /** 一个时间片的状态分类 */
-export type StatusClass = 'online' | 'degraded' | 'offline' | 'empty';
+export type StatusClass = 'online' | 'degraded' | 'offline' | 'unknown' | 'empty';
 
 /**
  * 降级判定阈值 —— 与告警引擎(`src/alerting/manager.ts`)保持一致。
@@ -179,11 +196,17 @@ export function buildStatusSegments(
   //    2. 有数据的部分被压缩到左边 ⇒ 与右侧折线的 X 轴**对不齐**
   //      (折线按"第几个点"定位, 竖条按"绝对时间"定位, 压缩后就错位)
   //
-  // **空 slot 用前一个状态延续**(carry-forward), 而不是画灰:
-  // 连接状态是**持续量** —— 没采到新数据不等于状态变了。
-  // 采样间隔 30s、slot 宽数分钟, 边界上必然有空 slot;
-  // 若一律画灰, 连续在线也会被切成一堆灰绿灰绿的碎条, 反而看不清断网。
-  // 只有**开头**就没有数据的部分才算"无数据"(连前情都没有, 不能编)。
+  // 空 slot 分两种情况,**绝不能用同一种颜色糊过去**:
+  //
+  //   ① 空隙 < 3 个采集周期 ⇒ 定时器抖动, 状态没变 ⇒ carry-forward
+  //      (每次都画灰的话, 连续在线也会被切成一堆灰绿灰绿的碎条)
+  //   ② 空隙 ≥ 3 个采集周期 ⇒ 采集器没在工作, **状态根本不可知** ⇒ 灰色
+  //      (原来是 carry-forward, 于是采集器挂掉 31 分钟画成一片健康的绿)
+  //
+  // 判据来自 `dataGaps.findGaps`, 与折线断开的判据是**同一份** ——
+  // 折线断开的地方, 这里必然变灰。
+  const gaps = findGaps(history, fromMs, toMs);
+
   const segments: StatusSegment[] = [];
   let carryKlass: StatusClass | null = null;
   let carryStats = { outageCount: 0, sampleCount: 0, onlineCount: 0, degradedCount: 0 };
@@ -194,7 +217,26 @@ export function buildStatusSegments(
     const to = fromMs + (i + 1) * slotMs;
 
     if (!list.length) {
-      // 延续上一片的状态与统计(状态不变 ⇒ 断线次数也不变)
+      // 用 slot **中心点**判归属 —— 用边界判会在两段 gap 的接壤处
+      // 因半开半闭的约定反复横跳。
+      if (isInGap(gaps, (from + to) / 2)) {
+        segments.push({
+          klass: 'unknown',
+          from, to,
+          width: slotMs / span,
+          // 断流期间没有任何采样, 统计全部归零 —— 别把上一片的
+          // "2 次断线"带进来, 那是另一段时间的事。
+          outageCount: 0,
+          sampleCount: 0,
+          onlineCount: 0,
+          degradedCount: 0,
+        });
+        // ⚠️ 不更新 carryKlass: 断流之后如果又出现一个短空 slot,
+        //    它应该延续**断流之前**的真实状态, 而不是延续"未知"。
+        continue;
+      }
+
+      // 短抖动 ⇒ 延续上一片的状态与统计(状态不变 ⇒ 断线次数也不变)
       segments.push({
         klass: carryKlass ?? 'empty',
         from, to,
@@ -379,6 +421,11 @@ function statusTitle(seg: StatusSegment): string {
 
   if (seg.klass === 'online') {
     return `时间：${time} | 状态：100% 在线`;
+  }
+
+  if (seg.klass === 'unknown') {
+    // 明确说"不知道", 而不是让用户以为那条灰带是"某种已知状态"
+    return `时间：${time} | 状态：数据缺失（采集中断，状态未知）`;
   }
 
   return `时间：${time} | 状态：无数据`;

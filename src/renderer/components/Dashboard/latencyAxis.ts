@@ -136,13 +136,17 @@ export function computeLatencyAxisInterval(max: number): number {
  * （没有数据的桶），把它们算进峰值会让 Y 轴被拉高。
  * 这里只取大于 0 的值参与峰值计算（0 是"无数据"而不是"延迟为 0"）。
  *
- * @param values 延迟序列
+ * ⚠️ `null` 是断流占位（见 `dataGaps.buildTimeGrid`），
+ * `Number.isFinite(null)` 为 false，会被自动跳过 ——
+ * 这是"断流不能让 Y 轴塌成最小刻度"的保证。
+ *
+ * @param values 延迟序列（断流处为 null）
  * @returns 峰值（ms）；没有有效值时返回 0
  */
-export function computeLatencyPeak(values: number[]): number {
+export function computeLatencyPeak(values: Array<number | null>): number {
   let peak = 0;
   for (const v of values) {
-    if (Number.isFinite(v) && v > peak) peak = v;
+    if (v !== null && Number.isFinite(v) && v > peak) peak = v;
   }
   return peak;
 }

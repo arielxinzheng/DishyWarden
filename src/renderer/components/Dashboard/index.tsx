@@ -35,6 +35,7 @@ import { AlertDrawerContent } from './AlertDrawerContent';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
 import { MetricCard, CHART_HEIGHT } from './MetricCard';
 import { StatusStrip, SLICE_PLANS, fitStatusSlots, STATUS_GAP } from './StatusStrip';
+import { assessStaleness } from './dataGaps';
 import { RouterStatusRow } from './RouterStatusRow';
 import { buildMetricSeries, peakOf } from './metricSeries';
 import { Drawer } from '../ui/drawer';
@@ -55,6 +56,15 @@ const TIME_RANGE_SECONDS: Record<TimeRange, number> = {
 // 字节 → GB 数值（保留 2 位），单位由 UI 单独渲染
 const toGb = (bytes: number) => (bytes / 1024 ** 3).toFixed(2);
 
+/** 断流时长的人话表述 —— 「31 分钟」比「1860000 ms」有用得多 */
+const formatSilentMs = (ms: number): string => {
+  const sec = Math.round(ms / 1000);
+  if (sec < 90) return `${sec} 秒`;
+  const min = Math.round(sec / 60);
+  if (min < 90) return `${min} 分钟`;
+  return `${(min / 60).toFixed(1)} 小时`;
+};
+
 export default function Dashboard() {
   const { telemetry, isConnected, isLoading, error, refresh, obstruction } = useDish();
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
@@ -67,13 +77,14 @@ export default function Dashboard() {
   // 六张指标卡的走势序列：和图表共用同一份 history, 各取一条指标
   const metricSeries = useMemo(() => buildMetricSeries(history), [history]);
 
-  // 状态色块条的时间窗 —— 与 history / 延迟折线**完全一致**,
-  // 这是"色块与右侧折线 X 轴对齐"的前提。
+  // 全局图表时间窗 —— 延迟折线、状态色块条、数据陈旧判定**共用同一个**。
   //
-  // 切片方案固定(块数表达时间分辨率, 不随宽度变):
-  //   6h→36块(每块10分钟) / 1h→30块(2分钟) / 15m→30块(30秒)
-  //   (24h→48块 已备好, 但当前时间范围选择器里没有 24h)
-  const statusStripRange = useMemo(() => {
+  // ⚠️ 为什么必须共用:
+  //   ① 色块与折线要视觉对齐 —— 看到灰块, 往右看折线就应有断口
+  //   ② "断流"判据基于时间, 两个组件各取一次 `Date.now()` 会差出几百毫秒,
+  //      断流的灰带与灰块就会错位
+  //   ③ 陈旧横幅说的分钟数, 与图上尾部灰带的宽度必须一致
+  const chartWindow = useMemo(() => {
     const seconds = TIME_RANGE_SECONDS[timeRange];
     const to = Date.now();
     const from = to - seconds * 1000;
@@ -85,6 +96,18 @@ export default function Dashboard() {
       maxSlots: plan?.slots ?? 30,
     };
   }, [timeRange, history]);
+
+  /**
+   * 数据陈旧状态 —— 采集器挂了多久。
+   *
+   * 这是仪表盘上**最容易被忽略又最危险**的信号: 采集器中断时,
+   * 顶部那些大数字(延迟/丢包/速度)全都来自最后一次成功采集,
+   * 看起来完全正常。不显式提示就是误导。
+   */
+  const staleness = useMemo(
+    () => assessStaleness(history, chartWindow.to),
+    [history, chartWindow.to],
+  );
 
   // 状态色块条的可用宽度 —— 测**图表区基准层**, 不测条带自己。
   //
@@ -100,12 +123,12 @@ export default function Dashboard() {
     // 宽度还没测出来(首帧/极端窄屏)时用方案值。
     // ⚠️ 但宽度为 0 时 flex-1 的块会被压成 0 宽 —— 视觉上条带消失。
     //    所以宽度太小就退到最小块数, 保证每块至少有 1px 可见。
-    if (statusStripWidth <= 0) return statusStripRange.maxSlots;
+    if (statusStripWidth <= 0) return chartWindow.maxSlots;
     // 基准层含 p-4 的左右内边距(各 16px) ⇒ 减去 32 才是真正可画的宽
     const available = statusStripWidth - 32;
     if (available <= 0) return 1;
-    return fitStatusSlots(available, STATUS_GAP, statusStripRange.maxSlots, 6);
-  }, [statusStripWidth, statusStripRange.maxSlots]);
+    return fitStatusSlots(available, STATUS_GAP, chartWindow.maxSlots, 6);
+  }, [statusStripWidth, chartWindow.maxSlots]);
 
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>('30s');
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
@@ -533,6 +556,24 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* 数据陈旧横幅 —— 只在「尾部断流」超过阈值时出现。
+          位置刻意选在总览带**之后、指标卡之前**:
+          上面那句绿色「正常」、下面那些大数字, 全都来自最后一次成功采集,
+          不先讲清"数据是旧的", 越是健康的数字越误导。 */}
+      {staleness.isStale && (
+        <div className="flex items-start gap-3 rounded-xl border border-warning-orange/40 bg-warning-orange/10 px-4 py-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-orange" />
+          <div className="text-sm leading-5">
+            <span className="font-semibold text-warning-orange">
+              数据已 {formatSilentMs(staleness.silentMs)} 未更新
+            </span>
+            <span className="text-muted-foreground">
+              {' '}· 下方数值为最后一次成功采集的结果; 图表上的断口与状态条上的灰块即采集中断区间
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* 6 metric cards row with mini charts */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         <MetricCard
@@ -543,17 +584,18 @@ export default function Dashboard() {
           series={metricSeries.availability}
           chartType="line"
           domain={[0, 1]}
-          legendLeft={statusStripRange.leftLabel}
+          legendLeft={chartWindow.leftLabel}
           legendRight="Now"
           chartAreaRef={statusCardRef}
         >
           {/* 状态色块条 —— 取代折线。
               与下方「延迟」折线共用同一份 history 和同一个时间窗,
-              所以 X 轴天然对齐: 看到红块, 往右看延迟折线就有对应尖刺。 */}
+              所以 X 轴天然对齐: 看到红块, 往右看延迟折线就有对应尖刺;
+              看到**灰块**, 折线在那里必然是**断开的**。 */}
           <StatusStrip
             history={history}
-            fromMs={statusStripRange.from}
-            toMs={statusStripRange.to}
+            fromMs={chartWindow.from}
+            toMs={chartWindow.to}
             slots={statusSlots}
             height={CHART_HEIGHT}
           />
@@ -615,6 +657,8 @@ export default function Dashboard() {
                 height={260}
                 history={history}
                 isLoading={historyLoading}
+                fromMs={chartWindow.from}
+                toMs={chartWindow.to}
                 handoffs={handoffs}
                 timeRange={timeRange}
               />
@@ -637,7 +681,13 @@ export default function Dashboard() {
               <CardTitle>吞吐量</CardTitle>
             </CardHeader>
             <CardContent>
-              <ThroughputChart height={280} history={history} isLoading={historyLoading} />
+              <ThroughputChart
+                height={280}
+                history={history}
+                fromMs={chartWindow.from}
+                toMs={chartWindow.to}
+                isLoading={historyLoading}
+              />
             </CardContent>
           </Card>
         </div>
