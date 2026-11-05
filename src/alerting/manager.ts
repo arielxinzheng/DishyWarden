@@ -1433,6 +1433,9 @@ export class AlertManager extends EventEmitter {
 
   /**
    * 获取告警历史（包括已恢复）
+   *
+   * 主入口是 queryHistory —— 它一次返回列表和总数，且支持时间范围。
+   * 这个方法只为既有调用方保留位置参数形态。
    */
   getAlertHistory(
     limit = 100,
@@ -1451,6 +1454,16 @@ export class AlertManager extends EventEmitter {
     statusFilter?: import('./database').Status
   ): number {
     return this.db.getAlertCount(severityFilter, statusFilter);
+  }
+
+  /**
+   * 历史查询：分页 + 严重度/状态/时间范围筛选的唯一入口。
+   * IPC 层直接透传契约对象，不再拆成两个方法各拼一遍条件。
+   */
+  queryHistory(
+    query: import('./database').AlertHistoryQuery = {}
+  ): { alerts: AlertRecord[]; total: number } {
+    return this.db.queryHistory(query);
   }
 
   /**

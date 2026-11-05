@@ -11,6 +11,30 @@ import type { ProbeResult, ProbeNodeState } from '../core/probeRunner';
 import type { HandoffEvent } from '../core/outageAnalyzer';
 
 /**
+ * 告警历史查询参数。
+ *
+ * 声明成独立类型而不是在 interface 和实现里各写一遍 —— 之前就是两处重复，
+ * 加 `keyword` 时只改了 interface，实现签名悄悄落后，靠 TS 也没报错
+ * （实现是对象字面量，不参与 ElectronAPI 的赋值检查）。
+ *
+ * from/to 为 ISO 8601 UTC，比较 last_seen，用于默认 7 天窗口和自定义日期范围。
+ */
+export interface AlertHistoryParams {
+  limit?: number;
+  offset?: number;
+  severity?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  keyword?: string;
+  /**
+   * 只要终态（resolved / false_positive）。
+   * 历史视图恒传 true；不传则保留全表语义（诊断 / 统计 / 单元测试用）。
+   */
+  terminalOnly?: boolean;
+}
+
+/**
  * Electron API 接口定义
  */
 export interface ElectronAPI {
@@ -70,12 +94,7 @@ export interface ElectronAPI {
   unmarkFalsePositive: (alertKey: string) => Promise<{ success: boolean; error?: string }>;
 
   // 获取告警历史（包括已恢复）
-  getAlertHistory: (params: {
-    limit?: number;
-    offset?: number;
-    severity?: string;
-    status?: string;
-  }) => Promise<{ alerts: AlertRecord[]; total: number }>;
+  getAlertHistory: (params: AlertHistoryParams) => Promise<{ alerts: AlertRecord[]; total: number }>;
 
   // 监听新告警
   onAlertNew: (callback: (alert: AlertRecord) => void) => () => void;
@@ -218,12 +237,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   unmarkFalsePositive: (alertKey: string) => ipcRenderer.invoke('unmark-false-positive', alertKey),
 
-  getAlertHistory: (params: {
-    limit?: number;
-    offset?: number;
-    severity?: string;
-    status?: string;
-  }) => ipcRenderer.invoke('get-alert-history', params),
+  getAlertHistory: (params: AlertHistoryParams) => ipcRenderer.invoke('get-alert-history', params),
 
   onAlertNew: (callback: (alert: AlertRecord) => void) => {
     const listener = (_event: any, alert: AlertRecord) => callback(alert);

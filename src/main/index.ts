@@ -493,29 +493,17 @@ ipcMain.handle('get-latest-dns-probe', () => {
 
 /**
  * IPC 处理器：获取告警历史
+ *
+ * 条件是契约对象，原样透传给 manager。IPC 层不做字段拆解、不设默认值 ——
+ * 否则每加一个筛选维度（时间范围就是这么来的）都要在这里再写一遍转发。
  */
-ipcMain.handle('get-alert-history', (_event, params: {
-  limit?: number;
-  offset?: number;
-  severity?: string;
-  status?: string;
-}) => {
-  if (!alertManager) return { alerts: [], total: 0 };
-  
-  const { limit = 100, offset = 0, severity, status } = params;
-  const alerts = alertManager.getAlertHistory(
-    limit,
-    offset,
-    severity as any,
-    status as any
-  );
-  const total = alertManager.getAlertCount(
-    severity as any,
-    status as any
-  );
-  
-  return { alerts, total };
-});
+ipcMain.handle(
+  'get-alert-history',
+  (_event, params: import('../alerting/database').AlertHistoryQuery = {}) => {
+    if (!alertManager) return { alerts: [], total: 0 };
+    return alertManager.queryHistory(params ?? {});
+  }
+);
 
 /**
  * IPC 处理器：更新告警通知配置
