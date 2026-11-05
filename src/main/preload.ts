@@ -50,6 +50,22 @@ export interface ElectronAPI {
   // 获取活跃告警列表
   getActiveAlerts: () => Promise<AlertRecord[]>;
 
+  // 忽略告警
+  snoozeAlert: (params: {
+    alertKey: string;
+    snoozeType: 'temporary' | 'until_resolved';
+    durationMs?: number;
+  }) => Promise<{ success: boolean; error?: string }>;
+
+  // 取消忽略告警
+  unsnoozeAlert: (alertKey: string) => Promise<{ success: boolean; error?: string }>;
+
+  // 标记误报
+  markFalsePositive: (params: {
+    alertKey: string;
+    deviceId?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+
   // 获取告警历史（包括已恢复）
   getAlertHistory: (params: {
     limit?: number;
@@ -178,6 +194,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   getActiveAlerts: () => ipcRenderer.invoke('get-active-alerts'),
+
+  snoozeAlert: (params: {
+    alertKey: string;
+    snoozeType: 'temporary' | 'until_resolved';
+    durationMs?: number;
+  }) => ipcRenderer.invoke('snooze-alert', params),
+
+  unsnoozeAlert: (alertKey: string) => ipcRenderer.invoke('unsnooze-alert', alertKey),
+
+  markFalsePositive: (params: {
+    alertKey: string;
+    deviceId?: string;
+  }) => ipcRenderer.invoke('mark-false-positive', params),
 
   getAlertHistory: (params: {
     limit?: number;

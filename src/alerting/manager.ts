@@ -1388,6 +1388,39 @@ export class AlertManager extends EventEmitter {
   }
 
   /**
+   * 忽略告警
+   * @param alertKey 告警唯一标识
+   * @param snoozeType 忽略类型
+   * @param durationMs 忽略时长(毫秒), 仅 temporary 类型需要
+   */
+  snoozeAlert(alertKey: string, snoozeType: 'temporary' | 'until_resolved', durationMs?: number): void {
+    this.db.snoozeAlert(alertKey, snoozeType, durationMs);
+    console.log(`[AlertManager] 告警已忽略: ${alertKey}, 类型: ${snoozeType}, 时长: ${durationMs ? `${durationMs / 1000}s` : 'N/A'}`);
+  }
+
+  /**
+   * 取消忽略告警
+   */
+  unsnoozeAlert(alertKey: string): void {
+    this.db.unsnoozeAlert(alertKey);
+    console.log(`[AlertManager] 取消忽略告警: ${alertKey}`);
+  }
+
+  /**
+   * 标记告警为误报
+   */
+  markFalsePositive(alertKey: string, deviceId?: string): void {
+    this.db.markFalsePositive(alertKey);
+    // 打点日志(未来可上报到服务端)
+    console.log(`[AlertManager] 用户标记误报: ${JSON.stringify({
+      alertKey,
+      deviceId: deviceId || 'unknown',
+      timestamp: new Date().toISOString(),
+      tag: 'User_Marked_False_Positive',
+    })}`);
+  }
+
+  /**
    * 获取告警历史（包括已恢复）
    */
   getAlertHistory(

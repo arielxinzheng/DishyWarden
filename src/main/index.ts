@@ -402,6 +402,55 @@ ipcMain.handle('get-active-alerts', () => {
 });
 
 /**
+ * IPC 处理器：忽略告警
+ */
+ipcMain.handle('snooze-alert', (_event, params: {
+  alertKey: string;
+  snoozeType: 'temporary' | 'until_resolved';
+  durationMs?: number;
+}) => {
+  if (!alertManager) return { success: false, error: 'AlertManager 未初始化' };
+  
+  try {
+    alertManager.snoozeAlert(params.alertKey, params.snoozeType, params.durationMs);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : '操作失败' };
+  }
+});
+
+/**
+ * IPC 处理器：取消忽略告警
+ */
+ipcMain.handle('unsnooze-alert', (_event, alertKey: string) => {
+  if (!alertManager) return { success: false, error: 'AlertManager 未初始化' };
+  
+  try {
+    alertManager.unsnoozeAlert(alertKey);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : '操作失败' };
+  }
+});
+
+/**
+ * IPC 处理器：标记误报
+ */
+ipcMain.handle('mark-false-positive', (_event, params: {
+  alertKey: string;
+  deviceId?: string;
+}) => {
+  if (!alertManager) return { success: false, error: 'AlertManager 未初始化' };
+  
+  try {
+    alertManager.markFalsePositive(params.alertKey, params.deviceId);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : '操作失败' };
+  }
+});
+
+/**
  * IPC 处理器：获取最新 DNS 探测结果
  */
 ipcMain.handle('get-latest-dns-probe', () => {

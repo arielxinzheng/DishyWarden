@@ -142,12 +142,31 @@ export default function Dashboard() {
     }
   }, []);
 
-  // 判断是否有严重告警
-  const hasCriticalAlerts = useMemo(() => {
-    return activeAlerts.some((alert) => alert.severity === 'critical');
+  // 过滤出未被忽略的告警 (用于横幅展示)
+  const visibleAlerts = useMemo(() => {
+    return activeAlerts.filter(alert => {
+      // 标记为误报的不显示
+      if (alert.marked_false_positive) return false;
+      
+      // 本次忽略的不显示
+      if (alert.snooze_type === 'until_resolved') return false;
+      
+      // 限时忽略且未过期的不显示
+      if (alert.snooze_until) {
+        const snoozeUntil = new Date(alert.snooze_until).getTime();
+        if (Date.now() < snoozeUntil) return false;
+      }
+      
+      return true;
+    });
   }, [activeAlerts]);
 
-  const hasAlerts = activeAlerts.length > 0;
+  // 判断是否有严重告警 (基于可见告警)
+  const hasCriticalAlerts = useMemo(() => {
+    return visibleAlerts.some((alert) => alert.severity === 'critical');
+  }, [visibleAlerts]);
+
+  const hasAlerts = visibleAlerts.length > 0;
 
   // 自动刷新逻辑
   useEffect(() => {
@@ -363,7 +382,7 @@ export default function Dashboard() {
                 {hasCriticalAlerts ? '⚠️ 检测到严重告警' : '⚠️ 检测到网络环境异常'}
               </span>
               <Badge variant={hasCriticalAlerts ? 'destructive' : 'secondary'}>
-                {activeAlerts.length} 个
+                {visibleAlerts.length} 个
               </Badge>
             </div>
             <button 
@@ -388,7 +407,16 @@ export default function Dashboard() {
         title="活跃告警"
         width="md"
       >
-        <AlertDrawerContent alerts={activeAlerts} />
+        <AlertDrawerContent 
+          alerts={activeAlerts}
+          onAlertsChange={async () => {
+            // 重新加载告警列表
+            if (window.electronAPI) {
+              const alerts = await window.electronAPI.getActiveAlerts();
+              setActiveAlerts(alerts || []);
+            }
+          }}
+        />
       </Drawer>
 
       {/* System overview band - 5 status blocks */}

@@ -14,6 +14,9 @@ import {
   ShieldAlert,
   ChevronLeft,
   ChevronRight,
+  BellOff,
+  MoreVertical,
+  Bell,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
@@ -25,6 +28,7 @@ import {
   formatAlertDuration,
 } from '../lib/alertFormat';
 import type { AlertRecord } from '../../alerting/database';
+import { AlertSnoozeMenu } from '../components/Dashboard/AlertSnoozeMenu';
 
 type Severity = AlertRecord['severity'];
 type Status = AlertRecord['status'];
@@ -50,7 +54,19 @@ const STATUS_CLASS: Record<Status, string> = {
   resolved: 'text-green-400',
 };
 
-function AlertCard({ alert }: { alert: AlertRecord }) {
+function AlertCard({ 
+  alert, 
+  onSnooze,
+  onUnsnooze,
+  onMarkFalsePositive,
+}: { 
+  alert: AlertRecord;
+  onSnooze: (alertKey: string, type: 'temporary' | 'until_resolved', durationMs?: number) => Promise<void>;
+  onUnsnooze: (alertKey: string) => Promise<void>;
+  onMarkFalsePositive: (alertKey: string) => Promise<void>;
+}) {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  
   const meta = SEVERITY_META[alert.severity] ?? SEVERITY_META.info;
   const Icon = meta.icon;
 
@@ -69,18 +85,60 @@ function AlertCard({ alert }: { alert: AlertRecord }) {
     [alert.first_seen, alert.last_seen]
   );
 
+  // 检查是否被忽略
+  const isSnoozed = useMemo(() => {
+    if (alert.marked_false_positive) return true;
+    if (alert.snooze_type === 'until_resolved') return true;
+    if (alert.snooze_until) {
+      const snoozeUntil = new Date(alert.snooze_until).getTime();
+      if (Date.now() < snoozeUntil) return true;
+    }
+    return false;
+  }, [alert]);
+
+  // 计算剩余忽略时间
+  const snoozeRemaining = useMemo(() => {
+    if (alert.snooze_type === 'until_resolved') return '本次已忽略';
+    if (!alert.snooze_until) return null;
+    
+    const snoozeUntil = new Date(alert.snooze_until).getTime();
+    const now = Date.now();
+    if (now >= snoozeUntil) return null;
+    
+    const remainingMs = snoozeUntil - now;
+    const hours = Math.floor(remainingMs / (60 * 60 * 1000));
+    const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+    
+    if (hours > 0) return `剩余 ${hours} 小时 ${minutes} 分钟`;
+    return `剩余 ${minutes} 分钟`;
+  }, [alert]);
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    const handleClick = () => setOpenMenuId(null);
+    if (openMenuId) {
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [openMenuId]);
+
   return (
     <Alert
       className={cn(
-        'border-l-4',
-        alert.severity === 'critical' && 'border-l-red-500 bg-red-500/5',
-        alert.severity === 'warning' && 'border-l-yellow-500 bg-yellow-500/5',
-        alert.severity === 'info' && 'border-l-blue-500 bg-blue-500/5',
+        'border-l-4 transition-all',
+        isSnoozed && 'opacity-50 border-l-slate-500 bg-slate-500/5',
+        !isSnoozed && alert.severity === 'critical' && 'border-l-red-500 bg-red-500/5',
+        !isSnoozed && alert.severity === 'warning' && 'border-l-yellow-500 bg-yellow-500/5',
+        !isSnoozed && alert.severity === 'info' && 'border-l-blue-500 bg-blue-500/5',
         alert.status === 'resolved' && 'opacity-70'
       )}
     >
       <div className="flex items-start gap-3 pl-7">
-        <Icon className={cn('mt-0.5 h-5 w-5 shrink-0', meta.className)} />
+        {isSnoozed ? (
+          <BellOff className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        ) : (
+          <Icon className={cn('mt-0.5 h-5 w-5 shrink-0', meta.className)} />
+        )}
 
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -92,10 +150,52 @@ function AlertCard({ alert }: { alert: AlertRecord }) {
               <span className={cn('text-xs font-medium', STATUS_CLASS[alert.status])}>
                 {STATUS_LABEL[alert.status] ?? alert.status}
               </span>
+              
+              {/* 操作按钮 */}
+              {alert.status !== 'resolved' && (
+                <div className="relative">
+                  {isSnoozed ? (
+                    <button
+                      onClick={() => onUnsnooze(alert.alert_key)}
+                      className="p-1.5 rounded hover:bg-accent-green/10 text-accent-green transition-colors"
+                      title="恢复提醒"
+                    >
+                      <Bell className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(openMenuId === alert.alert_key ? null : alert.alert_key);
+                      }}
+                      className="p-1.5 rounded hover:bg-muted transition-colors"
+                      title="忽略选项"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  )}
+                  
+                  {openMenuId === alert.alert_key && !isSnoozed && (
+                    <AlertSnoozeMenu
+                      onSnooze={(type, durationMs) => onSnooze(alert.alert_key, type, durationMs)}
+                      onMarkFalsePositive={() => onMarkFalsePositive(alert.alert_key)}
+                      onClose={() => setOpenMenuId(null)}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          {alert.description && (
+          {/* 忽略状态提示 */}
+          {isSnoozed && snoozeRemaining && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 border border-border/50 rounded px-3 py-1.5">
+              <BellOff className="w-4 h-4 shrink-0" />
+              <span>{snoozeRemaining}</span>
+            </div>
+          )}
+
+          {alert.description && !isSnoozed && (
             <AlertDescription>{alert.description}</AlertDescription>
           )}
 
@@ -107,7 +207,7 @@ function AlertCard({ alert }: { alert: AlertRecord }) {
             <span className="font-mono">{alert.alert_type}</span>
           </div>
 
-          {evidence && Object.keys(evidence).length > 0 && (
+          {!isSnoozed && evidence && Object.keys(evidence).length > 0 && (
             <details className="text-xs">
               <summary className="cursor-pointer select-none text-muted-foreground">
                 证据数据
@@ -123,7 +223,7 @@ function AlertCard({ alert }: { alert: AlertRecord }) {
             </details>
           )}
 
-          {recommendations.length > 0 && (
+          {!isSnoozed && recommendations.length > 0 && (
             <div className="mt-2 border-t border-border/40 pt-2">
               <div className="mb-1 text-xs font-medium">建议处理</div>
               <ul className="list-inside list-disc space-y-0.5 text-xs text-muted-foreground">
@@ -207,6 +307,61 @@ export default function AlertsPage() {
   const filtered = viewMode === 'active'
     ? (filter === 'all' ? alerts : alerts.filter((a) => a.severity === filter))
     : alerts;
+
+  // 按忽略状态和严重程度排序: 未忽略的置顶, 已忽略的沉底
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      // 判断忽略状态
+      const aIsSnoozed = 
+        a.marked_false_positive || 
+        a.snooze_type === 'until_resolved' ||
+        (a.snooze_until && new Date(a.snooze_until).getTime() > Date.now());
+      const bIsSnoozed = 
+        b.marked_false_positive || 
+        b.snooze_type === 'until_resolved' ||
+        (b.snooze_until && new Date(b.snooze_until).getTime() > Date.now());
+      
+      // 未忽略的优先
+      if (aIsSnoozed !== bIsSnoozed) {
+        return aIsSnoozed ? 1 : -1;
+      }
+      
+      // 同状态下按严重程度排序
+      const severityOrder = { critical: 0, warning: 1, info: 2 };
+      return (severityOrder[a.severity as keyof typeof severityOrder] ?? 99) - 
+             (severityOrder[b.severity as keyof typeof severityOrder] ?? 99);
+    });
+  }, [filtered]);
+
+  const handleSnooze = async (alertKey: string, type: 'temporary' | 'until_resolved', durationMs?: number) => {
+    if (!window.electronAPI?.snoozeAlert) return;
+    
+    const result = await window.electronAPI.snoozeAlert({ alertKey, snoozeType: type, durationMs });
+    if (result.success) {
+      // 重新加载告警列表
+      load();
+    }
+  };
+
+  const handleUnsnooze = async (alertKey: string) => {
+    if (!window.electronAPI?.unsnoozeAlert) return;
+    
+    const result = await window.electronAPI.unsnoozeAlert(alertKey);
+    if (result.success) {
+      load();
+    }
+  };
+
+  const handleMarkFalsePositive = async (alertKey: string) => {
+    if (!window.electronAPI?.markFalsePositive) return;
+    
+    const result = await window.electronAPI.markFalsePositive({ alertKey });
+    if (result.success) {
+      load();
+      // TODO: 显示 Toast 提示
+      console.log('感谢反馈，已为您清除该提示，我们将持续优化检测算法。');
+    }
+  };
 
   const counts = useMemo(
     () => ({
@@ -324,8 +479,14 @@ export default function AlertsPage() {
       {filtered.length > 0 && (
         <>
           <div className="space-y-3">
-            {filtered.map((alert) => (
-              <AlertCard key={alert.id ?? alert.alert_key} alert={alert} />
+            {sorted.map((alert) => (
+              <AlertCard 
+                key={alert.id ?? alert.alert_key} 
+                alert={alert}
+                onSnooze={handleSnooze}
+                onUnsnooze={handleUnsnooze}
+                onMarkFalsePositive={handleMarkFalsePositive}
+              />
             ))}
           </div>
 

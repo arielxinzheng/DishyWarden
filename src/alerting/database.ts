@@ -23,6 +23,10 @@ export interface AlertRecord {
   description: string;
   evidence: string; // JSON string
   recommendations: string; // JSON string
+  // 降噪字段
+  snooze_until?: string | null; // ISO 时间戳, 忽略直到该时刻
+  snooze_type?: 'temporary' | 'until_resolved' | null; // 忽略类型
+  marked_false_positive?: boolean; // 是否标记为误报
 }
 
 export type Severity = AlertRecord['severity'];
@@ -63,6 +67,9 @@ export class AlertDatabase {
         description TEXT NOT NULL,
         evidence TEXT,
         recommendations TEXT,
+        snooze_until TEXT,
+        snooze_type TEXT,
+        marked_false_positive INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
@@ -71,6 +78,7 @@ export class AlertDatabase {
       CREATE INDEX IF NOT EXISTS idx_status ON alerts(status);
       CREATE INDEX IF NOT EXISTS idx_severity ON alerts(severity);
       CREATE INDEX IF NOT EXISTS idx_first_seen ON alerts(first_seen);
+      CREATE INDEX IF NOT EXISTS idx_snooze_until ON alerts(snooze_until);
     `);
   }
 
@@ -226,6 +234,59 @@ export class AlertDatabase {
     `);
 
     return stmt.all() as AlertRecord[];
+  }
+
+  /**
+   * 忽略告警
+   * @param alertKey 告警唯一标识
+   * @param snoozeType 忽略类型: 'temporary' (限时) | 'until_resolved' (直到恢复)
+   * @param durationMs 忽略时长(毫秒), 仅 temporary 类型需要
+   */
+  snoozeAlert(alertKey: string, snoozeType: 'temporary' | 'until_resolved', durationMs?: number): void {
+    const snoozeUntil = snoozeType === 'temporary' && durationMs
+      ? new Date(Date.now() + durationMs).toISOString()
+      : null;
+
+    const stmt = this.db.prepare(`
+      UPDATE alerts
+      SET snooze_until = ?,
+          snooze_type = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE alert_key = ?
+    `);
+
+    stmt.run(snoozeUntil, snoozeType, alertKey);
+  }
+
+  /**
+   * 取消忽略告警
+   */
+  unsnoozeAlert(alertKey: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE alerts
+      SET snooze_until = NULL,
+          snooze_type = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE alert_key = ?
+    `);
+
+    stmt.run(alertKey);
+  }
+
+  /**
+   * 标记告警为误报
+   */
+  markFalsePositive(alertKey: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE alerts
+      SET marked_false_positive = 1,
+          snooze_until = NULL,
+          snooze_type = 'until_resolved',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE alert_key = ?
+    `);
+
+    stmt.run(alertKey);
   }
 
   /**
