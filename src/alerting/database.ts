@@ -80,6 +80,24 @@ export class AlertDatabase {
       CREATE INDEX IF NOT EXISTS idx_first_seen ON alerts(first_seen);
       CREATE INDEX IF NOT EXISTS idx_snooze_until ON alerts(snooze_until);
     `);
+
+    // 迁移：为已有表添加降噪字段（如果不存在）
+    this.migrateSchema();
+  }
+
+  private migrateSchema(): void {
+    const columns = this.db.pragma("table_info('alerts')") as Array<{ name: string }>;
+    const columnNames = columns.map(c => c.name);
+
+    if (!columnNames.includes('snooze_until')) {
+      this.db.exec('ALTER TABLE alerts ADD COLUMN snooze_until TEXT;');
+    }
+    if (!columnNames.includes('snooze_type')) {
+      this.db.exec('ALTER TABLE alerts ADD COLUMN snooze_type TEXT;');
+    }
+    if (!columnNames.includes('marked_false_positive')) {
+      this.db.exec('ALTER TABLE alerts ADD COLUMN marked_false_positive INTEGER DEFAULT 0;');
+    }
   }
 
   /**
