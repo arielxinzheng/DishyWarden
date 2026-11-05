@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Alert, AlertDescription } from '../ui/alert';
@@ -32,6 +33,8 @@ import {
 import { LatencyChart } from './LatencyChart';
 import { ThroughputChart } from './ThroughputChart';
 import { AlertDrawerContent } from './AlertDrawerContent';
+import { RecentlyResolvedCard } from './RecentlyResolvedCard';
+import { useRecentlyResolved } from './useRecentlyResolved';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
 import { MetricCard, CHART_HEIGHT } from './MetricCard';
 import { StatusStrip, SLICE_PLANS, fitStatusSlots, STATUS_GAP } from './StatusStrip';
@@ -66,6 +69,7 @@ const formatSilentMs = (ms: number): string => {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { telemetry, isConnected, isLoading, error, refresh, obstruction } = useDish();
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
   const summary24h = useHistorySummary(86400);
@@ -135,6 +139,8 @@ export default function Dashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
   const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
+  // 【刚刚恢复】数据源/定时器/已读偏好全封在 hook 里, 首页只消费结果
+  const recentlyResolved = useRecentlyResolved();
 
   // 监听活跃告警
   useEffect(() => {
@@ -445,6 +451,15 @@ export default function Dashboard() {
           }}
         />
       </Drawer>
+
+      {/* 刚刚恢复 - 短时留存。必须排在活跃告警横幅之后: 有活跃故障时,
+          「已恢复」只是背景信息，不能抢在真正的告警上面。 */}
+      <RecentlyResolvedCard
+        alerts={recentlyResolved.alerts}
+        now={recentlyResolved.now}
+        onDismiss={recentlyResolved.dismiss}
+        onOpenHistory={() => navigate('/alerts')}
+      />
 
       {/* System overview band - 5 status blocks */}
       <div className="relative overflow-hidden rounded-2xl border border-border">
