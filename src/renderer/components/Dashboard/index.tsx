@@ -135,9 +135,15 @@ export default function Dashboard() {
         setActiveAlerts((prev) => prev.filter((a) => a.alert_key !== alert.alert_key));
       });
 
+      // 降噪操作改变的是主进程权威状态，本地数组无法推算，必须重拉
+      const unsubscribeChanged = window.electronAPI.onAlertsChanged(() => {
+        loadAlerts();
+      });
+
       return () => {
         unsubscribeNew();
         unsubscribeResolved();
+        unsubscribeChanged();
       };
     }
   }, []);

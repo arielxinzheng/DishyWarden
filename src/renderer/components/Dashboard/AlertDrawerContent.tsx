@@ -19,11 +19,10 @@ interface AlertDrawerContentProps {
 
 export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerContentProps) {
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-  const [snoozedAlerts, setSnoozedAlerts] = useState<Set<string>>(new Set());
 
-  // 检查告警是否被忽略
+  // 忽略状态唯一来源：主进程写入数据库后经 props 回传的字段。
+  // 不在组件内维护本地副本，否则「取消忽略」后本地 Set 仍会把它判为已忽略。
   const isAlertSnoozed = (alert: AlertRecord): boolean => {
-    if (snoozedAlerts.has(alert.alert_key)) return true;
     if (alert.snooze_type === 'until_resolved') return true;
     if (alert.snooze_until) {
       const snoozeUntil = new Date(alert.snooze_until).getTime();
@@ -72,14 +71,14 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
       snoozedList: snoozed.sort(sortFn),
       activeList: active.sort(sortFn),
     };
-  }, [alerts, snoozedAlerts]);
+  }, [alerts]);
 
   const handleSnooze = async (alertKey: string, type: 'temporary' | 'until_resolved', durationMs?: number) => {
     if (!window.electronAPI?.snoozeAlert) return;
     
     const result = await window.electronAPI.snoozeAlert({ alertKey, snoozeType: type, durationMs });
     if (result.success) {
-      setSnoozedAlerts(prev => new Set(prev).add(alertKey));
+      // 状态由主进程广播 → 父组件重拉，这里不写本地副本
       onAlertsChange?.();
     }
   };
@@ -89,11 +88,6 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
     
     const result = await window.electronAPI.unsnoozeAlert(alertKey);
     if (result.success) {
-      setSnoozedAlerts(prev => {
-        const next = new Set(prev);
-        next.delete(alertKey);
-        return next;
-      });
       onAlertsChange?.();
     }
   };
@@ -103,7 +97,6 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
     
     const result = await window.electronAPI.markFalsePositive({ alertKey });
     if (result.success) {
-      setSnoozedAlerts(prev => new Set(prev).add(alertKey));
       onAlertsChange?.();
       
       // 显示 Toast 提示

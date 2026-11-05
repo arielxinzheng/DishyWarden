@@ -413,6 +413,8 @@ ipcMain.handle('snooze-alert', (_event, params: {
   
   try {
     alertManager.snoozeAlert(params.alertKey, params.snoozeType, params.durationMs);
+    // 广播状态变更：仪表盘横幅与告警中心都要重拉，保证跨页面一致
+    sendToRenderer('alerts-changed', { alertKey: params.alertKey, action: 'snooze' });
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : '操作失败' };
@@ -427,6 +429,7 @@ ipcMain.handle('unsnooze-alert', (_event, alertKey: string) => {
   
   try {
     alertManager.unsnoozeAlert(alertKey);
+    sendToRenderer('alerts-changed', { alertKey, action: 'unsnooze' });
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : '操作失败' };
@@ -444,6 +447,7 @@ ipcMain.handle('mark-false-positive', (_event, params: {
   
   try {
     alertManager.markFalsePositive(params.alertKey, params.deviceId);
+    sendToRenderer('alerts-changed', { alertKey: params.alertKey, action: 'mark-false-positive' });
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : '操作失败' };

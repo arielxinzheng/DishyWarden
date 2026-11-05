@@ -51,6 +51,9 @@ export class AlertDatabase {
   }
 
   private initializeSchema(): void {
+    // 第一步：建表 + 只涉及原有列的索引。
+    // 注意：这里绝不能引用降噪新列（snooze_until 等），否则旧库会因
+    // "no such column" 让整个 exec 抛错，构造函数失败，告警模块直接起不来。
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,25 +81,35 @@ export class AlertDatabase {
       CREATE INDEX IF NOT EXISTS idx_status ON alerts(status);
       CREATE INDEX IF NOT EXISTS idx_severity ON alerts(severity);
       CREATE INDEX IF NOT EXISTS idx_first_seen ON alerts(first_seen);
-      CREATE INDEX IF NOT EXISTS idx_snooze_until ON alerts(snooze_until);
     `);
 
-    // 迁移：为已有表添加降噪字段（如果不存在）
+    // 第二步：为旧库补齐降噪字段。
     this.migrateSchema();
+
+    // 第三步：索引必须放在迁移之后，此时列一定存在。
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_snooze_until ON alerts(snooze_until);
+    `);
   }
 
+  /**
+   * 旧库升级：alerting 降噪字段是后加的，CREATE TABLE IF NOT EXISTS 不会补列。
+   * 逐列检查，缺哪个补哪个，保证重复执行安全。
+   */
   private migrateSchema(): void {
     const columns = this.db.pragma("table_info('alerts')") as Array<{ name: string }>;
-    const columnNames = columns.map(c => c.name);
+    const columnNames = new Set(columns.map(c => c.name));
 
-    if (!columnNames.includes('snooze_until')) {
-      this.db.exec('ALTER TABLE alerts ADD COLUMN snooze_until TEXT;');
-    }
-    if (!columnNames.includes('snooze_type')) {
-      this.db.exec('ALTER TABLE alerts ADD COLUMN snooze_type TEXT;');
-    }
-    if (!columnNames.includes('marked_false_positive')) {
-      this.db.exec('ALTER TABLE alerts ADD COLUMN marked_false_positive INTEGER DEFAULT 0;');
+    const pendingColumns: Array<{ name: string; ddl: string }> = [
+      { name: 'snooze_until', ddl: 'ALTER TABLE alerts ADD COLUMN snooze_until TEXT;' },
+      { name: 'snooze_type', ddl: 'ALTER TABLE alerts ADD COLUMN snooze_type TEXT;' },
+      { name: 'marked_false_positive', ddl: 'ALTER TABLE alerts ADD COLUMN marked_false_positive INTEGER DEFAULT 0;' },
+    ];
+
+    for (const column of pendingColumns) {
+      if (!columnNames.has(column.name)) {
+        this.db.exec(column.ddl);
+      }
     }
   }
 

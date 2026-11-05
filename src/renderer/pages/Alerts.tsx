@@ -296,10 +296,15 @@ export default function AlertsPage() {
     const unsubResolved = window.electronAPI.onAlertResolved((alert) => {
       setAlerts((prev) => prev.filter((a) => a.alert_key !== alert.alert_key));
     });
+    // 降噪状态由主进程持有，本地无法推算，收到广播后整体重拉
+    const unsubChanged = window.electronAPI.onAlertsChanged(() => {
+      load();
+    });
 
     return () => {
       unsubNew();
       unsubResolved();
+      unsubChanged();
     };
   }, [load, isElectron, viewMode]);
 
@@ -335,29 +340,22 @@ export default function AlertsPage() {
 
   const handleSnooze = async (alertKey: string, type: 'temporary' | 'until_resolved', durationMs?: number) => {
     if (!window.electronAPI?.snoozeAlert) return;
-    
-    const result = await window.electronAPI.snoozeAlert({ alertKey, snoozeType: type, durationMs });
-    if (result.success) {
-      // 重新加载告警列表
-      load();
-    }
+
+    // 成功后由主进程广播 alerts-changed 触发重拉，本组件不自行改本地状态
+    await window.electronAPI.snoozeAlert({ alertKey, snoozeType: type, durationMs });
   };
 
   const handleUnsnooze = async (alertKey: string) => {
     if (!window.electronAPI?.unsnoozeAlert) return;
-    
-    const result = await window.electronAPI.unsnoozeAlert(alertKey);
-    if (result.success) {
-      load();
-    }
+
+    await window.electronAPI.unsnoozeAlert(alertKey);
   };
 
   const handleMarkFalsePositive = async (alertKey: string) => {
     if (!window.electronAPI?.markFalsePositive) return;
-    
+
     const result = await window.electronAPI.markFalsePositive({ alertKey });
     if (result.success) {
-      load();
       // TODO: 显示 Toast 提示
       console.log('感谢反馈，已为您清除该提示，我们将持续优化检测算法。');
     }

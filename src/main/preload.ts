@@ -80,6 +80,11 @@ export interface ElectronAPI {
   // 监听告警恢复
   onAlertResolved: (callback: (alert: AlertRecord) => void) => () => void;
 
+  /** 监听告警状态变更（忽略 / 取消忽略 / 标记误报），各视图据此重拉列表 */
+  onAlertsChanged: (
+    callback: (payload: { alertKey: string; action: string }) => void
+  ) => () => void;
+
   // 更新通知配置
   updateNotificationConfig: (config: NotificationConfig) => Promise<{ success: boolean }>;
 
@@ -230,6 +235,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     return () => {
       ipcRenderer.removeListener('alert-resolved', listener);
+    };
+  },
+
+  onAlertsChanged: (callback: (payload: { alertKey: string; action: string }) => void) => {
+    const listener = (_event: any, payload: { alertKey: string; action: string }) => callback(payload);
+    ipcRenderer.on('alerts-changed', listener);
+
+    return () => {
+      ipcRenderer.removeListener('alerts-changed', listener);
     };
   },
 
