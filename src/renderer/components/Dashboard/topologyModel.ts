@@ -159,7 +159,10 @@ function judgeGrpc(
   upstreamBroken: boolean,
 ): { tone: TopologyTone; detail: string } {
   // 局域网都断了，这一段必然是「测不出来」——不能因为手上有残留的旧遥测就点绿灯
-  if (upstreamBroken) return { tone: 'unknown', detail: '上游（局域网）中断，无法判定' };
+  if (upstreamBroken) {
+    // 因果必须写清楚：只说「未知」等于把问题丢回给用户
+    return { tone: 'unknown', detail: '受上游链路中断影响，本段状态不可达（局域网不可达）' };
+  }
 
   if (!inputs.telemetry) {
     return {
@@ -183,7 +186,7 @@ function judgeWan(
 ): { tone: TopologyTone; detail: string } {
   if (upstreamBroken) {
     // 上游已经断了，这一段「测不出来」，不是「也坏了」
-    return { tone: 'unknown', detail: '上游链中断，无法判定' };
+    return { tone: 'unknown', detail: '受上游链路中断影响，本段状态不可达（上游未连通）' };
   }
 
   const t = inputs.telemetry;
@@ -191,7 +194,10 @@ function judgeWan(
 
   // 天线自己没锁上（开机/寻星/收起）时，公网测不通是**结果**不是**原因**
   if (t.state !== 'ONLINE') {
-    return { tone: 'unknown', detail: `天线未锁定（状态 ${t.state}），公网暂不可用` };
+    return {
+      tone: 'unknown',
+      detail: `天线未锁定（状态 ${t.state}），公网暂不可用 —— 需等待寻星完成，不是公网故障`,
+    };
   }
 
   const drop = t.popPingDropRate ?? 0;
@@ -254,7 +260,10 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
       id: 'wan',
       label: 'PoP 出口',
       tone: wan.tone,
-      detail: wan.detail,
+      detail:
+        wan.tone === 'unknown' && (lanBroken || grpcBroken)
+          ? '受上游链路中断影响，当前节点状态不可达'
+          : wan.detail,
       alerts: alertsFor(inputs.alerts, 'wan'),
     },
   ];
@@ -317,7 +326,7 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
             : t
               ? '姿态未收敛'
               : '遥测 —',
-      detail: grpc.detail,
+      detail: lanBroken ? '上游节点（本地路由器）离线，状态未知' : grpc.detail,
       alerts: links[1].alerts,
     },
     {
@@ -338,7 +347,10 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
           : t && t.state === 'ONLINE'
             ? `${(t.popPingLatencyMs ?? 0).toFixed(0)} ms · 丢包 ${pct(t.popPingDropRate ?? 0)}`
             : '—',
-      detail: wan.detail,
+      detail:
+        wan.tone === 'unknown' && (lanBroken || grpcBroken)
+          ? '受上游链路中断影响，当前节点状态不可达'
+          : wan.detail,
       alerts: links[2].alerts,
     },
   ];

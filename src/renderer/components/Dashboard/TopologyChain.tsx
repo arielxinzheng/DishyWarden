@@ -51,6 +51,8 @@ export interface TopologyAlertInput {
 }
 
 export interface TopologyChainProps {
+  /** 外层间距等排版类 —— 间距由仪表盘统一控制（拓扑要贴近上方大盘） */
+  className?: string;
   /** 活跃告警；有值时会挂到对应链路上并显示角标 */
   alerts?: TopologyAlertInput[];
   /** 点击角标/链路时的动作（通常是打开告警抽屉） */
@@ -159,7 +161,7 @@ function useProbeSnapshot() {
   return { routerProbe, dnsProbe };
 }
 
-export function TopologyChain({ alerts = [], onOpenAlerts }: TopologyChainProps) {
+export function TopologyChain({ className = '', alerts = [], onOpenAlerts }: TopologyChainProps) {
   const { telemetry, isConnected, error } = useDish();
   const { routerProbe, dnsProbe } = useProbeSnapshot();
 
@@ -194,7 +196,7 @@ export function TopologyChain({ alerts = [], onOpenAlerts }: TopologyChainProps)
     // 无边框、无背景、无标题：四个节点直接裸露在页面背景上，只留轻量 margin。
     // 整体结论留给图形自己表达（红虚线 = 断，? = 测不出来）。
     <div
-      className="my-1"
+      className={className}
       aria-label={`全链路状态：${model.verdict.headline}，${model.verdict.detail}`}
       role="img"
     >
@@ -232,7 +234,7 @@ function NodeCard({
 
   return (
     <div
-      className="relative flex flex-1 items-center gap-2.5 px-1.5 py-1 min-w-[168px]"
+      className="group relative flex flex-1 items-center gap-2.5 px-1.5 py-1 min-w-[168px]"
       title={tooltip}
     >
       <div className="relative shrink-0">
@@ -297,7 +299,7 @@ function LinkSegment({
 
   return (
     <div
-      className="flex w-[76px] shrink-0 flex-col items-center justify-center px-1"
+      className="group flex w-[76px] shrink-0 flex-col items-center justify-center px-1"
       title={`${link.label}：${link.detail}`}
     >
       <span
@@ -362,7 +364,7 @@ function UnknownBadge({ detail, inline }: { detail: string; inline?: boolean }) 
     <span
       title={detail}
       aria-label={detail}
-      className={`grid place-items-center w-4 h-4 rounded-full border border-border bg-[#0a0c10] text-[10px] font-bold leading-none text-muted-foreground cursor-help ${
+      className={`grid place-items-center w-4 h-4 rounded-full border border-border bg-[#0a0c10] text-[10px] font-bold leading-none text-muted-foreground cursor-help transition-transform duration-200 group-hover:scale-[1.18] hover:scale-[1.18] ${
         inline
           ? 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2'
           : 'absolute -right-1 -bottom-1'

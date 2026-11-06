@@ -529,144 +529,155 @@ export default function Dashboard() {
         onOpenHistory={() => navigate('/alerts')}
       />
 
-      {/* System overview band - 5 status blocks */}
-      <div className="relative overflow-hidden rounded-2xl border border-border">
-        <div 
-          className="absolute inset-0 opacity-[.06] pointer-events-none"
-          style={{
-            backgroundImage: 'linear-gradient(rgba(148,163,184,.6) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.6) 1px,transparent 1px)',
-            backgroundSize: '38px 38px'
-          }}
-        />
-        <div 
-          className="relative"
-          style={{
-            background: isConnected 
-              ? 'radial-gradient(900px 300px at 12% -40%, rgba(74,222,128,.14), transparent 60%), linear-gradient(120deg,#08120d,#0a0c10)'
-              : 'radial-gradient(900px 300px at 12% -40%, rgba(239,68,68,.16), transparent 60%), linear-gradient(120deg,#12080a,#0a0c10)'
-          }}
-        >
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-x divide-border/30">
-            {/* 1. Overall status */}
-            <div className="p-5">
-              <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                状态
+      {/* ===== 总体状态组：5 块总览带 + 断流横幅 + 全链路拓扑 =====
+          三者合成一个视觉单元（拓扑读作大盘的注脚），组内间距显式控制：
+          带→横幅 32px（横幅是告警，要独立成行），带/横幅→拓扑 12px（贴近）。
+          组与下方指标矩阵之间保留 32px+ 的呼吸。 */}
+      <div>
+        {/* System overview band - 5 status blocks */}
+        <div className="relative overflow-hidden rounded-2xl border border-border">
+          <div 
+            className="absolute inset-0 opacity-[.06] pointer-events-none"
+            style={{
+              backgroundImage: 'linear-gradient(rgba(148,163,184,.6) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.6) 1px,transparent 1px)',
+              backgroundSize: '38px 38px'
+            }}
+          />
+          <div 
+            className="relative"
+            style={{
+              background: isConnected 
+                ? 'radial-gradient(900px 300px at 12% -40%, rgba(74,222,128,.14), transparent 60%), linear-gradient(120deg,#08120d,#0a0c10)'
+                : 'radial-gradient(900px 300px at 12% -40%, rgba(239,68,68,.16), transparent 60%), linear-gradient(120deg,#12080a,#0a0c10)'
+            }}
+          >
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-x divide-border/30">
+              {/* 1. Overall status */}
+              <div className="p-5">
+                <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
+                  状态
+                </div>
+                <div className={`mt-2 flex items-center gap-2 text-xl font-bold ${isConnected ? 'text-accent-green' : 'text-danger-red'}`}>
+                  <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-accent-green animate-pulse' : 'bg-danger-red animate-pulse'}`}></span>
+                  <span>{isConnected ? '正常' : '离线'}</span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  24h 可用率{' '}
+                  <span className={`font-mono ${availabilityColor}`}>{availabilityText}</span>
+                </div>
               </div>
-              <div className={`mt-2 flex items-center gap-2 text-xl font-bold ${isConnected ? 'text-accent-green' : 'text-danger-red'}`}>
-                <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-accent-green animate-pulse' : 'bg-danger-red animate-pulse'}`}></span>
-                <span>{isConnected ? '正常' : '离线'}</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                24h 可用率{' '}
-                <span className={`font-mono ${availabilityColor}`}>{availabilityText}</span>
-              </div>
-            </div>
 
-            {/* 2. Today's data usage */}
-            <div className="p-5">
-              <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                24h 用量
+              {/* 2. Today's data usage */}
+              <div className="p-5">
+                <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
+                  24h 用量
+                </div>
+                <div className="mt-2 text-2xl font-extrabold text-slate-100 font-mono">
+                  <span>{usageTotalGb}</span>
+                  <span className="text-sm text-muted-foreground ml-1">GB</span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-1 font-mono">
+                  <span className="text-sky-blue">↓ {usageDownGb} GB</span> /{' '}
+                  <span className="text-accent-green">↑ {usageUpGb} GB</span>
+                </div>
               </div>
-              <div className="mt-2 text-2xl font-extrabold text-slate-100 font-mono">
-                <span>{usageTotalGb}</span>
-                <span className="text-sm text-muted-foreground ml-1">GB</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1 font-mono">
-                <span className="text-sky-blue">↓ {usageDownGb} GB</span> /{' '}
-                <span className="text-accent-green">↑ {usageUpGb} GB</span>
-              </div>
-            </div>
 
-            {/* 3. Anomalies & outages */}
-            <div className="p-5">
-              <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                中断次数
+              {/* 3. Anomalies & outages */}
+              <div className="p-5">
+                <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
+                  中断次数
+                </div>
+                <div
+                  className={`mt-2 text-2xl font-extrabold font-mono ${
+                    outageCount === null
+                      ? 'text-muted-foreground'
+                      : outageCount === 0
+                        ? 'text-accent-green'
+                        : 'text-warning-orange'
+                  }`}
+                >
+                  {outageCount === null ? (
+                    <span>—</span>
+                  ) : outageCount === 0 ? (
+                    <span>无中断</span>
+                  ) : (
+                    <>
+                      <span>{outageCount}</span>
+                      <span className="text-sm text-muted-foreground ml-1">次</span>
+                    </>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {outageCount === null ? '暂无历史样本' : '近 24h 统计'}
+                </div>
               </div>
-              <div
-                className={`mt-2 text-2xl font-extrabold font-mono ${
-                  outageCount === null
-                    ? 'text-muted-foreground'
-                    : outageCount === 0
-                      ? 'text-accent-green'
-                      : 'text-warning-orange'
-                }`}
-              >
-                {outageCount === null ? (
-                  <span>—</span>
-                ) : outageCount === 0 ? (
-                  <span>无中断</span>
-                ) : (
-                  <>
-                    <span>{outageCount}</span>
-                    <span className="text-sm text-muted-foreground ml-1">次</span>
-                  </>
-                )}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {outageCount === null ? '暂无历史样本' : '近 24h 统计'}
-              </div>
-            </div>
 
-            {/* 4. Alignment status — 取自 alignmentStats，无数据时显示占位 */}
-            <div className="p-5">
-              <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                对准状态
+              {/* 4. Alignment status — 取自 alignmentStats，无数据时显示占位 */}
+              <div className="p-5">
+                <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
+                  对准状态
+                </div>
+                <div className={`mt-2 text-2xl font-extrabold font-mono ${isAligned ? 'text-accent-green' : 'text-warning-orange'}`}>
+                  {isAligned ? '已对准' : '校准中'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1 font-mono">
+                  误差 {alignmentUncertaintyText} · 锁星{' '}
+                  {telemetry.secondsToFirstNonemptySlot > 0
+                    ? `${telemetry.secondsToFirstNonemptySlot}s`
+                    : '—'}
+                </div>
               </div>
-              <div className={`mt-2 text-2xl font-extrabold font-mono ${isAligned ? 'text-accent-green' : 'text-warning-orange'}`}>
-                {isAligned ? '已对准' : '校准中'}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1 font-mono">
-                误差 {alignmentUncertaintyText} · 锁星{' '}
-                {telemetry.secondsToFirstNonemptySlot > 0
-                  ? `${telemetry.secondsToFirstNonemptySlot}s`
-                  : '—'}
-              </div>
-            </div>
 
-            {/* 5. Uptime */}
-            <div className="p-5 col-span-2 md:col-span-3 lg:col-span-1">
-              <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                运行时间
-              </div>
-              <div className="mt-2 text-2xl font-extrabold text-slate-100 font-mono">
-                {telemetry.uptime > 0 ? formatUptime(telemetry.uptime) : '—'}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                固件 {telemetry.softwareVersion || '—'}
+              {/* 5. Uptime */}
+              <div className="p-5 col-span-2 md:col-span-3 lg:col-span-1">
+                <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
+                  运行时间
+                </div>
+                <div className="mt-2 text-2xl font-extrabold text-slate-100 font-mono">
+                  {telemetry.uptime > 0 ? formatUptime(telemetry.uptime) : '—'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  固件 {telemetry.softwareVersion || '—'}
+                </div>
               </div>
             </div>
           </div>
+        </div>
+
+        {/* 数据陈旧横幅 —— 只在「尾部断流」超过阈值时出现。
+            位置刻意选在总览带**之后、指标卡之前**:
+            上面那句绿色「正常」、下面那些大数字, 全都来自最后一次成功采集,
+            不先讲清"数据是旧的", 越是健康的数字越误导。 */}
+        {staleness.isStale && (
+          <div className="mt-8 flex items-start gap-3 rounded-xl border border-warning-orange/40 bg-warning-orange/10 px-4 py-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-orange" />
+            <div className="text-sm leading-5">
+              <span className="font-semibold text-warning-orange">
+                数据已 {formatSilentMs(staleness.silentMs)} 未更新
+              </span>
+              <span className="text-muted-foreground">
+                {' '}· 下方数值为最后一次成功采集的结果; 图表上的断口与状态条上的灰块即采集中断区间
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* 全链路拓扑状态链 —— 位置在总览带/断流横幅之后、折线图卡之前。
+            断流横幅排它上面是刻意的: 数据陈旧时「拓扑全绿」是最误导人的画面,
+            先解释清楚"数据是旧的"再说链路状态。
+
+            间距刻意不对称: 距上方大盘 mt-3（读作"总体状态的延伸/注脚"），
+            距下方指标卡矩阵留足 32px+（那是另一组信息，需要呼吸感）。 */}
+        <div className="mt-3">
+          <TopologyChain
+            alerts={activeAlerts}
+            onOpenAlerts={() => setAlertDrawerOpen(true)}
+          />
         </div>
       </div>
 
-      {/* 数据陈旧横幅 —— 只在「尾部断流」超过阈值时出现。
-          位置刻意选在总览带**之后、指标卡之前**:
-          上面那句绿色「正常」、下面那些大数字, 全都来自最后一次成功采集,
-          不先讲清"数据是旧的", 越是健康的数字越误导。 */}
-      {staleness.isStale && (
-        <div className="flex items-start gap-3 rounded-xl border border-warning-orange/40 bg-warning-orange/10 px-4 py-3">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-orange" />
-          <div className="text-sm leading-5">
-            <span className="font-semibold text-warning-orange">
-              数据已 {formatSilentMs(staleness.silentMs)} 未更新
-            </span>
-            <span className="text-muted-foreground">
-              {' '}· 下方数值为最后一次成功采集的结果; 图表上的断口与状态条上的灰块即采集中断区间
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* 全链路拓扑状态链 —— 位置在总览带/断流横幅之后、折线图卡之前。
-          断流横幅排它上面是刻意的: 数据陈旧时「拓扑全绿」是最误导人的画面,
-          先解释清楚"数据是旧的"再说链路状态。 */}
-      <TopologyChain
-        alerts={activeAlerts}
-        onOpenAlerts={() => setAlertDrawerOpen(true)}
-      />
-
-      {/* 6 metric cards row with mini charts */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* 6 metric cards row with mini charts —— pt-3 让拓扑与矩阵之间的呼吸更足 */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 pt-3">
         <MetricCard
           title="连接状态"
           value={telemetry.state === 'ONLINE' ? '在线' : telemetry.state || '—'}
