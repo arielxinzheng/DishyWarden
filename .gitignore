@@ -11,6 +11,7 @@ data/alerts.db
 
 # 工具产物
 .playwright-mcp/
+browser-screenshots/
 
 # 测试运行产物（Playwright / Vitest 报告等）
 test-results/
