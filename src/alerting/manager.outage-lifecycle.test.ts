@@ -208,4 +208,57 @@ describe('NO_SCHEDULE 告警生命周期', () => {
 
     expect(second).toBe(first);
   });
+
+  /**
+   * 新鲜度过滤 —— 不把滑动窗口里的旧中断当成"正在发生"。
+   *
+   * `dishGetHistory` 返回的是过去 15 分钟的中断列表。一条三分钟前就
+   * 结束的 NO_SCHEDULE 仍然在窗口里，但它不代表此刻仍在中断。
+   * 不筛的话, 用户会看到"什么都没发生却冒出容量不足告警"。
+   */
+  it('窗口内已结束的 NO_SCHEDULE 不触发告警(不翻旧账)', async () => {
+    const db = (manager as any).db;
+
+    const stale = {
+      startTimestamp: Date.now() - 3 * 60_000,
+      durationMs: 10_222,
+      triggered: 'NO_SCHEDULE',
+    };
+
+    await manager.checkOutages([stale] as any);
+
+    expect(db.getAlertByKey('no_satellite_schedule:starlink')).toBeUndefined();
+  });
+
+  it('仍在进行中的 NO_SCHEDULE 正常触发', async () => {
+    const db = (manager as any).db;
+
+    // 刚开始 5 秒、总时长 45 秒 ⇒ 结束时刻在未来, 属于"正在中断"
+    const active = {
+      startTimestamp: Date.now() - 5_000,
+      durationMs: 45_000,
+      triggered: 'NO_SCHEDULE',
+    };
+
+    await manager.checkOutages([active] as any);
+
+    expect(db.getAlertByKey('no_satellite_schedule:starlink').status).toBe('ongoing');
+  });
+
+  it('已触发的告警在事件滑出窗口后自动 resolve', async () => {
+    const db = (manager as any).db;
+
+    await manager.checkOutages([NO_SCHEDULE] as any);
+    expect(db.getAlertByKey('no_satellite_schedule:starlink').status).toBe('ongoing');
+
+    // 下一轮采集: 只剩 5 分钟前那条旧记录, 新鲜窗口内没有 NO_SCHEDULE
+    const stale = {
+      startTimestamp: Date.now() - 5 * 60_000,
+      durationMs: 10_000,
+      triggered: 'NO_SCHEDULE',
+    };
+    await manager.checkOutages([stale] as any);
+
+    expect(db.getAlertByKey('no_satellite_schedule:starlink').status).toBe('resolved');
+  });
 });

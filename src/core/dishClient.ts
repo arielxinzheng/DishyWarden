@@ -125,7 +125,17 @@ export interface TelemetryData {
   wifiClientCount?: number;              // 连接的 WiFi 客户端数量
   
   // 告警
+  //
+  // ⚠️ 这是 dishGetStatus.alerts 的**对象结构**（布尔标志），不是字符串数组。
+  //    历史上曾是 string[]，规则用 alerts.includes('xxx') 判断；
+  //    改成对象后旧写法会抛 TypeError 并被告警引擎的 catch 吞掉 ⇒ 规则静默失效。
+  //    统一用 `hasAlert(data, 'thermalThrottle')`（src/core/serviceState.ts）读。
   alerts?: {
+    thermalThrottle?: boolean;
+    motorsStow?: boolean;
+    isHeating?: boolean;
+    slowEthernetSpeeds?: boolean;
+    connectivity?: boolean;
     installPending?: boolean;
     movingFastInHelloMobile?: boolean;
     unexpectedLocation?: boolean;
@@ -549,7 +559,7 @@ export class DishClient {
       wifiRetransmitRate: this.getMockWifiRetransmitRate(),
       wifiClientCount: Math.floor(Math.random() * 5) + 1,  // 1-5 个客户端
       
-      alerts: [],
+      alerts: {},
     };
   }
   

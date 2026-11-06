@@ -58,6 +58,9 @@ const SAMPLE_FIELDS = [
   { column: 'psu_temp_c', key: 'powerSupplyTemperature' },
   { column: 'public_ping_ms', key: 'publicPingLatencyMs' },
   { column: 'local_gateway_ms', key: 'localGatewayLatencyMs' },
+  { column: 'class_of_service', key: 'classOfService' },
+  { column: 'disablement_code', key: 'disablementCode' },
+  { column: 'alerts_json', key: 'alerts', transform: (v: unknown) => v ? JSON.stringify(v) : null },
 ] as const;
 
 /** better-sqlite3 不接受 boolean/undefined, 统一归一化 */
@@ -393,6 +396,21 @@ export class TelemetryStore {
         this.db.exec('CREATE INDEX idx_samples_obstructed_ts ON telemetry_samples(currently_obstructed, ts)');
         console.log('[TelemetryStore] 迁移 v4: 创建索引 idx_samples_obstructed_ts (遮挡 + 时间)');
       }
+
+      // v7: telemetry_samples 增加告警相关字段
+      const sampleCols = this.db
+        .prepare("PRAGMA table_info(telemetry_samples)")
+        .all() as { name: string }[];
+      const sampleNames = sampleCols.map((c) => c.name);
+
+      if (!sampleNames.includes('class_of_service')) {
+        this.db.exec(`
+          ALTER TABLE telemetry_samples ADD COLUMN class_of_service TEXT;
+          ALTER TABLE telemetry_samples ADD COLUMN disablement_code TEXT;
+          ALTER TABLE telemetry_samples ADD COLUMN alerts_json TEXT;
+        `);
+        console.log('[TelemetryStore] 迁移 v7: telemetry_samples 增加 class_of_service, disablement_code, alerts_json 列');
+      }
     } catch (error) {
       console.warn('[TelemetryStore] 迁移失败(不影响使用):', error);
     }
@@ -405,9 +423,11 @@ export class TelemetryStore {
 
   private writeSample(point: TimestampedTelemetry): void {
     const ts = toEpochMs(point.timestamp);
-    const values = SAMPLE_FIELDS.map((f) =>
-      toSqlValue((point as unknown as Record<string, unknown>)[f.key]),
-    );
+    const values = SAMPLE_FIELDS.map((f) => {
+      const rawValue = (point as unknown as Record<string, unknown>)[f.key];
+      const transformed = 'transform' in f && f.transform ? f.transform(rawValue) : rawValue;
+      return toSqlValue(transformed);
+    });
     this.insertSample.run(ts, ...values);
   }
 

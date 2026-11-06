@@ -195,9 +195,9 @@ describe('telemetry.ts - 异常检测', () => {
     powerSupplyTemperature: 30,
     hardwareVersion: '1.0.0',
     softwareVersion: '1.0.0',
-    // alerts 是**字符串数组**(如 ['thermalThrottle', 'motorsStow']),
-    // 告警规则用 data.alerts.includes('xxx') 判断。
-    alerts: [],
+    // alerts 是 dishGetStatus.alerts 的**对象结构**(布尔标志),
+    // 规则用 hasAlert(data, 'thermalThrottle') 读。
+    alerts: {},
     ...overrides,
   });
 

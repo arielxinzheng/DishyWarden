@@ -7,6 +7,7 @@
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import type { TelemetryData } from '../core/dishClient';
+import { countActiveAlerts } from '../core/serviceState';
 import type { RouterProbeResult } from '../core/routerProbeTypes';
 import type { DataCollector } from './historian';
 
@@ -194,7 +195,9 @@ export class PrometheusExporter {
     });
 
     // 告警计数
-    addMetric('starlink_alerts_total', telemetry.alerts.length, 'Total number of active alerts');
+    // alerts 是「布尔标志对象」（历史形态是 string[]），统一走 countActiveAlerts，
+    // 直接取 .length 在对象上是 undefined ⇒ 指标会变成 NaN。
+    addMetric('starlink_alerts_total', countActiveAlerts(telemetry), 'Total number of active alerts');
 
     // ========== 采集器健康指标 ==========
     

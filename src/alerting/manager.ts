@@ -47,6 +47,20 @@ export interface AlertRule {
   managedBy?: 'telemetry' | 'outages';
 }
 
+/**
+ * Outage 告警的「新鲜度窗口」。
+ *
+ * `dishGetHistory` 返回的是**滑动窗口**里的历史中断（DishyMock 15 分钟，
+ * 真实设备类似）。窗口里存在一条旧中断，不等于此刻仍在中断。
+ *
+ * 不筛新鲜度的后果：几分钟前就结束的一次调度失败会被反复读出来，
+ * 用户看到的是「什么都没发生却冒出容量不足告警」，而对应的中断在
+ * 设备侧早就翻篇了。
+ *
+ * 取 2 分钟 = 4 个采集周期（采集间隔 30s），足够容错又不至于翻旧账。
+ */
+const OUTAGE_FRESH_WINDOW_MS = 2 * 60_000;
+
 export class AlertManager extends EventEmitter {
   private db: AlertDatabase;
   private notifier: Notifier;
@@ -443,10 +457,14 @@ export class AlertManager extends EventEmitter {
         severity: 'warning',
         condition: (data) => {
           // 排除明显的断连/启动状态 - 这些不是天气问题
+          //
+          // 这里只在 TelemetryData['state'] 实际可能的取值上判断。
+          // 曾经的 `=== 'STOWED'` 是死条件（联合类型里没有 STOWED，TS 直接报
+          // TS2367），而且也没必要：天线收起后没有下行链路，状态会先落到
+          // SEARCHING/离线，末尾的 `data.state === 'ONLINE'` 已经把它挡在外面。
           if (data.state === 'SEARCHING' || 
               data.state === 'BOOTING' || 
-              data.state === 'OFFLINE' ||
-              data.state === 'STOWED') {
+              data.state === 'OFFLINE') {
             return false;
           }
 
@@ -1099,11 +1117,22 @@ export class AlertManager extends EventEmitter {
     triggered?: string;
   }>): Promise<void> {
     const now = new Date().toISOString();
+    const nowMs = Date.now();
 
     // 检查 NO_SCHEDULE outage
+    //
+    // ⚠️ 必须按「结束时刻」筛新鲜度，不能只看 cause ——
+    //   数据源是滑动窗口里的历史中断，窗口里存在 ≠ 此刻仍在发生。
+    //   判据用 `startTimestamp + durationMs`：一条仍在进行中的 45 秒
+    //   NO_SCHEDULE，它的 end 在未来，天然满足；已经结束的旧事件被排除。
     const noScheduleOutages = outages.filter(o => {
       const causeStr = (o.cause || o.triggered || '').toUpperCase();
-      return causeStr.includes('NO_SCHEDULE') || causeStr.includes('SCHEDULE');
+      if (!causeStr.includes('NO_SCHEDULE') && !causeStr.includes('SCHEDULE')) {
+        return false;
+      }
+      const startMs = Number(o.startTimestamp) || 0;
+      const durationMs = Number(o.durationMs) || 0;
+      return startMs + durationMs >= nowMs - OUTAGE_FRESH_WINDOW_MS;
     });
 
     if (noScheduleOutages.length > 0) {

@@ -87,7 +87,9 @@ function generateMockTelemetry(): TelemetryData {
     hardwareVersion: 'mock-hw-1.0',
     softwareVersion: 'mock-sw-1.0',
 
-    alerts: [],
+    // alerts 是 dishGetStatus.alerts 的布尔标志对象，不是字符串数组 ——
+    // 写成 [] 既与 TelemetryData 类型不符，规则用 hasAlert() 也读不到。
+    alerts: {},
   };
 }
 

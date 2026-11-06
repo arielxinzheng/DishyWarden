@@ -402,7 +402,9 @@ describe('alerting 集成测试 - AlertManager', () => {
       desiredBoresightAzimuthDeg: 135,
       desiredBoresightElevationDeg: 45,
     },
-    alerts: [],
+    // alerts 是 dishGetStatus.alerts 的**对象结构**(布尔标志),
+    // 不是字符串数组 —— 规则用 hasAlert(data, 'thermalThrottle') 读。
+    alerts: {},
     ...overrides,
   });
 
@@ -562,6 +564,131 @@ describe('alerting 集成测试 - AlertManager', () => {
 
       const active = manager.getActiveAlerts();
       expect(active).toHaveLength(0);
+    });
+  });
+
+  /**
+   * 服务受限
+   *
+   * 数据取自 DishyMock 的 service_restriction 场景**实测响应**:
+   *   disablementCode: 'SERVICE_RESTRICTED'
+   *   classOfService:   'RESTRICTED'
+   *   downlinkThroughputBps: 5000000   (5 Mbps, 卡在 low_throughput 阈值边缘)
+   *   alerts: {}                        (空的, 所以不能靠 alerts 判)
+   *
+   * 这里覆盖的是曾经踩过的坑: 规则对象写了 `getDetails` 而不是
+   * `summary/description/evidence`, 导致 checkTelemetry 调用
+   * rule.summary() 抛 TypeError → 被 catch 吞掉 → 页面上**永远没有告警**,
+   * 同时又因为 low_throughput 排除了服务受限 ⇒ 完全静默。
+   */
+  describe('服务受限告警', () => {
+    const restricted = (overrides: Partial<TelemetryData> = {}) =>
+      createMockTelemetry({
+        classOfService: 'RESTRICTED',
+        disablementCode: 'SERVICE_RESTRICTED',
+        downlinkThroughputBps: 5_000_000,
+        ...overrides,
+      });
+
+    it('触发「服务受限」告警', async () => {
+      await manager.checkTelemetry(restricted());
+
+      const types = manager.getActiveAlerts().map((a) => a.alert_type);
+      expect(types).toContain('service_restricted');
+    });
+
+    it('告警内容完整 (summary/description/evidence 都不是空壳)', async () => {
+      await manager.checkTelemetry(restricted());
+
+      const alert = manager
+        .getActiveAlerts()
+        .find((a) => a.alert_type === 'service_restricted');
+
+      expect(alert).toBeDefined();
+      expect(alert!.summary).toBeTruthy();
+      expect(alert!.description).toBeTruthy();
+      expect(JSON.parse(alert!.evidence)).toMatchObject({
+        disablement_code: 'SERVICE_RESTRICTED',
+      });
+    });
+
+    it('只给 disablementCode 也能触发 (判据不能只认 classOfService)', async () => {
+      await manager.checkTelemetry(
+        restricted({ classOfService: undefined })
+      );
+
+      const types = manager.getActiveAlerts().map((a) => a.alert_type);
+      expect(types).toContain('service_restricted');
+    });
+
+    it('只给 classOfService 也能触发', async () => {
+      await manager.checkTelemetry(
+        restricted({ disablementCode: undefined })
+      );
+
+      const types = manager.getActiveAlerts().map((a) => a.alert_type);
+      expect(types).toContain('service_restricted');
+    });
+
+    it('服务受限时不再重复报「下行速率低」', async () => {
+      await manager.checkTelemetry(restricted());
+
+      const types = manager.getActiveAlerts().map((a) => a.alert_type);
+      expect(types).not.toContain('low_throughput');
+    });
+
+    it('服务恢复后告警自动 resolve', async () => {
+      await manager.checkTelemetry(restricted());
+      await manager.checkTelemetry(createMockTelemetry());
+
+      const types = manager.getActiveAlerts().map((a) => a.alert_type);
+      expect(types).not.toContain('service_restricted');
+    });
+  });
+
+  /**
+   * alerts 布尔标志
+   *
+   * alerts 曾是 string[] (规则用 .includes('xxx')), 后改成对象结构。
+   * 规则没跟着改 ⇒ `alerts.includes` 是 undefined ⇒ 调它抛 TypeError
+   * ⇒ 这些规则全部静默失效。这里逐条钉住。
+   */
+  describe('alerts 布尔标志 (对象结构)', () => {
+    const activeTypes = () => manager.getActiveAlerts().map((a) => a.alert_type);
+
+    it('thermalThrottle → thermal_throttle', async () => {
+      await manager.checkTelemetry(
+        createMockTelemetry({ alerts: { thermalThrottle: true } })
+      );
+      expect(activeTypes()).toContain('thermal_throttle');
+    });
+
+    it('motorsStow → motors_stowed', async () => {
+      await manager.checkTelemetry(
+        createMockTelemetry({ alerts: { motorsStow: true } })
+      );
+      expect(activeTypes()).toContain('motors_stowed');
+    });
+
+    it('isHeating → dish_heating', async () => {
+      await manager.checkTelemetry(
+        createMockTelemetry({ alerts: { isHeating: true } })
+      );
+      expect(activeTypes()).toContain('dish_heating');
+    });
+
+    it('slowEthernetSpeeds → slow_ethernet', async () => {
+      await manager.checkTelemetry(
+        createMockTelemetry({ alerts: { slowEthernetSpeeds: true } })
+      );
+      expect(activeTypes()).toContain('slow_ethernet');
+    });
+
+    it('connectivity → cable_connectivity', async () => {
+      await manager.checkTelemetry(
+        createMockTelemetry({ alerts: { connectivity: true } })
+      );
+      expect(activeTypes()).toContain('cable_connectivity');
     });
   });
 

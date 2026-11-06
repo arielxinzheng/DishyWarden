@@ -24,8 +24,9 @@
  * v4: 性能索引 - (state, ts) 和 (currently_obstructed, ts)
  * v5: telemetry_samples 增加 public_ping_ms 和 local_gateway_ms 列
  * v6: 增加 satellite_handoffs 表，记录卫星切换事件
+ * v7: telemetry_samples 增加 class_of_service, disablement_code, alerts_json 列
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
@@ -55,7 +56,10 @@ export const DDL = `
     dish_temp_c         REAL,
     psu_temp_c          REAL,
     public_ping_ms      REAL,     -- 公网 Ping 延迟（探针节点 ICMP）
-    local_gateway_ms    REAL      -- 本地网关延迟（默认网关 ICMP）
+    local_gateway_ms    REAL,     -- 本地网关延迟（默认网关 ICMP）
+    class_of_service    TEXT,     -- 服务等级: RESIDENTIAL, RESTRICTED, SUSPENDED, etc.
+    disablement_code    TEXT,     -- 禁用代码: OKAY, NOT_ACTIVATED, SERVICE_RESTRICTED, ACCOUNT_SUSPENDED, etc.
+    alerts_json         TEXT      -- alerts 对象的 JSON 字符串
   );
 
   -- 索引: 状态过滤 + 时间范围查询（中断统计、在线率计算）

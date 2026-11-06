@@ -72,6 +72,25 @@ export function hasAlert(
   return false;
 }
 
+/**
+ * 当前有多少条 alerts 标志为真。
+ *
+ * 单独抽出来的理由和 `hasAlert()` 一样：`alerts` 有对象和字符串数组两种历史形态，
+ * 任何「数一数」的地方都得同时兼容。Prometheus 的 `starlink_alerts_total`
+ * 之前直接写 `telemetry.alerts.length`，对象形态下是 `undefined` ⇒ 指标变 NaN。
+ */
+export function countActiveAlerts(telemetry: Pick<TelemetryData, 'alerts'>): number {
+  const alerts = telemetry.alerts as unknown;
+
+  if (Array.isArray(alerts)) return alerts.length;
+
+  if (alerts && typeof alerts === 'object') {
+    return Object.values(alerts as Record<string, unknown>).filter((v) => v === true).length;
+  }
+
+  return 0;
+}
+
 /** 归一化后的服务状态快照 */
 export interface ServiceState {
   /** 原始字段，便于放进 evidence 供排查 */

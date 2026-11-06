@@ -528,25 +528,34 @@ export class DataCollector extends EventEmitter {
       }
 
       const history = await grpc.getHistory(8000);
-      const outages = history.outages as Outage[] | undefined;
-
-      if (!Array.isArray(outages) || outages.length === 0) {
-        return [];
-      }
+      const outages = Array.isArray(history.outages) ? (history.outages as Outage[]) : [];
 
       // 分析所有 outages
       const analysis = analyzeOutages(outages);
-      
+
       // 发出非切换类的 outage 事件（供告警系统使用）
-      if (analysis.otherOutages.length > 0) {
-        const newOutages = analysis.otherOutages.filter(
-          (o) => toEpochMs(o.startTimestamp) > this.lastHistoryTimestamp
-        );
-        if (newOutages.length > 0) {
-          this.emit('outages', newOutages);
-        }
-      }
-      
+      //
+      // ⚠️ **无论有没有事件都要 emit** ——
+      //   告警的生命周期需要"条件不成立"这个信号才能 resolve。
+      //   如果只在有事件时才 emit, 那么当 NO_SCHEDULE 彻底消失后
+      //   (场景关闭 / 设备恢复), 告警会永远停在 ongoing。
+      //
+      //   注意: `outages` 为空数组时也**必须**走到这里。
+      //   这里原本有个 `if (outages.length === 0) return []` 的早退,
+      //   等于把"本轮没有任何中断"这个事实整个吞掉 —— 设备恢复正常后
+      //   `checkOutages()` 永远收不到"现在没有 NO_SCHEDULE"的信号,
+      //   告警卡在 ongoing（它的生命周期已被 `managedBy: 'outages'`
+      //   从遥测侧摘走, 没有第二条恢复路径）。
+      //   `analyzeOutages([])` 返回空结果, 下面的 handoffs 分支自然会早退。
+      //
+      //   传的是**本轮看到的全部 otherOutages**(含历史的),
+      //   不是只有新增的 —— 让 `checkOutages()` 能看到
+      //   "现在还有没有 NO_SCHEDULE", 从而决定触发还是恢复。
+      //
+      //   采集侧对 handoff 用水位线过滤只是为了避免重复写同一条,
+      //   告警侧自己按 alert_key 去重, 不依赖这里。
+      this.emit('outages', analysis.otherOutages);
+
       if (analysis.handoffs.length === 0) {
         return [];
       }
