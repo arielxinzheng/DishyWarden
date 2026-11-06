@@ -55,6 +55,8 @@ export interface TopologyNodeState {
   statusText: string;
   /** 实测小字：网关 4.2 ms */
   metricText: string;
+  /** 一句话解释（悬停可见）—— 去掉全局标题栏后，理由必须就近挂在节点上 */
+  detail: string;
   alerts: TopologyAlertRef[];
 }
 
@@ -268,6 +270,7 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
       tone: 'ok',
       statusText: '在线 · 本机',
       metricText: '本机运行中',
+      detail: '本机页面正在运行，无独立探针',
       alerts: [],
     },
     {
@@ -289,6 +292,7 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
           : probe.rttMs != null
             ? `网关 ${probe.rttMs.toFixed(1)} ms`
             : '网关 —',
+      detail: lan.detail,
       alerts: links[0].alerts,
     },
     {
@@ -313,6 +317,7 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
             : t
               ? '姿态未收敛'
               : '遥测 —',
+      detail: grpc.detail,
       alerts: links[1].alerts,
     },
     {
@@ -333,6 +338,7 @@ export function buildTopology(inputs: TopologyInputs): TopologyModel {
           : t && t.state === 'ONLINE'
             ? `${(t.popPingLatencyMs ?? 0).toFixed(0)} ms · 丢包 ${pct(t.popPingDropRate ?? 0)}`
             : '—',
+      detail: wan.detail,
       alerts: links[2].alerts,
     },
   ];

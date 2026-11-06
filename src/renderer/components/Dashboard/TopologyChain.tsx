@@ -2,25 +2,33 @@
  * 全链路拓扑状态链 —— 仪表盘的「视觉锚点」。
  *
  * 位置：全局状态条（5 块 overview band）之下、折线图卡之上。
- * 作用：一眼回答「现在到底哪一段坏了」——这是表格和折线图都给不出的信息。
+ *
+ * ## 无容器、无标题（视觉降级）
+ *
+ * 早期版本外面套了一个带边框/渐变/网格的卡片，顶部还有一行
+ * 「🛰️ 全链路状态 · 端到端拓扑」+ 右侧全局结论标签。问题有两个：
+ *
+ *   1. 首屏空间被吃掉：标题栏 + 内边距 ≈ 60px，只为说一句图里已经写明的事；
+ *   2. 「图形自明性」被破坏：四个节点 + 三条连线本身就在表达拓扑，
+ *      再顶一个大标题等于给折线图加一句「这是一张折线图」。
+ *
+ * 现在节点直接裸露在页面背景上，只用上下 margin 呼吸。
+ * 结论不再全局显示，而是**就近**挂在出问题的那一处：
+ *   - 断链 → 连线变红虚线 + ✕，节点状态写「不可达」
+ *   - 测不出来 → 连线中央/节点图标角落出现微型 `?`，悬停给解释
+ *
+ * ## 两个颜色通道
+ *
+ *   图标 = 身份色（终端蓝 / 路由绿 / 天线银白 / 公网蓝），恒定，负责辨识度
+ *   卡片底色 + 边框 + 状态点 + 状态文字 = 状态色，负责告警
  *
  * ## 分工
  *
  *   topologyModel.ts   纯判据（哪种情况算断、算降级、算测不出来）
  *   本文件             取数 + 画图（不参与任何判定）
- *
- * 组件里唯一的判断是「颜色 → 类名」的查表，判据全在模型层，才能被单测覆盖。
- *
- * ## 取数
- *
- * - 天线 / 公网：`useDish()` 的遥测（gRPC 采集链路）
- * - 局域网网关：`getRouterProbe()`（主进程 ICMP，30s 一次，带可信度自检）
- * - DNS 解析：`getLatestDnsProbe()`（有配置双轨探针节点时才有值，可为空）
- * - 告警：由仪表盘传入的活跃告警，用于角标与点击跳转
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, HelpCircle, XCircle } from 'lucide-react';
 import { useDish } from '../../hooks/useDish';
 import { isValidProbe } from './routerProbeShape';
 import type { RouterProbeResult } from '../../../core/routerProbeTypes';
@@ -52,21 +60,20 @@ export interface TopologyChainProps {
 /**
  * 节点「身份配色」—— 图标颜色**不随健康状态变化**。
  *
- * 两个颜色通道分工:
+ * 两个颜色通道分工：
  *   图标 = 这是谁（终端/路由器/天线/公网），恒定，负责辨识度
  *   卡片底色 + 边框 + 状态点 + 状态文字 = 现在好不好，负责告警
  *
- * 早期版本让图标跟着状态变色，结果一整条健康链路的四个图标全是同一个绿，
- * 节点之间失去辨识度，整块看起来像一排绿点。彩色身份色才像「拓扑图」。
+ * 若让图标跟着状态变色，一条健康链路的四个图标会变成同一个绿，
+ * 节点之间失去辨识度，整块看起来像一排绿点。
  */
-const NODE_IDENTITY: Record<TopologyNodeId, { stroke: string; tint: string }> = {
-  pc: { stroke: '#38bdf8', tint: 'rgba(56,189,248,.12)' },      // 天蓝：终端
-  router: { stroke: '#34d399', tint: 'rgba(52,211,153,.12)' },  // 翠绿：路由器
-  dish: { stroke: '#e2e8f0', tint: 'rgba(226,232,240,.10)' },   // 银白：天线（金属抛物面）
-  internet: { stroke: '#60a5fa', tint: 'rgba(96,165,250,.12)' },// 蓝：公网
+const NODE_IDENTITY: Record<TopologyNodeId, { stroke: string; accent: string; tint: string }> = {
+  pc: { stroke: '#38bdf8', accent: '#7dd3fc', tint: 'rgba(56,189,248,.12)' },
+  router: { stroke: '#34d399', accent: '#6ee7b7', tint: 'rgba(52,211,153,.12)' },
+  dish: { stroke: '#e2e8f0', accent: '#38bdf8', tint: 'rgba(226,232,240,.10)' },
+  internet: { stroke: '#60a5fa', accent: '#93c5fd', tint: 'rgba(96,165,250,.12)' },
 };
 
-/** 颜色 → 类名。判据不在这里，这里只做翻译。 */
 const TONE_TEXT: Record<TopologyTone, string> = {
   ok: 'text-accent-green',
   degraded: 'text-warning-orange',
@@ -74,11 +81,11 @@ const TONE_TEXT: Record<TopologyTone, string> = {
   unknown: 'text-muted-foreground',
 };
 
-const TONE_TILE: Record<TopologyTone, string> = {
-  ok: 'bg-accent-green/10 border-accent-green/35',
-  degraded: 'bg-warning-orange/10 border-warning-orange/35',
-  down: 'bg-danger-red/10 border-danger-red/35',
-  unknown: 'bg-muted/40 border-border',
+const TONE_TILE_BORDER: Record<TopologyTone, string> = {
+  ok: 'border-border/60',
+  degraded: 'border-warning-orange/45',
+  down: 'border-danger-red/55',
+  unknown: 'border-border/60',
 };
 
 const TONE_LINE: Record<TopologyTone, string> = {
@@ -93,13 +100,6 @@ const TONE_DOT: Record<TopologyTone, string> = {
   degraded: 'bg-warning-orange',
   down: 'bg-danger-red',
   unknown: 'bg-muted-foreground',
-};
-
-const ICON_OF: Record<TopologyTone, typeof CheckCircle2> = {
-  ok: CheckCircle2,
-  degraded: AlertTriangle,
-  down: XCircle,
-  unknown: HelpCircle,
 };
 
 /** 探针轮询间隔：与采集周期对齐 */
@@ -190,104 +190,25 @@ export function TopologyChain({ alerts = [], onOpenAlerts }: TopologyChainProps)
     [telemetry, isConnected, error, routerProbe, dnsProbe, alertRefs],
   );
 
-  const VerdictIcon = ICON_OF[model.verdict.tone];
-
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border">
-      {/* 网格底纹，和上方 overview band 同一套视觉语言 */}
-      <div
-        className="absolute inset-0 opacity-[.055] pointer-events-none"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(148,163,184,.6) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.6) 1px,transparent 1px)',
-          backgroundSize: '38px 38px',
-        }}
-      />
-      <div
-        className="relative"
-        style={{
-          background:
-            model.verdict.tone === 'down'
-              ? 'radial-gradient(760px 220px at 8% -60%, rgba(239,68,68,.13), transparent 62%), linear-gradient(120deg,#12080a,#0a0c10)'
-              : model.verdict.tone === 'degraded'
-                ? 'radial-gradient(760px 220px at 8% -60%, rgba(249,115,22,.12), transparent 62%), linear-gradient(120deg,#120d08,#0a0c10)'
-                : 'radial-gradient(760px 220px at 8% -60%, rgba(56,189,248,.10), transparent 62%), linear-gradient(120deg,#0a1017,#0a0c10)',
-        }}
-      >
-        {/* 头部：标题 + 一句话结论 */}
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border/60">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-300">
-            {/* 图标一律内联 SVG：emoji 字形依赖平台字体，Linux/部分 Windows 上会变成空框 */}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              className="text-sky-blue shrink-0"
-              aria-hidden="true"
-            >
-              <circle cx="4" cy="12" r="1.9" />
-              <circle cx="12" cy="12" r="1.9" />
-              <circle cx="20" cy="12" r="1.9" />
-              <path d="M6 12h4M14 12h4" />
-            </svg>
-            全链路状态 · 端到端拓扑
-          </div>
-          <button
-            type="button"
-            onClick={onOpenAlerts}
-            disabled={!onOpenAlerts}
-            className="flex items-center gap-2 text-[11.5px] text-muted-foreground enabled:hover:text-foreground transition-colors"
-            title={model.verdict.detail}
-          >
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-semibold ${TONE_TEXT[model.verdict.tone]} ${
-                model.verdict.tone === 'ok'
-                  ? 'border-accent-green/35 bg-accent-green/10'
-                  : model.verdict.tone === 'down'
-                    ? 'border-danger-red/35 bg-danger-red/10'
-                    : model.verdict.tone === 'degraded'
-                      ? 'border-warning-orange/35 bg-warning-orange/10'
-                      : 'border-border bg-muted/40'
-              }`}
-            >
-              <VerdictIcon className="w-3 h-3" />
-              {model.verdict.headline}
-            </span>
-            {model.alertTotal > 0 && (
-              <span className="rounded-full bg-danger-red/15 border border-danger-red/35 text-danger-red px-2 py-0.5 text-[10.5px] font-semibold">
-                {model.alertTotal} 条告警
-              </span>
-            )}
-          </button>
+    // 无边框、无背景、无标题：四个节点直接裸露在页面背景上，只留轻量 margin。
+    // 整体结论留给图形自己表达（红虚线 = 断，? = 测不出来）。
+    <div
+      className="my-1"
+      aria-label={`全链路状态：${model.verdict.headline}，${model.verdict.detail}`}
+      role="img"
+    >
+      <div className="overflow-x-auto">
+        <div className="flex items-stretch min-w-[720px]">
+          {model.nodes.map((node, i) => (
+            <div key={node.id} className="flex items-stretch flex-1">
+              <NodeCard node={node} onOpenAlerts={onOpenAlerts} />
+              {i < model.links.length && (
+                <LinkSegment link={model.links[i]} onOpenAlerts={onOpenAlerts} />
+              )}
+            </div>
+          ))}
         </div>
-
-        {/* 链路主体 */}
-        <div className="overflow-x-auto">
-          {/* 节点最小宽度 172px：再窄标题会截断成「用户终…」，这个组件就没法读了 */}
-          <div className="flex items-stretch gap-0 px-3.5 py-3.5 min-w-[760px]">
-            {model.nodes.map((node, i) => (
-              <div key={node.id} className="flex items-stretch">
-                <NodeCard node={node} onOpenAlerts={onOpenAlerts} />
-                {i < model.links.length && (
-                  <LinkSegment link={model.links[i]} onOpenAlerts={onOpenAlerts} />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 断点原因：只在真有断链时才出现，避免平时占地方 */}
-        {model.rootCause && (
-          <div className="flex items-center gap-2 px-4 py-2 border-t border-border/60 text-[11.5px] text-danger-red">
-            <XCircle className="w-3.5 h-3.5 shrink-0" />
-            <span className="font-semibold">断点：{model.rootCause.label}</span>
-            <span className="text-muted-foreground">{model.rootCause.reason}</span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -305,29 +226,41 @@ function NodeCard({
   onOpenAlerts?: () => void;
 }) {
   const hasAlert = node.alerts.length > 0;
+  const tooltip = node.alerts.length
+    ? [node.detail, ...node.alerts.map((a) => a.summary)].join('\n')
+    : node.detail;
 
   return (
     <div
-      className="relative flex flex-1 items-center gap-2.5 rounded-xl border border-border/60 bg-card/50 px-3 py-2.5 min-w-[172px]"
-      title={hasAlert ? node.alerts.map((a) => a.summary).join('\n') : undefined}
+      className="relative flex flex-1 items-center gap-2.5 px-1.5 py-1 min-w-[168px]"
+      title={tooltip}
     >
-      <div
-        className={`w-10 h-10 shrink-0 rounded-xl grid place-items-center border ${TONE_TILE[node.tone]}`}
-        style={{
-          background:
-            node.tone === 'down'
-              ? 'rgba(239,68,68,.14)'
-              : node.tone === 'degraded'
-                ? 'rgba(249,115,22,.12)'
-                : NODE_IDENTITY[node.id].tint,
-        }}
-      >
-        <NodeIcon id={node.id} />
+      <div className="relative shrink-0">
+        <div
+          className={`w-10 h-10 rounded-xl grid place-items-center border ${TONE_TILE_BORDER[node.tone]}`}
+          style={{
+            background:
+              node.tone === 'down'
+                ? 'rgba(239,68,68,.14)'
+                : node.tone === 'degraded'
+                  ? 'rgba(249,115,22,.12)'
+                  : NODE_IDENTITY[node.id].tint,
+          }}
+        >
+          <NodeIcon id={node.id} />
+        </div>
+
+        {/* 「测不出来」就地标记：微型 ? 徽章，悬停给原因 */}
+        {node.tone === 'unknown' && <UnknownBadge detail={node.detail} />}
       </div>
 
       <div className="min-w-0">
-        <div className="text-[12.5px] font-semibold leading-tight whitespace-nowrap">{node.title}</div>
-        <div className={`mt-0.5 flex items-center gap-1.5 text-[11px] font-medium leading-tight ${TONE_TEXT[node.tone]}`}>
+        <div className="text-[12.5px] font-semibold leading-tight whitespace-nowrap">
+          {node.title}
+        </div>
+        <div
+          className={`mt-0.5 flex items-center gap-1.5 text-[11px] font-medium leading-tight ${TONE_TEXT[node.tone]}`}
+        >
           <span className={`w-1.5 h-1.5 rounded-full ${TONE_DOT[node.tone]}`} />
           <span className="whitespace-nowrap">{node.statusText}</span>
         </div>
@@ -341,7 +274,7 @@ function NodeCard({
           type="button"
           onClick={onOpenAlerts}
           disabled={!onOpenAlerts}
-          className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 min-w-[18px] h-[18px] rounded-full bg-danger-red text-[10px] font-bold text-white grid place-items-center shadow-sm enabled:hover:brightness-110"
+          className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 rounded-full bg-danger-red text-[10px] font-bold text-white grid place-items-center shadow-sm enabled:hover:brightness-110"
           title={node.alerts.map((a) => a.summary).join('\n')}
         >
           {node.alerts.length}
@@ -360,34 +293,36 @@ function LinkSegment({
 }) {
   const hasAlert = link.alerts.length > 0;
   const isDown = link.tone === 'down';
+  const isUnknown = link.tone === 'unknown';
 
   return (
     <div
-      className="flex w-[74px] shrink-0 flex-col items-center justify-center px-1 group"
+      className="flex w-[76px] shrink-0 flex-col items-center justify-center px-1"
       title={`${link.label}：${link.detail}`}
     >
-      <span className="text-[9.5px] text-muted-foreground/80 mb-1 whitespace-nowrap">{link.label}</span>
+      <span
+        className={`text-[9.5px] mb-1 whitespace-nowrap ${
+          isDown ? 'text-danger-red/90' : 'text-muted-foreground/80'
+        }`}
+      >
+        {link.label}
+      </span>
 
       <button
         type="button"
         onClick={hasAlert ? onOpenAlerts : undefined}
         disabled={!hasAlert || !onOpenAlerts}
-        className={`relative w-full h-[2px] rounded-full transition-all ${TONE_LINE[link.tone]} ${
-          isDown ? 'opacity-90' : ''
-        } ${hasAlert ? 'cursor-pointer' : 'cursor-default'}`}
+        className={`relative w-full h-[2px] rounded-full ${TONE_LINE[link.tone]} ${
+          hasAlert ? 'cursor-pointer' : 'cursor-default'
+        }`}
         aria-label={`${link.label}：${link.detail}`}
       >
-        {/* 箭头 */}
-        {!isDown && link.tone !== 'unknown' && (
-          <span
-            className={`absolute right-0 top-1/2 -translate-y-1/2 border-l-[5px] border-y-[3.5px] border-y-transparent ${
-              link.tone === 'ok'
-                ? 'border-l-accent-green'
-                : 'border-l-warning-orange'
-            }`}
-          />
+        {/* 正常/降级：箭头指向下游 */}
+        {!isDown && !isUnknown && (
+          <span className="absolute right-0 top-1/2 -translate-y-1/2 border-l-[5px] border-y-[3.5px] border-y-transparent border-l-accent-green" />
         )}
-        {/* 断链：红色虚线 + SVG 叉 */}
+
+        {/* 断链：红虚线 + SVG 叉 */}
         {isDown && (
           <>
             <span className="absolute inset-0 rounded-full border-t-2 border-dashed border-danger-red/80" />
@@ -398,21 +333,58 @@ function LinkSegment({
               className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#0a0c10] text-danger-red"
               aria-hidden="true"
             >
-              <path d="M2.5 2.5 9.5 9.5M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              <path
+                d="M2.5 2.5 9.5 9.5M9.5 2.5 2.5 9.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
             </svg>
           </>
         )}
+
+        {/* 测不出来：连线中央的 ? 徽章（不再有全局提示条） */}
+        {isUnknown && <UnknownBadge detail={link.detail} inline />}
       </button>
     </div>
   );
 }
 
+/**
+ * 微型 `?` 徽章 —— 「这一处测不出来」的就地标记。
+ *
+ * 为什么需要它：级联故障时下游节点会变成灰色（未知），但只靠颜色说不清
+ * 「为什么不知道」。全局提示条又说不到具体是哪一段，所以把 ? 直接摆在
+ * 出问题的那一处，悬停给完整原因。
+ */
+function UnknownBadge({ detail, inline }: { detail: string; inline?: boolean }) {
+  return (
+    <span
+      title={detail}
+      aria-label={detail}
+      className={`grid place-items-center w-4 h-4 rounded-full border border-border bg-[#0a0c10] text-[10px] font-bold leading-none text-muted-foreground cursor-help ${
+        inline
+          ? 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2'
+          : 'absolute -right-1 -bottom-1'
+      }`}
+    >
+      ?
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ */
-/* 图标（内联 SVG —— 不依赖 emoji 字形）                                */
+/* 图标（内联双色 SVG —— 不依赖 emoji 字形）                            */
 /* ------------------------------------------------------------------ */
 
-function NodeIcon({ id }: { id: TopologyNodeState['id'] }) {
-  const stroke = NODE_IDENTITY[id].stroke;
+/**
+ * 双色图标：主轮廓用身份色，局部填充/点缀用更亮的同色系。
+ *
+ * 单色线框在深色背景上太"平"，四个节点看着像同一套符号；
+ * 加一层低透明度填充 + 一个亮点，才有 emoji 那种体积感，又不依赖字形。
+ */
+function NodeIcon({ id }: { id: TopologyNodeId }) {
+  const { stroke, accent } = NODE_IDENTITY[id];
 
   const common = {
     width: 20,
@@ -420,7 +392,7 @@ function NodeIcon({ id }: { id: TopologyNodeState['id'] }) {
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke,
-    strokeWidth: 1.7,
+    strokeWidth: 1.6,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
   };
@@ -428,8 +400,9 @@ function NodeIcon({ id }: { id: TopologyNodeState['id'] }) {
   if (id === 'pc') {
     return (
       <svg {...common}>
-        <rect x="2.5" y="4" width="19" height="12.5" rx="2" />
+        <rect x="2.5" y="4" width="19" height="12.5" rx="2" fill={stroke} fillOpacity={0.16} />
         <path d="M8.5 20.5h7M12 16.5v4" />
+        <path d="M6 12.5l3-3 2 2 3-3.5 2 2" stroke={accent} strokeWidth={1.2} />
       </svg>
     );
   }
@@ -437,31 +410,32 @@ function NodeIcon({ id }: { id: TopologyNodeState['id'] }) {
   if (id === 'router') {
     return (
       <svg {...common}>
-        <rect x="2" y="14" width="20" height="7" rx="2" />
-        <path d="M6.5 17.5h.01M10 17.5h.01" />
-        <path d="M12 10.5V8" />
-        <path d="M8.5 8a5 5 0 0 1 7 0" />
-        <path d="M5.8 5.3a9 9 0 0 1 12.4 0" />
+        <rect x="2.5" y="14" width="19" height="6.5" rx="2" fill={stroke} fillOpacity={0.16} />
+        <path d="M6.5 17.2h.01M9.8 17.2h.01" strokeWidth={2} />
+        <path d="M12 11.5V9" />
+        <path d="M9.2 8.6a4 4 0 0 1 5.6 0" stroke={accent} />
+        <path d="M6.8 6.2a7.5 7.5 0 0 1 10.4 0" stroke={accent} />
       </svg>
     );
   }
 
   if (id === 'dish') {
-    // 卫星天线：抛物面 + 支架 + 信号弧
+    // 抛物面（填充）+ 支架 + 信号弧（点缀色）
     return (
       <svg {...common}>
-        <path d="M4 9.5a8.5 8.5 0 0 1 12 0" />
-        <path d="M10 9.5 19.5 4" />
-        <path d="M12 13.5v6M9 19.5h6" />
+        <path d="M4.2 10.2a9 9 0 0 1 12.4 0z" fill={stroke} fillOpacity={0.22} />
+        <path d="M4.2 10.2a9 9 0 0 1 12.4 0" />
+        <path d="M10.4 10.2 19 4.4" stroke={accent} />
+        <path d="M12 14v6M9 20h6" />
       </svg>
     );
   }
 
   return (
     <svg {...common}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18" />
-      <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18Z" />
+      <circle cx="12" cy="12" r="8.6" fill={stroke} fillOpacity={0.14} />
+      <path d="M3.4 12h17.2" stroke={accent} />
+      <path d="M12 3.4a13 13 0 0 1 0 17.2a13 13 0 0 1 0-17.2Z" />
     </svg>
   );
 }
