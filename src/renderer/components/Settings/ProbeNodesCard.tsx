@@ -41,12 +41,16 @@ interface ProbeNodesCardProps {
 const TYPE_LABEL: Record<ProbeType, string> = {
   icmp: 'ICMP',
   dns: 'DNS',
+  // dns_dual：同时探「用户态解析器」和「基准解析器(8.8.8.8)」，
+  // 用来区分「本机 DNS 坏了」和「上游 DNS 坏了」
+  dns_dual: 'DNS·双轨',
   tls: 'TLS',
 };
 
 const TYPE_OPTIONS: { value: ProbeType; label: string }[] = [
   { value: 'icmp', label: 'ICMP' },
   { value: 'dns', label: 'DNS' },
+  { value: 'dns_dual', label: 'DNS·双轨' },
   { value: 'tls', label: 'TLS' },
 ];
 

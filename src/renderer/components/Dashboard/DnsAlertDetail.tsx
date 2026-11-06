@@ -31,8 +31,7 @@ export function DnsAlertDetail({ evidence }: DnsAlertDetailProps) {
 
   const renderProbeStatus = (
     label: string,
-    probe: DnsProbeData,
-    isBaseline: boolean
+    probe: DnsProbeData
   ) => {
     const StatusIcon = probe.ok ? CheckCircle : XCircle;
     const statusColor = probe.ok ? 'text-accent-green' : 'text-danger-red';
@@ -111,8 +110,8 @@ export function DnsAlertDetail({ evidence }: DnsAlertDetailProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {renderProbeStatus('用户态 DNS', user_dns, false)}
-        {renderProbeStatus('基准态 DNS (8.8.8.8)', baseline_dns, true)}
+        {renderProbeStatus('用户态 DNS', user_dns)}
+        {renderProbeStatus('基准态 DNS (8.8.8.8)', baseline_dns)}
       </div>
 
       {renderLatencyComparison()}
