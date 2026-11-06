@@ -71,7 +71,9 @@ function generateMockTelemetry(): TelemetryData {
     // 校准数据
     boresightAzimuthDeg: 28.3 + (Math.random() - 0.5) * 2,
     boresightElevationDeg: 76.2 + (Math.random() - 0.5) * 2,
-    attitudeEstimationState: 'VALID',
+    // 枚举值必须与 dish proto 一致：真实设备返回 FILTER_CONVERGED。
+    // 历史上这里写的是 'VALID'（协议里不存在），会让校准页恒判「未知状态」。
+    attitudeEstimationState: 'FILTER_CONVERGED',
     tiltAngleDeg: 76 + (Math.random() - 0.5) * 1,
     alignmentStats: {
       validS: true,

@@ -1,0 +1,58 @@
+/**
+ * 「✅ 已对齐」浮层。
+ *
+ * 只在**刚进入**对齐状态的那一刻弹一次，3.2 秒后自动收起。
+ * 一直挂着会变成页面装饰，用户第二次看就不再读它了 —— 正反馈的价值
+ * 全在「变化的那一瞬间」。
+ *
+ * 副作用全部锁在这里，页面本身保持无状态渲染。
+ */
+
+import { useEffect, useRef, useState } from 'react';
+
+interface AlignmentFlashProps {
+  aligned: boolean;
+}
+
+/** 浮层停留时长（ms） */
+const FLASH_DURATION_MS = 3200;
+
+export function AlignmentFlash({ aligned }: AlignmentFlashProps) {
+  const [visible, setVisible] = useState(false);
+  // 用 ref 而不是 state 记录「上一次是否已对齐」：它只用于比较，不参与渲染
+  const wasAligned = useRef(false);
+
+  useEffect(() => {
+    if (!aligned) {
+      wasAligned.current = false;
+      setVisible(false);
+      return;
+    }
+
+    // 首次进入（含页面加载时就已对齐）也要弹一次
+    if (wasAligned.current) return;
+
+    wasAligned.current = true;
+    setVisible(true);
+    const timer = setTimeout(() => setVisible(false), FLASH_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [aligned]);
+
+  return (
+    <div
+      aria-live="polite"
+      // 位置：底部居中。放在顶部会正好压在页面 h1（「Alignment / 校准」）上，
+      // 而且顶部左侧是标题、右侧是空的，居中反而两不靠。
+      // 用 fixed 而不是页面内的绝对定位：main 是滚动容器，浮层不该跟着滚走。
+      className={`fixed bottom-7 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'
+      }`}
+    >
+      <div className="flex items-center gap-2 px-5 py-3 rounded-xl border border-green-500/60 bg-green-500/15 backdrop-blur-sm shadow-lg shadow-green-900/30">
+        <span className="text-lg">✅</span>
+        <span className="text-sm font-semibold text-green-400">已对齐</span>
+        <span className="text-xs text-green-300/70">朝向与仰角都在推荐范围内</span>
+      </div>
+    </div>
+  );
+}
