@@ -29,6 +29,7 @@ import {
   type DnsProbeSnapshot,
   type TopologyAlertRef,
   type TopologyLinkState,
+  type TopologyNodeId,
   type TopologyNodeState,
   type TopologyTone,
 } from './topologyModel';
@@ -47,6 +48,23 @@ export interface TopologyChainProps {
   /** 点击角标/链路时的动作（通常是打开告警抽屉） */
   onOpenAlerts?: () => void;
 }
+
+/**
+ * 节点「身份配色」—— 图标颜色**不随健康状态变化**。
+ *
+ * 两个颜色通道分工:
+ *   图标 = 这是谁（终端/路由器/天线/公网），恒定，负责辨识度
+ *   卡片底色 + 边框 + 状态点 + 状态文字 = 现在好不好，负责告警
+ *
+ * 早期版本让图标跟着状态变色，结果一整条健康链路的四个图标全是同一个绿，
+ * 节点之间失去辨识度，整块看起来像一排绿点。彩色身份色才像「拓扑图」。
+ */
+const NODE_IDENTITY: Record<TopologyNodeId, { stroke: string; tint: string }> = {
+  pc: { stroke: '#38bdf8', tint: 'rgba(56,189,248,.12)' },      // 天蓝：终端
+  router: { stroke: '#34d399', tint: 'rgba(52,211,153,.12)' },  // 翠绿：路由器
+  dish: { stroke: '#e2e8f0', tint: 'rgba(226,232,240,.10)' },   // 银白：天线（金属抛物面）
+  internet: { stroke: '#60a5fa', tint: 'rgba(96,165,250,.12)' },// 蓝：公网
+};
 
 /** 颜色 → 类名。判据不在这里，这里只做翻译。 */
 const TONE_TEXT: Record<TopologyTone, string> = {
@@ -293,8 +311,18 @@ function NodeCard({
       className="relative flex flex-1 items-center gap-2.5 rounded-xl border border-border/60 bg-card/50 px-3 py-2.5 min-w-[172px]"
       title={hasAlert ? node.alerts.map((a) => a.summary).join('\n') : undefined}
     >
-      <div className={`w-9 h-9 shrink-0 rounded-lg grid place-items-center border ${TONE_TILE[node.tone]}`}>
-        <NodeIcon id={node.id} tone={node.tone} />
+      <div
+        className={`w-10 h-10 shrink-0 rounded-xl grid place-items-center border ${TONE_TILE[node.tone]}`}
+        style={{
+          background:
+            node.tone === 'down'
+              ? 'rgba(239,68,68,.14)'
+              : node.tone === 'degraded'
+                ? 'rgba(249,115,22,.12)'
+                : NODE_IDENTITY[node.id].tint,
+        }}
+      >
+        <NodeIcon id={node.id} />
       </div>
 
       <div className="min-w-0">
@@ -383,19 +411,12 @@ function LinkSegment({
 /* 图标（内联 SVG —— 不依赖 emoji 字形）                                */
 /* ------------------------------------------------------------------ */
 
-function NodeIcon({ id, tone }: { id: TopologyNodeState['id']; tone: TopologyTone }) {
-  const stroke =
-    tone === 'ok'
-      ? '#10b981'
-      : tone === 'degraded'
-        ? '#f97316'
-        : tone === 'down'
-          ? '#ef4444'
-          : '#94a3b8';
+function NodeIcon({ id }: { id: TopologyNodeState['id'] }) {
+  const stroke = NODE_IDENTITY[id].stroke;
 
   const common = {
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke,
