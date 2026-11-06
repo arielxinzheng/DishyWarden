@@ -19,7 +19,7 @@ export default function Layout() {
       {/* 侧边栏导航 */}
       <nav className="w-64 bg-ink-900 border-r border-ink-700 p-4 flex flex-col">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-accent-green">SLMonitor</h1>
+          <h1 className="text-2xl font-bold text-accent-green">DishyWarden</h1>
           <p className="text-sm text-muted-foreground">星链监控</p>
         </div>
         
@@ -49,7 +49,7 @@ export default function Layout() {
 
         <div className="pt-4 border-t border-ink-700 text-xs text-muted-foreground">
           <p>版本 0.1.0</p>
-          <p className="mt-1">© 2024 SLMonitor</p>
+          <p className="mt-1">© 2026 DishyWarden</p>
         </div>
       </nav>
 
