@@ -199,7 +199,23 @@ export function TopologyChain({ alerts = [], onOpenAlerts }: TopologyChainProps)
         {/* 头部：标题 + 一句话结论 */}
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border/60">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-300">
-            <span className="text-[13px]">🛰️</span>
+            {/* 图标一律内联 SVG：emoji 字形依赖平台字体，Linux/部分 Windows 上会变成空框 */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              className="text-sky-blue shrink-0"
+              aria-hidden="true"
+            >
+              <circle cx="4" cy="12" r="1.9" />
+              <circle cx="12" cy="12" r="1.9" />
+              <circle cx="20" cy="12" r="1.9" />
+              <path d="M6 12h4M14 12h4" />
+            </svg>
             全链路状态 · 端到端拓扑
           </div>
           <button
@@ -343,13 +359,19 @@ function LinkSegment({
             }`}
           />
         )}
-        {/* 断链：红色虚线 + ✕ */}
+        {/* 断链：红色虚线 + SVG 叉 */}
         {isDown && (
           <>
             <span className="absolute inset-0 rounded-full border-t-2 border-dashed border-danger-red/80" />
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0c10] px-1 text-[10px] leading-none text-danger-red">
-              ✕
-            </span>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#0a0c10] text-danger-red"
+              aria-hidden="true"
+            >
+              <path d="M2.5 2.5 9.5 9.5M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
           </>
         )}
       </button>
