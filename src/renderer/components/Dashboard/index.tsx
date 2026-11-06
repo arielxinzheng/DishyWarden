@@ -34,6 +34,7 @@ import { LatencyChart } from './LatencyChart';
 import { ThroughputChart } from './ThroughputChart';
 import { AlertDrawerContent } from './AlertDrawerContent';
 import { RecentlyResolvedCard } from './RecentlyResolvedCard';
+import { TopologyChain } from './TopologyChain';
 import { useRecentlyResolved } from './useRecentlyResolved';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
 import { MetricCard, CHART_HEIGHT } from './MetricCard';
@@ -655,6 +656,14 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* 全链路拓扑状态链 —— 位置在总览带/断流横幅之后、折线图卡之前。
+          断流横幅排它上面是刻意的: 数据陈旧时「拓扑全绿」是最误导人的画面,
+          先解释清楚"数据是旧的"再说链路状态。 */}
+      <TopologyChain
+        alerts={activeAlerts}
+        onOpenAlerts={() => setAlertDrawerOpen(true)}
+      />
 
       {/* 6 metric cards row with mini charts */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
