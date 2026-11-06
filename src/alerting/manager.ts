@@ -201,9 +201,14 @@ export class AlertManager extends EventEmitter {
         description: (data) => {
           const azimuth = data.boresightAzimuthDeg?.toFixed(1) || 'N/A';
           const elevation = data.boresightElevationDeg?.toFixed(1) || 'N/A';
-          const desired = data.alignmentStats 
-            ? `期望 ${data.alignmentStats.desiredBoresightAzimuthDeg?.toFixed(1)}° / ${data.alignmentStats.desiredBoresightElevationDeg?.toFixed(1)}°`
-            : '';
+          // 期望朝向可能「设备没上报」（值为 undefined），不能只判断
+          // alignmentStats 对象是否存在 —— 那会让文案变成「期望 undefined°」。
+          const desiredAz = data.alignmentStats?.desiredBoresightAzimuthDeg;
+          const desiredEl = data.alignmentStats?.desiredBoresightElevationDeg;
+          const desired =
+            desiredAz !== undefined || desiredEl !== undefined
+              ? `期望 ${desiredAz?.toFixed(1) ?? 'N/A'}° / ${desiredEl?.toFixed(1) ?? 'N/A'}°`
+              : '';
           return `当前指向: 方位角 ${azimuth}°, 仰角 ${elevation}° ${desired}`;
         },
         evidence: (data) => ({

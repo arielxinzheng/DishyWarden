@@ -100,6 +100,7 @@ FILTER_CONVERGENCE_WARNING / INVALID_STATE`）。于是真机永远判「未对�
 
 ```bash
 npx vitest run src/renderer/components/Alignment     # 37 passed
+npx vitest run src/core/dishClient.desired.test.ts    # 10 passed
 npx tsc --noEmit -p tsconfig.json                    # Alignment 相关 0 错误
 npm run dev                                          # 打开 /alignment
 ```
@@ -118,12 +119,40 @@ alignmentStats.desiredBoresightAzimuthDeg   # 实测 0.5
 alignmentStats.desiredBoresightElevationDeg # 实测 65.0999984741211
 ```
 
-## 8. 已知遗留
+## 8. 期望值缺失时的「假推荐正北」（已修）
 
-1. `dishClient.ts` 把缺失的 `desiredBoresight*` 兜成 `0` 而不是 `undefined`
-   （`num(x, prev ?? 0)`），于是新页面的「设备未上报推荐朝向」分支在真机路径上
-   基本不可达，会退化成「以 0° 为中心的扇带 + 向西旋转 135°」这种错误引导。
-   属于既有映射，未在本次改动内。
-2. 仰角盘的刻度只有点、没有数字标签，读数要靠盘心「推荐 71.0°–81.0°」。
-3. DishyMock 把期望值设成当前值，所以真机上永远是「已对齐」；要看未对齐态
+`dishClient.ts` 原来这样映射期望朝向：
+
+```ts
+desiredBoresightAzimuthDeg: num(alignment.desiredBoresightAzimuthDeg,
+                                 prev?.alignmentStats?.desiredBoresightAzimuthDeg ?? 0),
+```
+
+`num()` 解析失败会兜成 **0**，而 **0 是完全合法的方位角（正北）**。后果：
+
+- 设备不报期望朝向 → 拿到 0 → 校准页以为「推荐正北」，
+  天线实际指向 135° 时给出「向西旋转 135°」这种**错误引导**；
+- 页面里「设备未上报推荐朝向」这条分支永远走不到。
+
+改成：
+
+```ts
+desiredBoresightAzimuthDeg:
+  parseFiniteNumber(alignment.desiredBoresightAzimuthDeg) ??
+  prev?.alignmentStats?.desiredBoresightAzimuthDeg,
+```
+
+要点：
+
+- 缺失 = `undefined`（「没有期望值」），**上报 0 仍然是 0**（推荐正北是合法值）——
+  两者可区分，因为 proto loader 用的是 `defaults: false`（`dishGrpc.ts`），
+  设备不报的字段压根不会出现在响应里；
+- 本帧缺失时沿用上一帧的值，设备抖动不会让推荐范围忽有忽无；
+- `parseFiniteNumber` 单独抽成导出函数并配了单测（`src/core/dishClient.desired.test.ts`，
+  10 个用例，含直接驱动 `parseStatus` 的端到端断言）。
+
+## 9. 已知遗留
+
+1. 仰角盘的刻度只有点、没有数字标签，读数要靠盘心「推荐 71.0°–81.0°」。
+2. DishyMock 把期望值设成当前值，所以真机上永远是「已对齐」；要看未对齐态
    必须用真实天线或改 mock 数据。

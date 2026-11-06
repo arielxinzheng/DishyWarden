@@ -8,6 +8,29 @@
 import { createConnectTransport } from '@connectrpc/connect-web';
 import { DishGrpcClient } from './dishGrpc';
 
+/**
+ * 把「可能是数字」的值解析成 number，解析不出来返回 undefined。
+ *
+ * ## 为什么不能复用 parseStatus 里的 num()
+ *
+ * `num()` 会把解析失败兜成 **0**，而 **0 是一个完全合法的方位角（正北）**。
+ * 期望朝向一旦被兜成 0，「设备没上报推荐朝向」就变成了「推荐正北」——
+ * 校准页会拿 0° 当目标算偏差，在天线实际指向 135° 时给出
+ * 「向西旋转 135°」这种**错误引导**；同时「无期望值」这条分支永远走不到。
+ *
+ * 所以这里必须能表达「没有值」。proto loader 用的是 `defaults: false`
+ * （见 `dishGrpc.ts`），设备不报的字段根本不会出现在响应里，
+ * 所以「缺失」与「上报了 0」是能分开的。
+ */
+export function parseFiniteNumber(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
 export interface DishConfig {
   address: string;      // dish 地址，默认 192.168.100.1
   grpcPort: number;     // gRPC 端口，默认 9200
@@ -357,14 +380,12 @@ export class DishClient {
           alignment.attitudeUncertaintyDeg,
           prev?.alignmentStats?.attitudeUncertaintyDeg ?? 0
         ),
-        desiredBoresightAzimuthDeg: num(
-          alignment.desiredBoresightAzimuthDeg,
-          prev?.alignmentStats?.desiredBoresightAzimuthDeg ?? 0
-        ),
-        desiredBoresightElevationDeg: num(
-          alignment.desiredBoresightElevationDeg,
-          prev?.alignmentStats?.desiredBoresightElevationDeg ?? 0
-        ),
+        desiredBoresightAzimuthDeg:
+          parseFiniteNumber(alignment.desiredBoresightAzimuthDeg) ??
+          prev?.alignmentStats?.desiredBoresightAzimuthDeg,
+        desiredBoresightElevationDeg:
+          parseFiniteNumber(alignment.desiredBoresightElevationDeg) ??
+          prev?.alignmentStats?.desiredBoresightElevationDeg,
       },
 
       dishTemperature: num(deviceInfo.dishTemperature, prev?.dishTemperature ?? 0),
