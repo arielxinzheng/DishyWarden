@@ -53,18 +53,45 @@ export function donutSectorPath(
 }
 
 /**
+ * 单线圆弧 —— 用于「目标区标记」。
+ *
+ * 为什么需要它：推荐带只有 10° 宽，而指针就画在带正中间，两者是同一个绿。
+ * 真机实测（desired == 当前读数）下来，用户根本看不出那是一条「带」，
+ * 只看到一根绿线 —— 于是页面写着「彩色扇带是推荐范围」，用户找不到扇带。
+ * 所以在**指针够不着的外圈**再画一段粗弧，一眼就能定位推荐区在哪。
+ */
+export function arcPath(
+  cx: number,
+  cy: number,
+  r: number,
+  startCompassDeg: number,
+  spanDeg: number
+): string {
+  const start = polar(cx, cy, r, startCompassDeg);
+  const end = polar(cx, cy, r, startCompassDeg + spanDeg);
+  const largeArc = Math.abs(spanDeg) > 180 ? 1 : 0;
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
+}
+
+/**
  * 对齐配色 —— 「指针变绿」这条正反馈的唯一定义处。
  *
  * inBand 为真时推荐带由灰转绿、指针由橙转绿；两个圆盘都从这里取色，
  * 不会出现「一个盘绿了另一个盘还是橙的」。
+ *
+ * 两套颜色（band / targetArc）不是重复：
+ *   band      扇带本体，宽度大但半透明，指针会压在上面
+ *   targetArc 外圈亮弧，实心高对比，指针永远压不到，是「带在哪」的主指示
  */
 export const DIAL_COLORS = {
   pointerOut: '#f97316',
   pointerIn: '#22c55e',
-  bandOut: 'rgba(148, 163, 184, 0.14)',
-  bandOutStroke: 'rgba(148, 163, 184, 0.30)',
-  bandIn: 'rgba(34, 197, 94, 0.22)',
-  bandInStroke: 'rgba(34, 197, 94, 0.55)',
+  bandOut: 'rgba(148, 163, 184, 0.22)',
+  bandOutStroke: 'rgba(203, 213, 225, 0.55)',
+  bandIn: 'rgba(34, 197, 94, 0.34)',
+  bandInStroke: 'rgba(74, 222, 128, 0.85)',
+  targetArcOut: 'rgba(203, 213, 225, 0.9)',
+  targetArcIn: 'rgba(74, 222, 128, 0.95)',
   text: '#e2e8f0',
   subText: '#94a3b8',
   faint: '#64748b',
@@ -72,6 +99,16 @@ export const DIAL_COLORS = {
 
 export function dialPalette(inBand: boolean) {
   return inBand
-    ? { pointer: DIAL_COLORS.pointerIn, band: DIAL_COLORS.bandIn, bandStroke: DIAL_COLORS.bandInStroke }
-    : { pointer: DIAL_COLORS.pointerOut, band: DIAL_COLORS.bandOut, bandStroke: DIAL_COLORS.bandOutStroke };
+    ? {
+        pointer: DIAL_COLORS.pointerIn,
+        band: DIAL_COLORS.bandIn,
+        bandStroke: DIAL_COLORS.bandInStroke,
+        targetArc: DIAL_COLORS.targetArcIn,
+      }
+    : {
+        pointer: DIAL_COLORS.pointerOut,
+        band: DIAL_COLORS.bandOut,
+        bandStroke: DIAL_COLORS.bandOutStroke,
+        targetArc: DIAL_COLORS.targetArcOut,
+      };
 }

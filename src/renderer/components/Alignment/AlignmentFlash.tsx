@@ -41,11 +41,11 @@ export function AlignmentFlash({ aligned }: AlignmentFlashProps) {
   return (
     <div
       aria-live="polite"
-      // 位置：底部居中。放在顶部会正好压在页面 h1（「Alignment / 校准」）上，
-      // 而且顶部左侧是标题、右侧是空的，居中反而两不靠。
-      // 用 fixed 而不是页面内的绝对定位：main 是滚动容器，浮层不该跟着滚走。
-      className={`fixed bottom-7 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${
-        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'
+      // 位置：由页面摆在标题行右侧（flex 兄弟节点），**永远不覆盖任何内容**。
+      // 之前用 fixed 顶部/底部居中都试过：要么压住 h1，要么盖住下方说明卡。
+      // 隐藏时仍占位（opacity 0），标题不会因为它的出现/消失而跳动。
+      className={`shrink-0 transition-all duration-300 ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'
       }`}
     >
       <div className="flex items-center gap-2 px-5 py-3 rounded-xl border border-green-500/60 bg-green-500/15 backdrop-blur-sm shadow-lg shadow-green-900/30">

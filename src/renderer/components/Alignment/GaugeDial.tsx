@@ -5,11 +5,13 @@
  * 因为 alignmentGuidance 已经把仰角换算成罗盘角，这里不需要第二套三角函数。
  *
  * 绘制顺序（不可调换）：
- *   推荐带 → 刻度 → 指针 → 引导牌 → 提示箭头
+ *   推荐带 → 刻度 → 外圈目标弧 → 指针 → 引导牌 → 提示箭头
  * 引导牌必须压在指针之上，否则指针从牌下方穿过时数字和线条会糊成一团。
+ * 目标弧必须画在指针之外（半径更大），否则又会被指针盖住 —— 那正是
+ * 「看不出扇带」的老毛病。
  */
 
-import { DIAL_COLORS, dialPalette, donutSectorPath, polar } from './dialGeometry';
+import { DIAL_COLORS, arcPath, dialPalette, donutSectorPath, polar } from './dialGeometry';
 import { DialPill } from './dialPill';
 import type { DialModel } from './alignmentGuidance';
 
@@ -20,6 +22,8 @@ interface GaugeGeometry {
   rInner: number;
   /** 刻度点所在半径（在推荐带外侧） */
   tickR: number;
+  /** 外圈目标弧所在半径 —— 必须在 pointerR 之外，否则会被指针盖住 */
+  targetR: number;
   pointerR: number;
   /** 刻度覆盖的罗盘角范围：全圆 0–355，仰角盘只有 0–90 */
   tickFrom: number;
@@ -35,10 +39,16 @@ const GAUGE: Record<'compass' | 'elevation', GaugeGeometry> = {
   compass: {
     cx: 100,
     cy: 100,
-    rOuter: 76,
-    rInner: 52,
-    tickR: 82,
-    pointerR: 76,
+    // 三层同心，互不重叠（自内向外）：
+    //   指针到 pointerR=55（停在带内缘之前，不压扇带）
+    //   扇带 rInner=58 → rOuter=72（环上的一段，带宽 10°）
+    //   外圈目标弧 targetR=79（亮弧，指针永远盖不到）
+    //   刻度点 tickR=86
+    rOuter: 72,
+    rInner: 58,
+    tickR: 86,
+    targetR: 79,
+    pointerR: 55,
     tickFrom: 0,
     tickTo: 355,
     tickStep: 5,
@@ -52,16 +62,17 @@ const GAUGE: Record<'compass' | 'elevation', GaugeGeometry> = {
     cy: 174,
     // 环半径比方位角盘小一档：象限盘的可视面积只有圆形盘的四分之一，
     // 环画满会让圆心牌没有地方摆（见下方 pillX/pillY 的取值推导）
-    rOuter: 104,
-    rInner: 80,
-    tickR: 111,
-    pointerR: 104,
+    rOuter: 100,
+    rInner: 86,
+    tickR: 116,
+    targetR: 106,
+    pointerR: 83,
     tickFrom: 0,
     tickTo: 90,
     tickStep: 5,
     // 牌子放右上角的空白区。这里的坐标不是随手填的：
     //   - 推荐带（仰角 71–81° ⇒ 罗盘角 9–19°）最右只到 x≈80，
-    //   - 刻度点最小 y = cy - tickR = 63，
+    //   - 刻度点最小 y = cy - tickR = 58，且落在 x < 94 的一段，
     // 所以 x 94–190 / y 28–60 这块是这张盘上唯一既不压带、也不压刻度、
     // 还能装下「推荐 71.0°–81.0°」整行的矩形。
     pillX: 142,
@@ -90,7 +101,8 @@ export function GaugeDial({ variant, model, ariaLabel }: GaugeDialProps) {
       role="img"
       aria-label={`${ariaLabel}：${model.hintMain}，${model.hintSub}`}
     >
-      {/* 推荐范围扇带 —— 未进带时灰色，进带时转绿（配色唯一来源：dialGeometry.dialPalette） */}
+      {/* 推荐范围扇带 —— 未进带时灰色，进带时转绿（配色唯一来源：dialGeometry.dialPalette）
+          描边勾出整个扇区（含两条径向边），指针停在带内缘时也能看出区间有多宽 */}
       {model.hasBand && (
         <path
           d={donutSectorPath(
@@ -103,7 +115,7 @@ export function GaugeDial({ variant, model, ariaLabel }: GaugeDialProps) {
           )}
           fill={palette.band}
           stroke={palette.bandStroke}
-          strokeWidth={0.8}
+          strokeWidth={1.6}
           className="transition-all duration-300"
         />
       )}
@@ -113,6 +125,25 @@ export function GaugeDial({ variant, model, ariaLabel }: GaugeDialProps) {
         const p = polar(geo.cx, geo.cy, geo.tickR, deg);
         return <circle key={deg} cx={p.x} cy={p.y} r={0.9} fill="white" fillOpacity={0.35} />;
       })}
+
+      {/* 外圈目标弧 —— 推荐范围在哪，一眼可见。
+          半径在指针长度之外，指针再长也盖不住它；这是「推荐范围」的主指示。 */}
+      {model.hasBand && (
+        <path
+          d={arcPath(
+            geo.cx,
+            geo.cy,
+            geo.targetR,
+            model.bandStartCompass,
+            model.bandSpanCompass
+          )}
+          fill="none"
+          stroke={palette.targetArc}
+          strokeWidth={5}
+          strokeLinecap="round"
+          className="transition-all duration-300"
+        />
+      )}
 
       {/* 方位标签只在全圆罗盘上有意义 —— 仰角盘没有「东南西北」 */}
       {variant === 'compass' && (

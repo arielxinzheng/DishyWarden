@@ -79,6 +79,8 @@ export default function AlignmentPage() {
   const verdict = judgeAlignment(attitude.converged, rotation, tilt);
 
   const tolerance = DEFAULT_TOLERANCE_DEG;
+  // 设备没上报期望值时盘上没有带，说明文案也不能再承诺「扇带」
+  const hasBand = rotation.hasBand || tilt.hasBand;
   const rotationBand =
     desiredAzimuth === undefined
       ? '—'
@@ -92,16 +94,18 @@ export default function AlignmentPage() {
 
   return (
     <div className="p-8 space-y-6">
-      <AlignmentFlash aligned={verdict.aligned} />
-
-      {/* 标题 + 人话状态 */}
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Alignment / 校准</h1>
-        <p className={`flex items-center gap-2 font-medium ${TONE_TEXT[attitude.tone]}`}>
-          <span>{attitude.icon}</span>
-          <span>{attitude.label}</span>
-        </p>
-        <p className="text-xs text-gray-500 mt-1">{attitude.detail}</p>
+      {/* 标题 + 人话状态 + 「刚对齐」正反馈。Flash 是 flex 兄弟节点，
+          摆在标题行右侧，不悬浮、不覆盖任何内容。 */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Alignment / 校准</h1>
+          <p className={`flex items-center gap-2 font-medium ${TONE_TEXT[attitude.tone]}`}>
+            <span>{attitude.icon}</span>
+            <span>{attitude.label}</span>
+          </p>
+          <p className="text-xs text-gray-500 mt-1">{attitude.detail}</p>
+        </div>
+        <AlignmentFlash aligned={verdict.aligned} />
       </div>
 
       {/* 综合结论 */}
@@ -162,12 +166,29 @@ export default function AlignmentPage() {
       </div>
 
       {/* 使用说明 */}
-      <div className="rounded-xl border border-gray-700/60 bg-gray-900/50 p-6 space-y-2">
+      <div className="rounded-xl border border-gray-700/60 bg-gray-900/50 p-6 space-y-3">
         <h3 className="text-white font-bold">如何读取此图</h3>
+
         <p className="text-sm text-gray-400 leading-relaxed">
-          <strong className="text-gray-300">彩色扇带</strong>是推荐范围（{formatDeg(tolerance)} 容差）。
-          灰色表示还没进带，绿色表示已进带。
+          <strong className="text-gray-300">外圈亮弧</strong>标出推荐范围的位置（推荐 = 期望值 ±{' '}
+          {formatDeg(tolerance)}，即总共 {formatDeg(tolerance * 2)} 宽）。
+          <strong className="text-gray-300">内圈扇带</strong>就是推荐范围本身：
+          {hasBand ? (
+            <>
+              灰色表示还没进带，<span className="text-green-400">绿色</span>表示已进带。
+            </>
+          ) : (
+            <>设备未上报期望值，本页不画推荐范围。</>
+          )}
         </p>
+
+        {/* 图例：光靠文字说「灰色/绿色」不如直接摆两个色块 */}
+        <div className="flex flex-wrap items-center gap-5 pt-1">
+          <LegendSwatch color="rgba(148, 163, 184, 0.22)" border="rgba(203, 213, 225, 0.55)" label="还没进带" />
+          <LegendSwatch color="rgba(34, 197, 94, 0.34)" border="rgba(74, 222, 128, 0.85)" label="已进带" />
+          <LegendSwatch color="#f97316" label="橙色指针 = 当前实际指向" />
+        </div>
+
         <p className="text-sm text-gray-400 leading-relaxed">
           <strong className="text-gray-300">橙色指针</strong>是设备当前实际指向。
           进带后指针变绿，盘心会直接告诉你「还需向东旋转多少度」「还需抬高多少度」；
@@ -236,5 +257,31 @@ function ParamCard({ title, rows }: { title: string; rows: ParamRow[] }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * 图例色块。
+ *
+ * 为什么要有图例：盘面上的扇带只有 10° 宽，文字描述「灰色 / 绿色」对
+ * 第一次打开这页的人几乎没有指向性 —— 直接把两种颜色摆出来更直观。
+ */
+function LegendSwatch({
+  color,
+  border,
+  label,
+}: {
+  color: string;
+  border?: string;
+  label: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-2 text-xs text-gray-400">
+      <span
+        className="inline-block w-5 h-3 rounded-sm"
+        style={{ background: color, border: border ? `1px solid ${border}` : undefined }}
+      />
+      {label}
+    </span>
   );
 }
