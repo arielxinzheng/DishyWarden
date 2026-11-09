@@ -6,6 +6,7 @@ import {
   OBSTRUCTION_LEVELS,
   OBSTRUCTION_LEVEL_COLORS,
   analyzeObstructionMap,
+  classifyObstruction,
   assessObstructionImpact,
   describeObstructionAge,
 } from '../lib/obstructionAnalysis';
@@ -134,7 +135,29 @@ export default function ObstructionMap() {
           <StatCard
             label="最大遮挡度"
             value={stats.maxObstruction.toFixed(2)}
-            color="purple"
+            // 颜色跟 3D 图的四色分级同源：灰/绿 = 未达遮挡线，橙 = 部分，红 = 挡死。
+            // 不再固定用紫色 —— 数值本身就该传达严重程度。
+            color={
+              classifyObstruction(stats.maxObstruction) === 'blocked'
+                ? 'red'
+                : classifyObstruction(stats.maxObstruction) === 'partial'
+                  ? 'orange'
+                  : 'green'
+            }
+            tooltip={
+              <>
+                <p>取值范围 0 ~ 1，表示<strong className="text-gray-100">视野内最严重那一点</strong>的信号衰减程度。</p>
+                <p className="mt-1">0 = 该区域天空完全干净；1 = 物理障碍物已将信号完全挡死。</p>
+                <p className="mt-1.5 text-gray-400">
+                  与「视野遮挡占比」的区别：这个看<strong className="text-gray-200">单点有多严重</strong>，
+                  占比看<strong className="text-gray-200">被挡住的范围有多大</strong>。
+                </p>
+                <p className="mt-1.5 text-gray-500">
+                  卡片颜色与 3D 图同源阈值：≤ {OBSTRUCTION_LEVELS.clearMax.toFixed(2)} 无遮挡 ·
+                  ≤ {OBSTRUCTION_LEVELS.partialMax.toFixed(2)} 部分 · &gt; {OBSTRUCTION_LEVELS.partialMax.toFixed(2)} 完全
+                </p>
+              </>
+            }
           />
         </div>
       )}
@@ -236,9 +259,11 @@ interface StatCardProps {
   color: 'blue' | 'green' | 'orange' | 'red' | 'purple';
   /** 补充说明（工具提示级别，不抢主数值） */
   hint?: string;
+  /** 悬停/聚焦时展开的名词解释气泡 */
+  tooltip?: React.ReactNode;
 }
 
-function StatCard({ label, value, color, hint }: StatCardProps) {
+function StatCard({ label, value, color, hint, tooltip }: StatCardProps) {
   const colorClasses = {
     blue: 'bg-blue-900/20 border-blue-500 text-blue-400',
     green: 'bg-green-900/20 border-green-500 text-green-400',
@@ -249,9 +274,63 @@ function StatCard({ label, value, color, hint }: StatCardProps) {
 
   return (
     <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
-      <p className="text-sm opacity-80 mb-1">{label}</p>
+      {tooltip ? (
+        <InfoLabel text={label} tooltip={tooltip} />
+      ) : (
+        <p className="text-sm opacity-80 mb-1">{label}</p>
+      )}
       <p className="text-2xl font-bold">{value}</p>
       {hint && <p className="text-[11px] opacity-70 mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * 带释义气泡的标签。
+ *
+ * ## 为什么不用原生 `title`
+ *
+ * Electron/Chromium 里原生 title 有约 1 秒延迟、样式完全不可控，
+ * 而且这个项目里已经踩过「Electron 里根本不弹」的坑（见 StatusTooltip 头注释）。
+ * 这里用纯 CSS 的 hover/focus 浮层：零状态、零 portal，键盘 Tab 聚焦也能看到。
+ *
+ * ## 两重提示
+ *
+ * 虚线底边 + 小 (i) 图标 —— SaaS 里「可悬浮查看释义」的标准范式；
+ * 任何一个都足以暗示可交互，两个同时出现是为了在深色低对比背景下更明显。
+ */
+function InfoLabel({ text, tooltip }: { text: string; tooltip: React.ReactNode }) {
+  return (
+    <div
+      className="group/label relative inline-flex items-center gap-1 rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+      tabIndex={0}
+      aria-describedby="obstruction-max-tooltip"
+    >
+      <span className="text-sm opacity-80 border-b border-dotted border-white/35 pb-0.5 cursor-help">
+        {text}
+      </span>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className="w-3.5 h-3.5 opacity-60 cursor-help"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 16.5v-4.8M12 7.8v.6" strokeLinecap="round" />
+      </svg>
+
+      {/* 浮层：右对齐，避免在 4 列网格的最后一列溢出视口 */}
+      <div
+        id="obstruction-max-tooltip"
+        role="tooltip"
+        className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-72 rounded-lg border border-gray-600/80 bg-gray-950/95 px-3 py-2.5 text-[11.5px] font-normal leading-relaxed text-gray-300 shadow-xl backdrop-blur-sm group-hover/label:block group-focus/label:block"
+      >
+        {tooltip}
+      </div>
     </div>
   );
 }
