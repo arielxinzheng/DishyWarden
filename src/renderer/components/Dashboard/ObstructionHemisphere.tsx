@@ -5,19 +5,35 @@
  */
 
 import { useMemo } from 'react';
+import {
+  OBSTRUCTION_LEVEL_COLORS,
+  classifyObstruction,
+  detectObstructionScale,
+  normalizeObstructionValue,
+} from '../../lib/obstructionAnalysis';
+
+export interface ObstructionHighlight {
+  /** 主遮挡方位角（度，0=北，顺时针） */
+  azimuth: number;
+  /** 中文方位名，用于选中最近的罗盘标签 */
+  text: string;
+}
 
 interface ObstructionHemisphereProps {
   data: number[][];
   width?: number;
   height?: number;
   showLegend?: boolean;
+  /** 主遮挡方向：高亮罗盘标签并在边缘画出指示箭头 */
+  highlight?: ObstructionHighlight | null;
 }
 
 export function ObstructionHemisphere({ 
   data, 
   width = 360, 
   height = 280,
-  showLegend = false 
+  showLegend = false,
+  highlight = null,
 }: ObstructionHemisphereProps) {
   const canvasDataUrl = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -41,6 +57,8 @@ export function ObstructionHemisphere({
     const baseRadiusY = height * (width > 400 ? 0.364 : 0.36); // 椭圆 Y 半径（高度，形成 3D 透视）
     const gridSize = data.length; // 通常是 123
     const gridCenter = (gridSize - 1) / 2;
+    // 刻度只在这里判一次，保证与分析卡片的占比口径完全一致
+    const scale = detectObstructionScale(data);
 
     // 先绘制地平线轮廓椭圆（作为背景）
     ctx.strokeStyle = width > 400 ? 'rgba(100, 116, 139, 0.4)' : 'rgba(100, 116, 139, 0.3)';
@@ -86,8 +104,10 @@ export function ObstructionHemisphere({
         const x = centerX + projectedRadius * baseRadiusX * Math.cos(angle);
         const y = centerY - elevation * baseRadiusY * 1.4 + projectedRadius * baseRadiusY * 0.35 * Math.sin(angle);
         
-        // 获取颜色（四色分类：Unmapped/Clear/Partial/Obstruction）
-        const color = getDishylinkColor(value);
+        // 获取颜色（四色分类）—— 分类器与分析卡片的占比统计是同一个函数，
+        // 因此"红色面积"与"视野遮挡占比"不可能再对不上
+        const level = classifyObstruction(normalizeObstructionValue(value, scale));
+        const color = OBSTRUCTION_LEVEL_COLORS[level].canvas;
         
         // 点大小：远处（中心）小，近处（边缘）大，增强透视感
         const baseSize = width > 400 ? 2.2 : 1.4;
@@ -122,21 +142,58 @@ export function ObstructionHemisphere({
     
     const compassRadius = baseRadiusX + (width > 400 ? 30 : 20);
     const directions = [
-      { angle: -90, label: 'N' },  // 北（上）
-      { angle: 0, label: 'E' },    // 东（右）
-      { angle: 90, label: 'S' },   // 南（下）
-      { angle: 180, label: 'W' },  // 西（左）
+      { angle: -90, label: 'N', zh: '北' },  // 北（上）
+      { angle: 0, label: 'E', zh: '东' },    // 东（右）
+      { angle: 90, label: 'S', zh: '南' },   // 南（下）
+      { angle: 180, label: 'W', zh: '西' },  // 西（左）
     ];
-    
+
+    // 主遮挡方向最接近哪个罗盘标签（8 方位名 → 最近的 4 向标签）
+    const highlightLabel = highlight
+      ? (() => {
+          const az = ((highlight.azimuth % 360) + 360) % 360;
+          // 45° 一档，四舍五入到最近的 90° 轴
+          const idx = Math.round(az / 90) % 4;
+          return ['N', 'E', 'S', 'W'][idx];
+        })()
+      : null;
+
     directions.forEach(({ angle, label }) => {
       const rad = (angle * Math.PI) / 180;
       const x = centerX + compassRadius * Math.cos(rad);
       const y = centerY + (baseRadiusY * 0.35) * Math.sin(rad);
+      const isHighlight = highlightLabel === label;
+
+      ctx.fillStyle = isHighlight ? 'rgba(251, 191, 36, 0.95)' : (width > 400 ? 'rgba(148, 163, 184, 0.7)' : 'rgba(148, 163, 184, 0.6)');
+      ctx.font = isHighlight
+        ? (width > 400 ? 'bold 18px sans-serif' : 'bold 12px sans-serif')
+        : (width > 400 ? '16px sans-serif' : '11px sans-serif');
       ctx.fillText(label, x, y);
     });
 
+    // 主方向箭头：贴着地平线椭圆，指向障碍所在方位
+    if (highlight) {
+      const azRad = ((highlight.azimuth - 90) * Math.PI) / 180;
+      const arrowRadiusX = baseRadiusX + 6;
+      const arrowRadiusY = baseRadiusY * 0.35 + 6;
+      const ax = centerX + arrowRadiusX * Math.cos(azRad);
+      const ay = centerY + arrowRadiusY * Math.sin(azRad);
+
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(azRad);
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(9, 0);
+      ctx.lineTo(-5, 5);
+      ctx.lineTo(-5, -5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
     return canvas.toDataURL();
-  }, [data, width, height]);
+  }, [data, width, height, highlight]);
 
   if (!canvasDataUrl) {
     return (
@@ -160,45 +217,19 @@ export function ObstructionHemisphere({
       
       {/* Dishylink 风格图例 - 可选 */}
       {showLegend && (
-        <div className="flex items-center justify-center gap-6 mt-6 text-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-gray-500"></div>
-            <span className="text-gray-400">Unmapped</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-gray-300"></div>
-            <span className="text-gray-300">Clear view</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-800"></div>
-            <span className="text-red-400">Partial</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500"></div>
-            <span className="text-red-500">Obstructions</span>
-          </div>
+        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mt-6 text-sm">
+          {(['unmapped', 'clear', 'partial', 'blocked'] as const).map((level) => (
+            <div key={level} className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${OBSTRUCTION_LEVEL_COLORS[level].dot}`} />
+              <span className="text-gray-300">{OBSTRUCTION_LEVEL_COLORS[level].label}</span>
+              <span className="text-gray-500">({OBSTRUCTION_LEVEL_COLORS[level].zh})</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// 障碍值到颜色的映射 (Dishylink 四色分类)
-function getDishylinkColor(value: number): string {
-  // Dishylink 使用四色分类而非渐变
-  // 基于真实 Starlink 数据：0 = unmapped, 1-50 = clear, 51-200 = partial, 201+ = obstruction
-  
-  if (value === 0) {
-    // Unmapped - 深灰色
-    return 'rgba(107, 114, 128, 0.5)';
-  } else if (value <= 50) {
-    // Clear view - 浅灰白色
-    return 'rgba(209, 213, 219, 0.9)';
-  } else if (value <= 200) {
-    // Partial obstruction - 暗红色
-    return 'rgba(153, 27, 27, 0.85)';
-  } else {
-    // Obstructions - 亮红色
-    return 'rgba(239, 68, 68, 0.9)';
-  }
-}
+// 颜色映射已统一到 lib/obstructionAnalysis 的 OBSTRUCTION_LEVEL_COLORS ——
+// 曾经这里有一套 0..255 阈值，而实测数据是 0..1，导致图形与数字互相矛盾。

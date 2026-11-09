@@ -9,6 +9,10 @@ import {
   analyzeObstructionMap,
   azimuthToDirection,
   assessObstructionImpact,
+  classifyObstruction,
+  detectObstructionScale,
+  normalizeObstructionValue,
+  OBSTRUCTION_LEVELS,
 } from './obstructionAnalysis';
 
 describe('obstructionAnalysis.ts - 方位角转换', () => {
@@ -93,7 +97,9 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
       
       expect(result).toBeDefined();
       expect(result!.obstructionPercentage).toBe(1);
-      expect(result!.maxObstruction).toBe(255);
+      // 0..255 老刻度会被归一化成 0..1
+      expect(result!.maxObstruction).toBe(1);
+      expect(result!.scale).toBe(255);
       expect(result!.obstructedPixels).toBe(result!.totalPixels);
     });
 
@@ -213,8 +219,8 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
 
       const result = analyzeObstructionMap(map);
       expect(result).toBeDefined();
-      // 只有中心的 100 是有效值
-      expect(result!.maxObstruction).toBe(100);
+      // 只有中心的 100 是有效值；归一化后 100/255 ≈ 0.392
+      expect(result!.maxObstruction).toBeCloseTo(100 / 255, 6);
     });
   });
 });
@@ -259,5 +265,86 @@ describe('obstructionAnalysis.ts - 影响评估', () => {
       const result = assessObstructionImpact(0.10);
       expect(result.label).toBe('高');
     });
+  });
+});
+/**
+ * ===== 回归：数字与图形「互相打脸」的那个 bug =====
+ *
+ * 现象: 卡片写「障碍像素 11,681 / 视野遮挡占比 100.00% / 影响 高」，
+ * 3D 半球却全是浅灰的 Clear view，一个红点都没有。
+ *
+ * 根因: gRPC 路径给的是归一化 0..1（1 - snr/12），分析器却用 value > 0
+ * 判遮挡（于是 0.333 也算遮挡），渲染器又按 0..255 分级（0.333 <= 50 ⇒ clear）。
+ * 三个模块各说各话。
+ */
+describe('回归：归一化刻度与分级一致性', () => {
+  /** 造一张"整图同值"的 n×n 图（模拟 DishyMock 基线：snr=8 → 0.3333 处处相等） */
+  const uniform = (size: number, value: number) =>
+    Array(size).fill(0).map(() => Array(size).fill(value));
+
+  it('整张图 0.3333（设备判为晴朗）⇒ 遮挡占比 0，而不是 100%', () => {
+    const stats = analyzeObstructionMap(uniform(123, 0.3333333333333333));
+    expect(stats).not.toBeNull();
+    expect(stats!.obstructionPercentage).toBe(0);
+    expect(stats!.obstructedPixels).toBe(0);
+    expect(stats!.levelCounts.clear).toBeGreaterThan(0);
+    expect(stats!.maxObstruction).toBeCloseTo(0.3333, 4);
+  });
+
+  it('均匀分布的图不编造"主遮挡方向"', () => {
+    // 老实现会把重心噪声算成方位角，渲染出「主遮挡方向: 北」
+    expect(analyzeObstructionMap(uniform(123, 0.3333))!.dominantDirection).toBeNull();
+  });
+
+  it('占比数字与"红/橙像素"比例严格一致（同一分类器）', () => {
+    const size = 21;
+    const center = (size - 1) / 2;
+    // 中心 1/4 半径内涂满 0.9（完全遮挡），其余 0.2（无遮挡）
+    const map = Array(size).fill(0).map((_, y) =>
+      Array(size).fill(0).map((_, x) => {
+        const d = Math.sqrt((x - center) ** 2 + (y - center) ** 2);
+        if (d > center) return 0;
+        return d <= center / 2 ? 0.9 : 0.2;
+      })
+    );
+
+    const stats = analyzeObstructionMap(map)!;
+    const colored = stats.levelCounts.partial + stats.levelCounts.blocked;
+    expect(stats.obstructedPixels).toBe(colored);
+    expect(stats.obstructionPercentage).toBeCloseTo(
+      stats.obstructedPixels / stats.totalPixels, 10
+    );
+  });
+
+  it('两套刻度都判对', () => {
+    // 0..255 老数据：255 = 完全遮挡
+    expect(analyzeObstructionMap(uniform(21, 255))!.obstructionPercentage).toBe(1);
+    // 0..1 新数据：1.0 = 完全遮挡
+    expect(analyzeObstructionMap(uniform(21, 1.0))!.obstructionPercentage).toBe(1);
+    // 都是 0 时都是"无遮挡"
+    expect(analyzeObstructionMap(uniform(21, 0))!.obstructionPercentage).toBe(0);
+  });
+
+  it('刻度识别：出现 > 1.5 才判定为 0..255', () => {
+    expect(detectObstructionScale([[0, 0.5], [0.9, 0.1]])).toBe(1);
+    expect(detectObstructionScale([[0, 200], [55, 0]])).toBe(255);
+  });
+
+  it('分级边界与阈值常量对齐', () => {
+    const { clearMax, partialMax } = OBSTRUCTION_LEVELS;
+    expect(classifyObstruction(0)).toBe('unmapped');
+    expect(classifyObstruction(clearMax)).toBe('clear');
+    expect(classifyObstruction(clearMax + 1e-9)).toBe('partial');
+    expect(classifyObstruction(partialMax)).toBe('partial');
+    expect(classifyObstruction(partialMax + 1e-9)).toBe('blocked');
+  });
+
+  it('归一化把两套刻度映到同一语义', () => {
+    // snr=8 的基线（0.3333）在两套刻度下都应是 clear
+    expect(classifyObstruction(normalizeObstructionValue(0.3333, 1))).toBe('clear');
+    expect(classifyObstruction(normalizeObstructionValue(0.3333 * 255, 255))).toBe('clear');
+    // 遮挡扇区（0.75）两套刻度下都应是 blocked
+    expect(classifyObstruction(normalizeObstructionValue(0.75, 1))).toBe('blocked');
+    expect(classifyObstruction(normalizeObstructionValue(0.75 * 255, 255))).toBe('blocked');
   });
 });

@@ -579,10 +579,10 @@ export class DishClient {
         const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
         const normalized = distance / (size / 2);
         
-        // 随机生成障碍值（0-255，越高遮挡越严重）
-        const obstruction = normalized > 0.8 
-          ? Math.floor(Math.random() * 200) + 55
-          : Math.floor(Math.random() * 50);
+        // 随机生成障碍值（**归一化 0..1**，越高遮挡越严重 —— 与 gRPC 实测同刻度）
+        const obstruction = normalized > 0.8
+          ? (Math.floor(Math.random() * 200) + 55) / 255
+          : Math.floor(Math.random() * 50) / 255;
         
         row.push(obstruction);
       }
