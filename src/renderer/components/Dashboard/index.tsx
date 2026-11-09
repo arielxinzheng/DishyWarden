@@ -45,6 +45,7 @@ import { Drawer } from '../ui/drawer';
 // 场景 A: 首次安装采集失败 → 全屏 Setup 引导页(拦截渲染, 见 firstInstall.ts 的判定)
 import { isFirstInstallFailure, type ZeroDataStorageStats } from './firstInstall';
 import SetupGuide from './SetupGuide';
+import { LanguageSwitcher } from '../../components/LanguageSwitcher';
 
 type TimeRange = '15m' | '1h' | '6h';
 type RefreshInterval = '30s' | '1m' | 'manual';
@@ -493,6 +494,9 @@ export default function Dashboard() {
             <Globe className="w-4 h-4" />
             <span className="font-medium">{t('dashboard:app.official_site')}</span>
           </a>
+
+          {/* 全局语言切换（需求指定的「右上角」位置） */}
+          <LanguageSwitcher variant="label" />
         </div>
       </div>
 

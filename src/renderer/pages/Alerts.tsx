@@ -41,6 +41,7 @@ import {
   formatLocaleOf,
   type DayLabel,
 } from '../components/Alerts/historyWindow';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 type Filter = 'all' | Severity;
 type ViewMode = 'active' | 'history';
@@ -277,6 +278,9 @@ export default function AlertsPage() {
             <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
             {t('alerts:page.refresh')}
           </button>
+
+          {/* 全局语言切换（需求指定的「右上角」位置） */}
+          <LanguageSwitcher variant="label" />
         </div>
       </div>
 

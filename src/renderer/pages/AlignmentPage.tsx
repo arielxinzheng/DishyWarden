@@ -16,6 +16,7 @@ import {
   rotationModel,
 } from '../components/Alignment/alignmentGuidance';
 import { formatDeg, formatSignedDeg } from '../components/Alignment/format';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 /**
  * 校准页面。
@@ -118,7 +119,11 @@ export default function AlignmentPage() {
           </p>
           <p className="text-xs text-gray-500 mt-1">{attitudeSubText}</p>
         </div>
-        <AlignmentFlash aligned={verdict.aligned} />
+        <div className="flex items-center gap-3">
+          {/* 全局语言切换（需求指定的「右上角」位置） */}
+          <LanguageSwitcher variant="label" />
+          <AlignmentFlash aligned={verdict.aligned} />
+        </div>
       </div>
 
       {/* 综合结论 */}

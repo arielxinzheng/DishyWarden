@@ -12,6 +12,7 @@ import {
   describeObstructionAge,
   type CompassDirection,
 } from '../lib/obstructionAnalysis';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 /** 8 方位码 → 字典键（方位文案随语言变化，箭头符号本身与语言无关） */
 const DIRECTION_LABEL_KEYS: Record<CompassDirection, string> = {
@@ -116,8 +117,11 @@ export default function ObstructionMap() {
   return (
     <div className="p-8 space-y-6">
       {/* 页面标题 —— 投影方式说明在图表下方的「数据说明」里，这里不再重复 */}
-      <div>
+      <div className="flex items-start justify-between gap-4">
         <h1 className="text-3xl font-bold text-white">{t('obstruction:page.title')}</h1>
+
+        {/* 全局语言切换（需求指定的「右上角」位置） */}
+        <LanguageSwitcher variant="label" />
       </div>
 
       {/* 数据来源与新鲜度 —— 模拟图和实测图视觉几乎一样, 必须标出来 */}

@@ -76,7 +76,9 @@ export function ProbeNodesCard({
   const loadStates = useCallback(async () => {
     if (!window.electronAPI?.getProbeStates) return;
     try {
-      setStates(await window.electronAPI.getProbeStates());
+      // ⚠️ 必须兜底成 []：主进程在浏览器模式 / IPC 异常时可能返回 null，
+      // 直接 setStates(null) 会让下面的 states.find() 抛错，整个设置页崩进 ErrorBoundary。
+      setStates((await window.electronAPI.getProbeStates()) ?? []);
     } catch {
       // 主进程还没起来, 忽略
     }

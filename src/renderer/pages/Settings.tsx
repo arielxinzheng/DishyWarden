@@ -302,6 +302,9 @@ export default function Settings() {
             <Save className="w-4 h-4 mr-2" />
             {saving ? t('settings:save.saving') : t('settings:save.button')}
           </Button>
+
+          {/* 全局语言切换（需求指定的「右上角」位置） */}
+          <LanguageSwitcher variant="label" />
         </div>
       </div>
 

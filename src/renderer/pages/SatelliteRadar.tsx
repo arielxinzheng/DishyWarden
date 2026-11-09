@@ -33,6 +33,7 @@ import {
   type ServingReason,
   type ServingSatelliteEstimate,
 } from '../utils/servingSatellite';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 /** 页面级错误语义码（文案由 ERROR_KEYS 取字典，错误详情只进控制台） */
 type RadarErrorCode = 'no_location' | 'no_tle' | 'no_visible' | 'tle_fetch_failed' | 'load_failed';
@@ -600,6 +601,9 @@ export default function SatelliteRadar() {
               {t('satellite:radar.clear_cache')}
             </Button>
           )}
+
+          {/* 全局语言切换（需求指定的「右上角」位置） */}
+          <LanguageSwitcher variant="label" />
         </div>
       </div>
 
