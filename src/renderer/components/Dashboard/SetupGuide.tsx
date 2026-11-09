@@ -28,6 +28,7 @@
  */
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { WifiOff, Radar, RefreshCw, CheckCircle2, Circle, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -44,27 +45,32 @@ export interface SetupGuideProps {
   onOpenSettings: () => void;
 }
 
-/** 排查清单条目 —— 文案对齐用户手册常见安装问题 */
-const CHECKLIST: { key: string; label: string; hint: string }[] = [
+/**
+ * 排查清单条目 —— 文案对齐用户手册常见安装问题。
+ *
+ * 只存**字典键**, 不存文案: 本模块在中文/英文界面都复用同一份清单,
+ * `{{target}}` 由渲染时插值。
+ */
+const CHECKLIST: { key: string; labelKey: string; hintKey: string }[] = [
   {
     key: 'power',
-    label: 'Starlink 终端已通电并完成启动',
-    hint: '启动约需 2-3 分钟, 指示灯常亮表示就绪',
+    labelKey: 'setup.item_power',
+    hintKey: 'setup.item_power_hint',
   },
   {
     key: 'network',
-    label: '本机已连接到 Starlink 网络',
-    hint: '通常是 192.168.100.x 网段（或路由器桥接后的对应网段）',
+    labelKey: 'setup.item_network',
+    hintKey: 'setup.item_network_hint',
   },
   {
     key: 'ip',
-    label: '设备 IP 地址是否正确',
-    hint: `默认 192.168.100.1 —— 当前正在尝试 ${'{target}'}`,
+    labelKey: 'setup.item_ip',
+    hintKey: 'setup.item_ip_hint',
   },
   {
     key: 'firewall',
-    label: 'gRPC 端口未被防火墙拦截',
-    hint: '默认端口 9200, 检查本机防火墙/安全软件放行规则',
+    labelKey: 'setup.item_firewall',
+    hintKey: 'setup.item_firewall_hint',
   },
 ];
 
@@ -75,12 +81,14 @@ export default function SetupGuide({
   onRetry,
   onOpenSettings,
 }: SetupGuideProps) {
+  const { t } = useTranslation();
   // 排查清单勾选状态 —— 纯 UI 记忆, 引导结束即失效
   const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   const checklist = CHECKLIST.map((item) => ({
     ...item,
-    hint: item.hint.replace('{target}', connectTarget),
+    label: t(`dashboard:${item.labelKey}`),
+    hint: t(`dashboard:${item.hintKey}`, { target: connectTarget }),
   }));
   const doneCount = checklist.filter((i) => checked[i.key]).length;
 
@@ -125,7 +133,7 @@ export default function SetupGuide({
         </div>
 
         <h2 className="text-xl font-semibold text-foreground">
-          {isRetrying ? '正在寻找 Starlink 设备...' : '未找到 Starlink 设备'}
+          {isRetrying ? t('dashboard:setup.finding') : t('dashboard:setup.not_found')}
         </h2>
         {error && !isRetrying && (
           <p className="mt-2 text-sm text-danger-red max-w-md text-center">{error}</p>
@@ -135,8 +143,15 @@ export default function SetupGuide({
       {/* 2. 排查表单 */}
       <div className="w-full max-w-lg bg-ink-900 border border-ink-700 rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm font-semibold text-foreground">连接失败排查</p>
-          <span className="text-xs text-muted-foreground">{doneCount}/{checklist.length} 已检查</span>
+          <p className="text-sm font-semibold text-foreground">
+            {t('dashboard:setup.checklist_title')}
+          </p>
+          <span className="text-xs text-muted-foreground">
+            {t('dashboard:setup.checklist_progress', {
+              done: doneCount,
+              total: checklist.length,
+            })}
+          </span>
         </div>
         <ul className="space-y-3">
           {checklist.map((item) => (
@@ -186,11 +201,11 @@ export default function SetupGuide({
           )}
         >
           <RefreshCw className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
-          {isRetrying ? '正在重试...' : '重试连接'}
+          {isRetrying ? t('dashboard:setup.retrying') : t('dashboard:setup.retry')}
         </button>
         <p className="text-xs text-muted-foreground flex items-center gap-1.5">
           <Radar className="h-3.5 w-3.5" />
-          当前目标: {connectTarget}
+          {t('dashboard:setup.target', { target: connectTarget })}
         </p>
       </div>
 
@@ -200,7 +215,7 @@ export default function SetupGuide({
         className="mt-6 text-sm text-accent-green/80 hover:text-accent-green underline underline-offset-4 flex items-center gap-1.5"
       >
         <Settings className="h-4 w-4" />
-        设备地址不对？去设置页修改
+        {t('dashboard:setup.open_settings')}
       </button>
 
       {/* 雷达扫描臂的 keyframes —— Tailwind 没有内置 conic 扫描, 手写注入 */}

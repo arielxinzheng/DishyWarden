@@ -43,14 +43,17 @@ describe('链路 1：用户终端 → 本地路由器', () => {
     const m = buildTopology(inputs());
     expect(m.links[0].tone).toBe('ok');
     expect(m.nodes[1].tone).toBe('ok');
-    expect(m.nodes[1].metricText).toBe('网关 4.2 ms');
+    expect(m.nodes[1].metric).toEqual({
+      key: 'topology.router_metric',
+      params: { rtt: '4.2' },
+    });
   });
 
   it('网关不可达 → 红色，并成为断点', () => {
     const m = buildTopology(inputs({ routerProbe: probe({ reachable: false, rttMs: null }) }));
     expect(m.links[0].tone).toBe('down');
     expect(m.rootCause?.linkId).toBe('lan');
-    expect(m.verdict.headline).toContain('局域网');
+    expect(m.verdict.headline).toEqual({ kind: 'down', linkId: 'lan' });
   });
 
   it('高丢包（≥50%）判为断，轻度丢包（10%-50%）判为降级', () => {
@@ -63,7 +66,7 @@ describe('链路 1：用户终端 → 本地路由器', () => {
       inputs({ routerProbe: probe({ trusted: false, trustNote: '疑似 VPN 环境' }) }),
     );
     expect(m.links[0].tone).toBe('unknown');
-    expect(m.links[0].detail).toContain('VPN');
+    expect(m.links[0].detail.key).toBe('topology.lan_untrusted');
   });
 
   it('没有任何探测结果 → 灰（没证据 ≠ 正常）', () => {
@@ -107,7 +110,8 @@ describe('链路 3：星链天线 → 互联网', () => {
   it('天线在寻星/未锁定时判「测不出来」，而不是「公网挂了」', () => {
     const m = buildTopology(inputs({ telemetry: telemetry({ state: 'SEARCHING', popPingDropRate: 1 }) }));
     expect(m.links[2].tone).toBe('unknown');
-    expect(m.links[2].detail).toContain('SEARCHING');
+    expect(m.links[2].detail.key).toBe('topology.wan_dish_not_locked');
+    expect(m.links[2].detail.params?.state).toBe('SEARCHING');
     expect(m.rootCause).toBeNull();
   });
 
@@ -138,18 +142,18 @@ describe('上下游传播与总判定', () => {
     // 断点只有一处，下游两段都是「测不出来」
     expect(m.links.filter((l) => l.tone === 'down')).toHaveLength(1);
     expect(m.links[1].tone).toBe('unknown');
-    expect(m.links[1].detail).toContain('上游');
+    expect(m.links[1].detail.key).toBe('topology.grpc_upstream');
     expect(m.links[2].tone).toBe('unknown');
     expect(m.rootCause?.linkId).toBe('lan');
     // 残留读数不展示（否则「采集中断」旁边挂着「误差 0.4°」会误导）
-    expect(m.nodes[2].metricText).toBe('—');
-    expect(m.nodes[3].metricText).toBe('—');
+    expect(m.nodes[2].metric).toBeNull();
+    expect(m.nodes[3].metric).toBeNull();
   });
 
   it('全绿时结论是「全链路正常」', () => {
     const m = buildTopology(inputs());
     expect(m.verdict.tone).toBe('ok');
-    expect(m.verdict.headline).toBe('全链路正常');
+    expect(m.verdict.headline).toEqual({ kind: 'ok' });
   });
 
   it('全绿但仍有活跃告警时，结论里要点出告警数', () => {
@@ -158,7 +162,10 @@ describe('上下游传播与总判定', () => {
       inputs({ alerts: [{ alertKey: 'high_latency', severity: 'warning', summary: '延迟偏高' }] }),
     );
     expect(m.verdict.tone).toBe('ok');
-    expect(m.verdict.detail).toContain('1 条活跃告警');
+    expect(m.verdict.detail).toEqual({
+      key: 'topology.verdict_ok_alerts',
+      params: { count: 1 },
+    });
     expect(m.alertTotal).toBe(1);
   });
 
@@ -167,7 +174,7 @@ describe('上下游传播与总判定', () => {
       inputs({ alerts: [{ alertKey: 'wifi_signal', severity: 'warning', summary: 'WiFi 信号弱' }] }),
     );
     expect(m.alertTotal).toBe(0);
-    expect(m.verdict.detail).toBe('端到端链路通畅');
+    expect(m.verdict.detail.key).toBe('topology.verdict_ok_detail');
   });
 });
 

@@ -78,24 +78,31 @@ export function selectRecentlyResolved(
 }
 
 /**
- * 严重等级已在 selectRecentlyResolved 里按 severity 收口, 这里只负责把 ruleId
- * 翻成人话。没收录的用后端 summary —— 硬编码全量映射会随规则演进腐坏,
- * 后端 summary 才是权威文案。
+ * 已知故障场景的**语义码**。
+ *
+ * ⚠️ 本文件是纯逻辑层, 不产出中文文案 —— 文案统一由视图层从
+ * `dashboard:recently_resolved.scenario_*` 取; 单测断言这些码, 不依赖界面语言。
  */
-const SCENARIO_LABEL: Record<string, string> = {
-  dish_offline: '网络中断',
-  collector_heartbeat_lost: '采集器离线',
-  cable_connectivity: '连接线断开',
-  router_offline: '路由器离线',
-  motors_stowed: '天线电机停转',
-  poe_power: '供电异常',
+export type ResolvedScenario =
+  | 'dish_offline'
+  | 'collector_heartbeat_lost'
+  | 'cable_connectivity'
+  | 'router_offline'
+  | 'motors_stowed'
+  | 'poe_power';
+
+/** 规则 id → 场景码。没收录的返回 null, 由视图层用后端 summary 兜底。 */
+const SCENARIO_CODES: Record<string, ResolvedScenario> = {
+  dish_offline: 'dish_offline',
+  collector_heartbeat_lost: 'collector_heartbeat_lost',
+  cable_connectivity: 'cable_connectivity',
+  router_offline: 'router_offline',
+  motors_stowed: 'motors_stowed',
+  poe_power: 'poe_power',
 };
 
-export function scenarioOf(alert: ResolvedAlertLike): string {
-  const label = SCENARIO_LABEL[alert.alert_type];
-  if (label) return label;
-  const summary = (alert.summary || '').trim();
-  return summary || '服务异常';
+export function scenarioOf(alert: ResolvedAlertLike): ResolvedScenario | null {
+  return SCENARIO_CODES[alert.alert_type] ?? null;
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
@@ -121,23 +128,45 @@ export function formatSpan(firstIso: string, lastIso: string): string {
     : `${dayOf(start)} ${clockOf(start)} - ${dayOf(end)} ${clockOf(end)}`;
 }
 
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return '';
+/**
+ * 时长 → **结构化描述**, 不返回句子。
+ *
+ * 单位/数值由视图层按当前语言套模板（`duration_minutes` /
+ * `duration_hours_minutes` …），这样中英文的语序/单位词都不用在这里分裂。
+ */
+export type DurationDescriptor =
+  | { kind: 'below_minute' }
+  | { kind: 'minutes'; minutes: number }
+  | { kind: 'hours'; hours: number }
+  | { kind: 'hours_minutes'; hours: number; minutes: number };
+
+export function describeDuration(ms: number): DurationDescriptor | null {
+  if (!Number.isFinite(ms) || ms < 0) return null;
   const minutes = Math.round(ms / 60_000);
-  if (minutes < 1) return '不到 1 分钟';
-  if (minutes < 60) return `${minutes} 分钟`;
+  if (minutes < 1) return { kind: 'below_minute' };
+  if (minutes < 60) return { kind: 'minutes', minutes };
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分钟`;
+  return rest === 0
+    ? { kind: 'hours', hours }
+    : { kind: 'hours_minutes', hours, minutes: rest };
 }
 
-/** 相对时间: `刚刚` / `12 分钟前` / `1 小时前` —— 撑起「刚恢复」的心智 */
-export function formatAgo(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return '刚刚';
+/**
+ * 相对时间 → **语义码**: `刚刚` / `N 分钟前` / `N 小时前` —— 撑起「刚恢复」的心智。
+ * 单位与语序交给视图层（common:just_now / minutes_ago / hours_ago）。
+ */
+export type RelativeAge =
+  | { unit: 'just_now' }
+  | { unit: 'minutes'; count: number }
+  | { unit: 'hours'; count: number };
+
+export function relativeAge(ms: number): RelativeAge {
+  if (!Number.isFinite(ms) || ms < 0) return { unit: 'just_now' };
   const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
-  return `${Math.floor(minutes / 60)} 小时前`;
+  if (minutes < 1) return { unit: 'just_now' };
+  if (minutes < 60) return { unit: 'minutes', count: minutes };
+  return { unit: 'hours', count: Math.floor(minutes / 60) };
 }
 
 export function loadDismissedKeys(): string[] {

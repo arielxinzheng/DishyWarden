@@ -29,17 +29,23 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useDish } from '../../hooks/useDish';
+import { alertTitleKey } from '../../lib/alertMessage';
 import { isValidProbe } from './routerProbeShape';
 import type { RouterProbeResult } from '../../../core/routerProbeTypes';
 import {
   buildTopology,
   type DnsProbeSnapshot,
   type TopologyAlertRef,
+  type TopologyLinkId,
   type TopologyLinkState,
+  type TopologyMessage,
   type TopologyNodeId,
   type TopologyNodeState,
   type TopologyTone,
+  type TopologyVerdictHeadline,
 } from './topologyModel';
 
 /** 仪表盘活跃告警的最小形态（AlertRecord 的子集） */
@@ -104,6 +110,51 @@ const TONE_DOT: Record<TopologyTone, string> = {
   unknown: 'bg-muted-foreground',
 };
 
+/* ------------------------------------------------------------------ */
+/* 语义码 → 本地化文案                                                  */
+/*                                                                     */
+/* topologyModel 只给键 + 插值参数，句子在这里拼 —— 单测因此不被语言绑架。 */
+/* ------------------------------------------------------------------ */
+
+/** 语义消息 → 当前语言文案（字典键统一加 `dashboard:` 前缀） */
+function translateMessage(t: TFunction, message: TopologyMessage): string {
+  return t(`dashboard:${message.key}`, message.params);
+}
+
+/** 节点身份标题（用户终端 / 本地路由器 / 星链天线 / 互联网） */
+function nodeTitle(t: TFunction, id: TopologyNodeId): string {
+  return t(`dashboard:topology.node_${id}`);
+}
+
+/** 连线标签（局域网 / gRPC 9200 / PoP 出口） */
+function linkLabel(t: TFunction, id: TopologyLinkId): string {
+  return t(`dashboard:topology.link_${id}`);
+}
+
+/** 结论语义 → 一句话；断点链路名在这里插值 */
+function verdictHeadline(t: TFunction, headline: TopologyVerdictHeadline): string {
+  switch (headline.kind) {
+    case 'down':
+      return t('dashboard:topology.verdict_down', { link: linkLabel(t, headline.linkId) });
+    case 'degraded':
+      return t('dashboard:topology.verdict_degraded', { link: linkLabel(t, headline.linkId) });
+    case 'unknown':
+      return t('dashboard:topology.verdict_unknown');
+    default:
+      return t('dashboard:topology.verdict_ok');
+  }
+}
+
+/**
+ * 告警的本地化短标题。
+ *
+ * ⚠️ 不直接展示 `TopologyAlertRef.summary` —— 那是主进程写进库的中文原文，
+ * 切语言不会变。按 `alert_type` 从 `alerts` 命名空间取标题。
+ */
+function alertTitle(t: TFunction, alert: TopologyAlertRef): string {
+  return t(alertTitleKey(alert.alertKey), { defaultValue: alert.summary });
+}
+
 /** 探针轮询间隔：与采集周期对齐 */
 const PROBE_INTERVAL_MS = 30_000;
 
@@ -162,6 +213,7 @@ function useProbeSnapshot() {
 }
 
 export function TopologyChain({ className = '', alerts = [], onOpenAlerts }: TopologyChainProps) {
+  const { t } = useTranslation();
   const { telemetry, isConnected, error } = useDish();
   const { routerProbe, dnsProbe } = useProbeSnapshot();
 
@@ -197,7 +249,10 @@ export function TopologyChain({ className = '', alerts = [], onOpenAlerts }: Top
     // 整体结论留给图形自己表达（红虚线 = 断，? = 测不出来）。
     <div
       className={className}
-      aria-label={`全链路状态：${model.verdict.headline}，${model.verdict.detail}`}
+      aria-label={t('dashboard:topology.aria', {
+        headline: verdictHeadline(t, model.verdict.headline),
+        detail: translateMessage(t, model.verdict.detail),
+      })}
       role="img"
     >
       <div className="overflow-x-auto">
@@ -227,10 +282,14 @@ function NodeCard({
   node: TopologyNodeState;
   onOpenAlerts?: () => void;
 }) {
+  const { t } = useTranslation();
   const hasAlert = node.alerts.length > 0;
-  const tooltip = node.alerts.length
-    ? [node.detail, ...node.alerts.map((a) => a.summary)].join('\n')
-    : node.detail;
+  const detailText = translateMessage(t, node.detail);
+  const alertTitles = node.alerts.map((a) => alertTitle(t, a));
+  const tooltip = hasAlert ? [detailText, ...alertTitles].join('\n') : detailText;
+  const statusText = translateMessage(t, node.status);
+  // null = 没有可信读数（例如上游断了不摆残留数字），显示占位符
+  const metricText = node.metric ? translateMessage(t, node.metric) : '—';
 
   return (
     <div
@@ -253,21 +312,21 @@ function NodeCard({
         </div>
 
         {/* 「测不出来」就地标记：微型 ? 徽章，悬停给原因 */}
-        {node.tone === 'unknown' && <UnknownBadge detail={node.detail} />}
+        {node.tone === 'unknown' && <UnknownBadge detail={detailText} />}
       </div>
 
       <div className="min-w-0">
         <div className="text-[12.5px] font-semibold leading-tight whitespace-nowrap">
-          {node.title}
+          {nodeTitle(t, node.id)}
         </div>
         <div
           className={`mt-0.5 flex items-center gap-1.5 text-[11px] font-medium leading-tight ${TONE_TEXT[node.tone]}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${TONE_DOT[node.tone]}`} />
-          <span className="whitespace-nowrap">{node.statusText}</span>
+          <span className="whitespace-nowrap">{statusText}</span>
         </div>
         <div className="mt-0.5 text-[10px] font-mono text-muted-foreground/80 whitespace-nowrap">
-          {node.metricText}
+          {metricText}
         </div>
       </div>
 
@@ -277,7 +336,7 @@ function NodeCard({
           onClick={onOpenAlerts}
           disabled={!onOpenAlerts}
           className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 rounded-full bg-danger-red text-[10px] font-bold text-white grid place-items-center shadow-sm enabled:hover:brightness-110"
-          title={node.alerts.map((a) => a.summary).join('\n')}
+          title={alertTitles.join('\n')}
         >
           {node.alerts.length}
         </button>
@@ -293,6 +352,9 @@ function LinkSegment({
   link: TopologyLinkState;
   onOpenAlerts?: () => void;
 }) {
+  const { t } = useTranslation();
+  const label = linkLabel(t, link.id);
+  const detailText = translateMessage(t, link.detail);
   const hasAlert = link.alerts.length > 0;
   const isDown = link.tone === 'down';
   const isUnknown = link.tone === 'unknown';
@@ -300,14 +362,14 @@ function LinkSegment({
   return (
     <div
       className="group flex w-[76px] shrink-0 flex-col items-center justify-center px-1"
-      title={`${link.label}：${link.detail}`}
+      title={t('dashboard:topology.link_tooltip', { label, detail: detailText })}
     >
       <span
         className={`text-[9.5px] mb-1 whitespace-nowrap ${
           isDown ? 'text-danger-red/90' : 'text-muted-foreground/80'
         }`}
       >
-        {link.label}
+        {label}
       </span>
 
       <button
@@ -317,7 +379,7 @@ function LinkSegment({
         className={`relative w-full h-[2px] rounded-full ${TONE_LINE[link.tone]} ${
           hasAlert ? 'cursor-pointer' : 'cursor-default'
         }`}
-        aria-label={`${link.label}：${link.detail}`}
+        aria-label={t('dashboard:topology.link_tooltip', { label, detail: detailText })}
       >
         {/* 正常/降级：箭头指向下游 */}
         {!isDown && !isUnknown && (
@@ -346,7 +408,7 @@ function LinkSegment({
         )}
 
         {/* 测不出来：连线中央的 ? 徽章（不再有全局提示条） */}
-        {isUnknown && <UnknownBadge detail={link.detail} inline />}
+        {isUnknown && <UnknownBadge detail={detailText} inline />}
       </button>
     </div>
   );

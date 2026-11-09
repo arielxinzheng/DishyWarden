@@ -9,6 +9,7 @@
  */
 
 import ReactECharts from 'echarts-for-react';
+import { useTranslation } from 'react-i18next';
 import type { HistorySample } from '../../../storage/types';
 import { useEffect, useMemo, useState } from 'react';
 import { formatTimeLabel } from '../../../core/telemetry';
@@ -31,6 +32,7 @@ export function ThroughputChart({
   toMs,
   isLoading = false,
 }: ThroughputChartProps) {
+  const { t, i18n } = useTranslation();
   const [chartData, setChartData] = useState<{
     time: string[];
     download: Array<number | null>;
@@ -83,13 +85,23 @@ export function ThroughputChart({
         // 否则 toFixed 直接抛异常(整个图表白屏)
         const fmt = (p: any) =>
           p.value === null || p.value === undefined || Number.isNaN(p.value)
-            ? '无数据'
+            ? t('dashboard:chart.no_data_short')
             : `${p.value.toFixed(1)} Mbps`;
-        return `${time}<br/>${params[0].marker}下载: ${fmt(params[0])}<br/>${params[1].marker}上传: ${fmt(params[1])}`;
+        return [
+          time,
+          `<br/>${t('dashboard:chart.tooltip_download', {
+            marker: params[0]?.marker ?? '',
+            value: fmt(params[0]),
+          })}`,
+          `<br/>${t('dashboard:chart.tooltip_upload', {
+            marker: params[1]?.marker ?? '',
+            value: fmt(params[1]),
+          })}`,
+        ].join('');
       },
     },
     legend: {
-      data: ['下载', '上传'],
+      data: [t('dashboard:chart.download'), t('dashboard:chart.upload')],
       textStyle: {
         color: '#888',
       },
@@ -122,7 +134,7 @@ export function ThroughputChart({
     },
     yAxis: {
       type: 'value',
-      name: '速度 (Mbps)',
+      name: t('dashboard:chart.speed_mbps'),
       nameTextStyle: {
         color: '#888',
         fontSize: 12,
@@ -143,7 +155,7 @@ export function ThroughputChart({
     },
     series: [
       {
-        name: '下载',
+        name: t('dashboard:chart.download'),
         type: 'line',
         smooth: true,
         symbol: 'none',
@@ -151,7 +163,7 @@ export function ThroughputChart({
         // 栅格上限 720 格本来也不需要抽稀
         connectNulls: false,
         // 灰带只挂在一条 series 上 —— 两条都挂会叠成两倍浓度
-        markArea: gapMarkArea(chartData.gaps),
+        markArea: gapMarkArea(chartData.gaps, t('dashboard:chart.no_data_short')),
         itemStyle: {
           color: '#3b82f6',
         },
@@ -177,7 +189,7 @@ export function ThroughputChart({
         data: chartData.download,
       },
       {
-        name: '上传',
+        name: t('dashboard:chart.upload'),
         type: 'line',
         smooth: true,
         symbol: 'none',
@@ -208,7 +220,7 @@ export function ThroughputChart({
       },
     ],
     }),
-    [chartData],
+    [chartData, t, i18n.language],
   );
 
   if (isLoading) {
@@ -217,7 +229,7 @@ export function ThroughputChart({
         style={{ height }}
         className="flex items-center justify-center text-muted-foreground"
       >
-        加载中...
+        {t('common:loading')}
       </div>
     );
   }

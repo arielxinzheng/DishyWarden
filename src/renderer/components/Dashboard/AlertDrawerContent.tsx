@@ -4,11 +4,13 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Badge } from '../ui/badge';
 import { AlertTriangle, Info, AlertCircle, BellOff, MoreVertical, Bell } from 'lucide-react';
 import type { AlertRecord } from '../../../alerting/database';
-import { parseRecommendations, parseEvidence } from '../../lib/alertFormat';
+import { parseEvidence } from '../../lib/alertFormat';
+import { localizeAlert } from '../../lib/alertMessage';
 import { DnsAlertDetail } from './DnsAlertDetail';
 import { AlertSnoozeMenu } from './AlertSnoozeMenu';
 
@@ -18,6 +20,7 @@ interface AlertDrawerContentProps {
 }
 
 export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerContentProps) {
+  const { t, i18n } = useTranslation();
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
   // 忽略状态唯一来源：主进程写入数据库后经 props 回传的字段。
@@ -31,21 +34,49 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
     return false;
   };
 
-  // 计算剩余忽略时间
-  const getSnoozeRemaining = (alert: AlertRecord): string | null => {
-    if (alert.snooze_type === 'until_resolved') return '本次已忽略';
+  /**
+   * 剩余忽略时间 → **语义码**（渲染时再套字典模板）。
+   * 单位词不写死在逻辑里, 英文界面才不会出现「剩余 / 小时」这种中英混排。
+   */
+  const snoozeRemaining = (
+    alert: AlertRecord,
+  ):
+    | { kind: 'until_resolved' }
+    | { kind: 'hours'; hours: number; minutes: number }
+    | { kind: 'minutes'; minutes: number }
+    | null => {
+    if (alert.snooze_type === 'until_resolved') return { kind: 'until_resolved' };
     if (!alert.snooze_until) return null;
-    
+
     const snoozeUntil = new Date(alert.snooze_until).getTime();
     const now = Date.now();
     if (now >= snoozeUntil) return null;
-    
+
     const remainingMs = snoozeUntil - now;
     const hours = Math.floor(remainingMs / (60 * 60 * 1000));
     const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
-    
-    if (hours > 0) return `剩余 ${hours} 小时 ${minutes} 分钟`;
-    return `剩余 ${minutes} 分钟`;
+
+    return hours > 0
+      ? { kind: 'hours', hours, minutes }
+      : { kind: 'minutes', minutes };
+  };
+
+  /** 语义码 → 本地化文案 */
+  const snoozeRemainingText = (
+    remaining: Exclude<ReturnType<typeof snoozeRemaining>, null>,
+  ): string => {
+    if (remaining.kind === 'until_resolved') {
+      return t('dashboard:alert_drawer.snoozed_until_resolved');
+    }
+    if (remaining.kind === 'hours') {
+      return t('dashboard:alert_drawer.snoozed_remaining_hours', {
+        hours: remaining.hours,
+        minutes: remaining.minutes,
+      });
+    }
+    return t('dashboard:alert_drawer.snoozed_remaining_minutes', {
+      minutes: remaining.minutes,
+    });
   };
 
   // 分离已忽略和未忽略的告警
@@ -102,7 +133,7 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
       // 显示 Toast 提示
       if (typeof window !== 'undefined' && 'toast' in window) {
         // @ts-ignore
-        window.toast?.success('感谢反馈，已为您清除该提示，我们将持续优化检测算法。');
+        window.toast?.success(t('dashboard:alert_drawer.toast_false_positive'));
       }
     }
   };
@@ -118,14 +149,17 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
     return (
       <div className="text-center text-muted-foreground py-12">
         <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-        <p>当前没有活跃告警</p>
+        <p>{t('dashboard:alert_drawer.empty')}</p>
       </div>
     );
   }
 
   const renderAlert = (alert: AlertRecord, isSnoozed: boolean) => {
-    const snoozeRemaining = getSnoozeRemaining(alert);
-    
+    // 告警标题 / 摘要 / 建议 / 严重度统一由 localizeAlert 按当前语言重拼,
+    // 不直接展示主进程写进库里的中文原文。
+    const localized = localizeAlert(alert, t);
+    const remaining = snoozeRemaining(alert);
+
     return (
       <Alert
         key={alert.id}
@@ -159,12 +193,12 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
             {/* 标题与操作按钮 */}
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3 flex-1 min-w-0">
-                <AlertTitle className="mb-0 text-lg">{alert.summary}</AlertTitle>
+                <AlertTitle className="mb-0 text-lg">{localized.title}</AlertTitle>
                 <Badge 
                   variant={alert.severity === 'critical' ? 'destructive' : 'secondary'}
                   className="shrink-0"
                 >
-                  {alert.severity === 'critical' ? '严重' : alert.severity === 'warning' ? '警告' : '信息'}
+                  {localized.severityLabel}
                 </Badge>
               </div>
               
@@ -174,7 +208,7 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
                   <button
                     onClick={() => handleUnsnooze(alert.alert_key)}
                     className="p-2 rounded-md hover:bg-accent-green/10 text-accent-green transition-colors"
-                    title="恢复提醒"
+                    title={t('dashboard:alert_drawer.unsnooze')}
                   >
                     <Bell className="w-4 h-4" />
                   </button>
@@ -185,7 +219,7 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
                       setOpenMenuId(openMenuId === alert.id ? null : alert.id ?? null);
                     }}
                     className="p-2 rounded-md hover:bg-muted transition-colors"
-                    title="忽略选项"
+                    title={t('dashboard:alert_drawer.snooze_menu')}
                   >
                     <MoreVertical className="w-4 h-4" />
                   </button>
@@ -203,17 +237,17 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
             </div>
 
             {/* 忽略状态提示 */}
-            {isSnoozed && snoozeRemaining && (
+            {isSnoozed && remaining && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 border border-border/50 rounded px-3 py-2">
                 <BellOff className="w-4 h-4 shrink-0" />
-                <span>{snoozeRemaining}</span>
+                <span>{snoozeRemainingText(remaining)}</span>
               </div>
             )}
 
             {/* 描述 */}
             {!isSnoozed && (
               <AlertDescription className="text-base leading-relaxed">
-                {alert.description}
+                {localized.summary}
               </AlertDescription>
             )}
 
@@ -230,12 +264,12 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
 
             {/* 建议处理 */}
             {!isSnoozed && (() => {
-              const recs = parseRecommendations(alert.recommendations);
+              const recs = localized.recommendations;
               if (recs.length === 0) return null;
               return (
                 <div className="mt-4 pt-4 border-t border-border/50">
                   <div className="text-sm font-semibold mb-3 text-foreground">
-                    💡 建议处理措施
+                    {t('dashboard:alert_drawer.recommendations')}
                   </div>
                   <ul className="space-y-2">
                     {recs.map((rec, i) => (
@@ -252,16 +286,22 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
             {/* 时间戳与计数 */}
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground pt-2 border-t border-border/30">
               <span>
-                首次触发: {new Date(alert.first_seen).toLocaleString('zh-CN', {
-                  month: '2-digit',
-                  day: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
+                {t('dashboard:alert_drawer.first_seen', {
+                  time: new Date(alert.first_seen).toLocaleString(i18n.language, {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
                 })}
               </span>
-              <span>触发次数: {alert.occurrence_count}</span>
+              <span>
+                {t('dashboard:alert_drawer.occurrences', { count: alert.occurrence_count })}
+              </span>
               {alert.status === 'ongoing' && !isSnoozed && (
-                <span className="text-warning-orange font-semibold">● 持续中</span>
+                <span className="text-warning-orange font-semibold">
+                  {t('dashboard:alert_drawer.ongoing')}
+                </span>
               )}
             </div>
           </div>
@@ -281,7 +321,9 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
           {activeList.length > 0 && (
             <div className="flex items-center gap-3 my-6">
               <div className="flex-1 h-px bg-border/30" />
-              <span className="text-xs text-muted-foreground">已忽略的告警</span>
+              <span className="text-xs text-muted-foreground">
+                {t('dashboard:alert_drawer.snoozed_section')}
+              </span>
               <div className="flex-1 h-px bg-border/30" />
             </div>
           )}

@@ -5,6 +5,7 @@
  */
 
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   OBSTRUCTION_LEVEL_COLORS,
   classifyObstruction,
@@ -15,7 +16,10 @@ import {
 export interface ObstructionHighlight {
   /** 主遮挡方位角（度，0=北，顺时针） */
   azimuth: number;
-  /** 中文方位名，用于选中最近的罗盘标签 */
+  /**
+   * 方位语义码（`N`/`NE`/…，来自 `obstructionAnalysis` 的 CompassDirection）。
+   * 本组件只用 azimuth 选最近的罗盘标签，文本由调用方自行本地化。
+   */
   text: string;
 }
 
@@ -35,6 +39,7 @@ export function ObstructionHemisphere({
   showLegend = false,
   highlight = null,
 }: ObstructionHemisphereProps) {
+  const { t } = useTranslation();
   const canvasDataUrl = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -141,11 +146,12 @@ export function ObstructionHemisphere({
     ctx.textBaseline = 'middle';
     
     const compassRadius = baseRadiusX + (width > 400 ? 30 : 20);
+    // 罗盘标签用国际通用字母（N/E/S/W），所有语言一致，无需翻译
     const directions = [
-      { angle: -90, label: 'N', zh: '北' },  // 北（上）
-      { angle: 0, label: 'E', zh: '东' },    // 东（右）
-      { angle: 90, label: 'S', zh: '南' },   // 南（下）
-      { angle: 180, label: 'W', zh: '西' },  // 西（左）
+      { angle: -90, label: 'N' },  // 北（上）
+      { angle: 0, label: 'E' },    // 东（右）
+      { angle: 90, label: 'S' },   // 南（下）
+      { angle: 180, label: 'W' },  // 西（左）
     ];
 
     // 主遮挡方向最接近哪个罗盘标签（8 方位名 → 最近的 4 向标签）
@@ -201,7 +207,7 @@ export function ObstructionHemisphere({
         className="flex items-center justify-center text-slate-500"
         style={{ width, height }}
       >
-        加载中...
+        {t('common:loading')}
       </div>
     );
   }
@@ -221,8 +227,9 @@ export function ObstructionHemisphere({
           {(['unmapped', 'clear', 'partial', 'blocked'] as const).map((level) => (
             <div key={level} className="flex items-center gap-2">
               <div className={`w-3 h-3 rounded-full ${OBSTRUCTION_LEVEL_COLORS[level].dot}`} />
-              <span className="text-gray-300">{OBSTRUCTION_LEVEL_COLORS[level].label}</span>
-              <span className="text-gray-500">({OBSTRUCTION_LEVEL_COLORS[level].zh})</span>
+              <span className="text-gray-300">
+                {t(OBSTRUCTION_LEVEL_COLORS[level].labelKey)}
+              </span>
             </div>
           ))}
         </div>

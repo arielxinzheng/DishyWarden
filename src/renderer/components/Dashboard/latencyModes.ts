@@ -22,11 +22,17 @@
 /** 延迟维度：Public / PoP / Local(网关) */
 export type LatencyMode = 'public' | 'pop' | 'gateway';
 
-/** 延迟维度的展示配置 */
-export const LATENCY_DIMENSIONS: Array<{ id: LatencyMode; label: string; available: boolean }> = [
-  { id: 'public', label: 'Public', available: true },
-  { id: 'pop', label: 'PoP', available: true },
-  { id: 'gateway', label: 'Local', available: true },
+/**
+ * 延迟维度的展示配置。
+ *
+ * ⚠️ 本文件不产出用户可见文案: `labelKey` 是 `dashboard:` 命名空间下的
+ * 字典键, 由渲染层（LatencyChart）用 `t()` 翻译。否则同一个按钮在
+ * 中文界面会永远显示 "Local"。
+ */
+export const LATENCY_DIMENSIONS: Array<{ id: LatencyMode; labelKey: string; available: boolean }> = [
+  { id: 'public', labelKey: 'chart.mode_public', available: true },
+  { id: 'pop', labelKey: 'chart.mode_pop', available: true },
+  { id: 'gateway', labelKey: 'chart.mode_gateway', available: true },
 ];
 
 export const DEFAULT_MODE: LatencyMode = LATENCY_DIMENSIONS.find((d) => d.available)?.id ?? 'pop';

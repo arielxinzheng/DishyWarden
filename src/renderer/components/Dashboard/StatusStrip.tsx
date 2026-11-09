@@ -55,6 +55,8 @@
  * 天然对齐: 看到红条, 往右看一眼延迟折线就有对应尖刺。
  */
 
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
 import type { HistorySample } from '../../../storage/types';
 import { findGaps, isInGap } from './dataGaps';
 import { StatusTooltip, useStatusTooltip } from './StatusTooltip';
@@ -310,11 +312,11 @@ export interface StatusStripProps {
  * Gap 一旦被压到 0, 分片感就没了, 那就退化成了纯色条, 失去意义。
  * 这个取舍在 Dashboard 里用 `fitStatusSlots()` 实现。
  */
-export const SLICE_PLANS: Record<string, { slots: number; slotMs: number; label: string }> = {
-  '24h': { slots: 48, slotMs: 30 * 60 * 1000, label: '24h ago' },
-  '6h': { slots: 36, slotMs: 10 * 60 * 1000, label: '6h ago' },
-  '1h': { slots: 30, slotMs: 2 * 60 * 1000, label: '1h ago' },
-  '15m': { slots: 30, slotMs: 30 * 1000, label: '15m ago' },
+export const SLICE_PLANS: Record<string, { slots: number; slotMs: number }> = {
+  '24h': { slots: 48, slotMs: 30 * 60 * 1000 },
+  '6h': { slots: 36, slotMs: 10 * 60 * 1000 },
+  '1h': { slots: 30, slotMs: 2 * 60 * 1000 },
+  '15m': { slots: 30, slotMs: 30 * 1000 },
 };
 
 /**
@@ -352,6 +354,7 @@ export function StatusStrip({
   slots = 36,
   height = 32,
 }: StatusStripProps) {
+  const { t, i18n } = useTranslation();
   const segments = buildStatusSegments(history, fromMs, toMs, slots);
   const { content, handlers, close } = useStatusTooltip();
 
@@ -383,7 +386,7 @@ export function StatusStrip({
               backgroundColor: STATUS_COLORS[seg.klass],
               opacity: seg.klass === 'empty' ? 0.5 : 1,
             }}
-            {...handlers(statusTitle(seg))}
+            {...handlers(statusTitle(seg, t, i18n.language))}
           />
         ))}
       </div>
@@ -400,10 +403,13 @@ export function StatusStrip({
  * 例:
  *   时间：14:00 - 14:24 | 状态：包含 2 次断线
  *   时间：14:24 - 14:48 | 状态：100% 在线
+ *
+ * 时间用**当前界面语言**的时/分格式, 模板与插值值都走字典 ——
+ * 不在逻辑层拼句子。
  */
-function statusTitle(seg: StatusSegment): string {
+function statusTitle(seg: StatusSegment, t: TFunction, lng: string): string {
   const fmt = (ts: number) =>
-    new Date(ts).toLocaleTimeString('zh-CN', {
+    new Date(ts).toLocaleTimeString(lng, {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -411,22 +417,25 @@ function statusTitle(seg: StatusSegment): string {
   const time = `${fmt(seg.from)} - ${fmt(seg.to)}`;
 
   if (seg.klass === 'offline') {
-    const times = seg.outageCount === 1 ? '1 次断线' : `${seg.outageCount} 次断线`;
-    return `时间：${time} | 状态：包含 ${times}`;
+    return t('dashboard:status.tooltip_offline', { time, count: seg.outageCount });
   }
 
   if (seg.klass === 'degraded') {
-    return `时间：${time} | 状态：服务降级（${seg.degradedCount}/${seg.sampleCount} 次采样非在线）`;
+    return t('dashboard:status.tooltip_degraded', {
+      time,
+      degraded: seg.degradedCount,
+      samples: seg.sampleCount,
+    });
   }
 
   if (seg.klass === 'online') {
-    return `时间：${time} | 状态：100% 在线`;
+    return t('dashboard:status.tooltip_online', { time });
   }
 
   if (seg.klass === 'unknown') {
     // 明确说"不知道", 而不是让用户以为那条灰带是"某种已知状态"
-    return `时间：${time} | 状态：数据缺失（采集中断，状态未知）`;
+    return t('dashboard:status.tooltip_unknown', { time });
   }
 
-  return `时间：${time} | 状态：无数据`;
+  return t('dashboard:status.tooltip_empty', { time });
 }

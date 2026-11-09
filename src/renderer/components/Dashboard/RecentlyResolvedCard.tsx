@@ -7,17 +7,21 @@
  *   - 视觉上必须和活跃告警横幅明显不同: 活跃 = 红/橙危险色, 这里 = 绿色
  *     安全色或中性灰。严禁红黄。
  *   - 层级: 活跃横幅永远在上, 本卡片在下。
+ *   - 所有可见文案走 `dashboard:recently_resolved.*`; 场景/时长只消费
+ *     `recentlyResolved.ts` 返回的语义码, 不在组件里推断。
  */
 
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2, ShieldCheck, X } from 'lucide-react';
 import {
   VISIBLE_LIMIT,
+  describeDuration,
   dismissKeyOf,
-  formatAgo,
-  formatDuration,
   formatSpan,
   recoveredAt,
+  relativeAge,
   scenarioOf,
+  type DurationDescriptor,
   type ResolvedAlertLike,
 } from './recentlyResolved';
 
@@ -35,21 +39,77 @@ const parseTs = (iso: string): number => {
   return Number.isFinite(ms) ? ms : 0;
 };
 
-/** `网络中断（14:05 - 14:10，持续 5 分钟）` */
-const describeOutage = (alert: ResolvedAlertLike): string => {
-  const span = formatSpan(alert.first_seen, alert.last_seen);
-  const lasted = formatDuration(recoveredAt(alert) - parseTs(alert.first_seen));
-  const window = [span, lasted && `持续 ${lasted}`].filter(Boolean).join('，');
-  const scenario = scenarioOf(alert);
-  return window ? `${scenario}（${window}）` : scenario;
-};
-
 export function RecentlyResolvedCard({
   alerts,
   now,
   onDismiss,
   onOpenHistory,
 }: RecentlyResolvedCardProps) {
+  const { t } = useTranslation();
+
+  /** 时长语义码 → 本地化片段（`5 分钟` / `5 min`） */
+  const durationText = (d: DurationDescriptor): string => {
+    switch (d.kind) {
+      case 'below_minute':
+        return t('dashboard:recently_resolved.duration_lt_minute');
+      case 'minutes':
+        return t('dashboard:recently_resolved.duration_minutes', { count: d.minutes });
+      case 'hours':
+        return t('dashboard:recently_resolved.duration_hours', { count: d.hours });
+      case 'hours_minutes':
+        return t('dashboard:recently_resolved.duration_hours_minutes', {
+          hours: d.hours,
+          minutes: d.minutes,
+        });
+    }
+  };
+
+  /**
+   * 场景名。已知规则用字典里的短场景名；未收录的规则退回后端 summary
+   * —— 硬编码全量映射会随规则演进腐坏。
+   */
+  const scenarioText = (alert: ResolvedAlertLike): string => {
+    const code = scenarioOf(alert);
+    if (code) return t(`dashboard:recently_resolved.scenario_${code}`);
+    const summary = (alert.summary || '').trim();
+    return summary || t('dashboard:recently_resolved.scenario_unknown');
+  };
+
+  /** `刚才经历了一次网络中断（14:05 - 14:10，持续 5 分钟），现已自动恢复正常` */
+  const outageLine = (alert: ResolvedAlertLike): string => {
+    const span = formatSpan(alert.first_seen, alert.last_seen);
+    const duration = describeDuration(recoveredAt(alert) - parseTs(alert.first_seen));
+    const scenario = scenarioText(alert);
+    const lasted = duration ? durationText(duration) : '';
+
+    if (span && lasted) {
+      return t('dashboard:recently_resolved.line_full', {
+        scenario,
+        span,
+        duration: lasted,
+      });
+    }
+    if (span) {
+      return t('dashboard:recently_resolved.line_with_span', { scenario, span });
+    }
+    if (lasted) {
+      return t('dashboard:recently_resolved.line_with_duration', {
+        scenario,
+        duration: lasted,
+      });
+    }
+    return t('dashboard:recently_resolved.line_plain', { scenario });
+  };
+
+  /** 相对恢复时间（`刚刚恢复` / `12 分钟前恢复`） */
+  const agoText = (ms: number): string => {
+    const age = relativeAge(ms);
+    if (age.unit === 'just_now') {
+      return t('dashboard:recently_resolved.recovered_just_now');
+    }
+    return t(`dashboard:recently_resolved.recovered_${age.unit}`, { count: age.count });
+  };
+
   if (alerts.length === 0) return null;
 
   const shown = alerts.slice(0, VISIBLE_LIMIT);
@@ -59,15 +119,17 @@ export function RecentlyResolvedCard({
     <section
       // 不用 <Alert>: 那个组件带 role="alert", 会把「已恢复」当成新的紧急消息
       // 播报给屏幕阅读器, 语义正好相反。
-      aria-label="最近已恢复的严重告警"
+      aria-label={t('dashboard:recently_resolved.aria')}
       className="rounded-lg border border-accent-green/30 bg-accent-green/5 p-4"
     >
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 shrink-0 text-accent-green" />
-          <span className="text-sm font-medium text-accent-green">刚刚恢复</span>
+          <span className="text-sm font-medium text-accent-green">
+            {t('dashboard:recently_resolved.title')}
+          </span>
           <span className="text-xs text-muted-foreground">
-            最近 1 小时内已自动恢复的严重告警
+            {t('dashboard:recently_resolved.subtitle')}
           </span>
         </div>
         <button
@@ -75,7 +137,7 @@ export function RecentlyResolvedCard({
           onClick={onOpenHistory}
           className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          查看历史
+          {t('dashboard:recently_resolved.view_history')}
         </button>
       </div>
 
@@ -88,19 +150,17 @@ export function RecentlyResolvedCard({
             <div className="flex min-w-0 items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent-green" />
               <div className="min-w-0">
-                <p className="text-sm text-foreground/90">
-                  刚才经历了一次{describeOutage(alert)}，现已自动恢复正常
-                </p>
+                <p className="text-sm text-foreground/90">{outageLine(alert)}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {formatAgo(now - recoveredAt(alert))}恢复
+                  {agoText(now - recoveredAt(alert))}
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => onDismiss(alert)}
-              aria-label="我知道了，不再提示这条"
-              title="我知道了"
+              aria-label={t('dashboard:recently_resolved.dismiss_aria')}
+              title={t('dashboard:recently_resolved.dismiss')}
               className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent-green/15 hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" />
@@ -115,7 +175,7 @@ export function RecentlyResolvedCard({
           onClick={onOpenHistory}
           className="mt-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          还有 {remaining} 条更早的已恢复告警
+          {t('dashboard:recently_resolved.more', { count: remaining })}
         </button>
       )}
     </section>

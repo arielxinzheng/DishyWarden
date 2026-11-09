@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BellOff, AlertOctagon, Clock } from 'lucide-react';
 
 interface AlertSnoozeMenuProps {
@@ -13,6 +14,7 @@ interface AlertSnoozeMenuProps {
 }
 
 export function AlertSnoozeMenu({ onSnooze, onMarkFalsePositive, onClose }: AlertSnoozeMenuProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
   const handleSnooze = async (type: 'temporary' | 'until_resolved', durationMs?: number) => {
@@ -49,8 +51,10 @@ export function AlertSnoozeMenu({ onSnooze, onMarkFalsePositive, onClose }: Aler
         >
           <Clock className="w-4 h-4 text-sky-blue shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-foreground">忽略 1 小时</div>
-            <div className="text-xs text-muted-foreground">临时屏蔽此告警</div>
+            <div className="font-medium text-foreground">{t('dashboard:alert_drawer.snooze_1h')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('dashboard:alert_drawer.snooze_1h_hint')}
+            </div>
           </div>
         </button>
 
@@ -62,8 +66,10 @@ export function AlertSnoozeMenu({ onSnooze, onMarkFalsePositive, onClose }: Aler
         >
           <Clock className="w-4 h-4 text-warning-orange shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-foreground">忽略 24 小时</div>
-            <div className="text-xs text-muted-foreground">延后处理</div>
+            <div className="font-medium text-foreground">{t('dashboard:alert_drawer.snooze_24h')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('dashboard:alert_drawer.snooze_24h_hint')}
+            </div>
           </div>
         </button>
 
@@ -78,8 +84,10 @@ export function AlertSnoozeMenu({ onSnooze, onMarkFalsePositive, onClose }: Aler
         >
           <BellOff className="w-4 h-4 text-slate-400 shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-foreground">忽略本次异常</div>
-            <div className="text-xs text-muted-foreground">直到网络恢复</div>
+            <div className="font-medium text-foreground">{t('dashboard:alert_drawer.snooze_this')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('dashboard:alert_drawer.snooze_this_hint')}
+            </div>
           </div>
         </button>
 
@@ -94,8 +102,10 @@ export function AlertSnoozeMenu({ onSnooze, onMarkFalsePositive, onClose }: Aler
         >
           <AlertOctagon className="w-4 h-4 shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="font-medium">这是一个误报</div>
-            <div className="text-xs opacity-70">反馈给我们</div>
+            <div className="font-medium">{t('dashboard:alert_drawer.false_positive')}</div>
+            <div className="text-xs opacity-70">
+              {t('dashboard:alert_drawer.false_positive_hint')}
+            </div>
           </div>
         </button>
       </div>

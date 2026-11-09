@@ -18,11 +18,13 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Router, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import type { RouterProbeResult } from '../../../core/routerProbeTypes';
 import { isValidProbe } from './routerProbeShape';
 
 export function RouterStatusRow() {
+  const { t, i18n } = useTranslation();
   const [probe, setProbe] = useState<RouterProbeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,7 +73,7 @@ export function RouterStatusRow() {
     return (
       <div className="flex items-center gap-2 rounded-md border border-warning-orange/30 bg-warning-orange/5 px-3 py-2 text-xs text-warning-orange">
         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-        <span>路由器探测失败: {error}</span>
+        <span>{t('dashboard:router.probe_failed', { error })}</span>
       </div>
     );
   }
@@ -80,7 +82,7 @@ export function RouterStatusRow() {
     return (
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
         <Router className="w-3.5 h-3.5 shrink-0" />
-        <span>等待首次路由器探测…</span>
+        <span>{t('dashboard:router.waiting')}</span>
       </div>
     );
   }
@@ -99,7 +101,7 @@ export function RouterStatusRow() {
             <WifiOff className="w-4 h-4 shrink-0 text-danger-red" />
           )}
           <span className="text-xs text-slate-300 truncate">
-            路由器
+            {t('dashboard:router.title')}
             <span className="text-muted-foreground ml-1.5 font-mono">
               {/* ⚠️ 用 `!= null` 而不是 `!== null` ——
                   后者对 `undefined` 为真, 会对 undefined 调 .toFixed() 崩掉。
@@ -109,9 +111,11 @@ export function RouterStatusRow() {
                 : 'RTT —'}
             </span>
             <span className="text-muted-foreground ml-1.5">
-              丢包 {Number.isFinite(probe.packetLoss)
-                ? (probe.packetLoss * 100).toFixed(0)
-                : '0'}%
+              {t('dashboard:router.loss', {
+                value: Number.isFinite(probe.packetLoss)
+                  ? (probe.packetLoss * 100).toFixed(0)
+                  : '0',
+              })}
             </span>
           </span>
         </div>
@@ -120,26 +124,30 @@ export function RouterStatusRow() {
             reachable ? 'text-accent-green' : 'text-danger-red'
           }`}
         >
-          {reachable ? '可达' : '不可达'}
+          {reachable ? t('dashboard:router.reachable') : t('dashboard:router.unreachable')}
         </span>
       </div>
 
-      {/* 第二行：不可信警告 —— 必须显眼 */}
-      {!trusted && probe.trustNote && (
+      {/* 第二行：不可信警告 —— 必须显眼。
+          ⚠️ 不直接展示主进程的 `trustNote`: 那是运行期生成的**中文**说明,
+          切到其它语言不会变。这里用字典里的本地化说明。 */}
+      {!trusted && (
         <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-warning-orange leading-relaxed">
           <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-          <span>{probe.trustNote}</span>
+          <span>{t('dashboard:router.untrusted_note')}</span>
         </div>
       )}
 
       {/* 第三行：采集时刻 */}
       {probe.timestamp && (
         <div className="mt-1 text-[10px] text-muted-foreground font-mono">
-          {new Date(probe.timestamp).toLocaleTimeString('zh-CN', { hour12: false })} 采集
+          {t('dashboard:router.collected_at', {
+            time: new Date(probe.timestamp).toLocaleTimeString(i18n.language, { hour12: false }),
+          })}
           {/* ⚠️ 同样用 `!= null` —— `httpOk` 未定义时不应显示 HTTP 行 */}
           {probe.httpOk != null && (
             <span className="ml-2">
-              HTTP {probe.httpOk ? '正常' : '异常'}
+              HTTP {probe.httpOk ? t('dashboard:router.http_ok') : t('dashboard:router.http_error')}
             </span>
           )}
         </div>

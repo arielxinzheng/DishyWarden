@@ -4,6 +4,7 @@
  */
 
 import ReactECharts from 'echarts-for-react';
+import { useTranslation } from 'react-i18next';
 import { formatTimeLabel } from '../../../core/telemetry';
 import type { HistorySample } from '../../../storage/types';
 import type { HandoffEvent } from '../../../core/outageAnalyzer';
@@ -75,6 +76,7 @@ export function LatencyChart({
   handoffs = [],
   timeRange = '1h',
 }: LatencyChartProps) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<LatencyMode>(DEFAULT_MODE);
   /**
    * 用户对卫星切换标记的**手动**选择, **按时间范围分别记忆**。
@@ -338,17 +340,31 @@ export function LatencyChart({
           //    异常会冒到 ErrorBoundary 把整页换成白屏。
           if (item.value === null || item.value === undefined) continue;
 
-          if (item.seriesName === '延迟') {
-            rows.push(`${item.marker}延迟: ${Number(item.value).toFixed(1)} ms`);
-          } else if (item.seriesName === '丢包率') {
-            rows.push(`${item.marker}丢包率: ${Number(item.value).toFixed(2)}%`);
-          } else if (item.seriesName === '卫星切换') {
-            rows.push('★ 卫星切换');
+          // ⚠️ 用 **seriesIndex** 而不是 seriesName 识别序列 ——
+          //    seriesName 已本地化, 拿中文/英文名做 if 判断会在切语言后失效。
+          if (item.seriesIndex === 0) {
+            rows.push(
+              t('dashboard:chart.tooltip_latency', {
+                marker: item.marker,
+                value: Number(item.value).toFixed(1),
+              }),
+            );
+          } else if (item.seriesIndex === 1) {
+            rows.push(
+              t('dashboard:chart.tooltip_loss', {
+                marker: item.marker,
+                value: Number(item.value).toFixed(2),
+              }),
+            );
+          } else if (item.seriesIndex === 2) {
+            rows.push(t('dashboard:chart.tooltip_handoff'));
           }
         }
 
         // 该时刻一个值都没有 ⇒ 明确说"数据缺失", 别留一个空 tooltip
-        if (rows.length === 0) return `${axisValue}<br/>数据缺失 (No Data)`;
+        if (rows.length === 0) {
+          return `${axisValue}<br/>${t('dashboard:chart.tooltip_no_data')}`;
+        }
         return `${axisValue}<br/>${rows.join('<br/>')}`;
       },
     },
@@ -420,7 +436,7 @@ export function LatencyChart({
     ],
     series: [
       {
-        name: '延迟',
+        name: t('dashboard:chart.latency_series'),
         type: 'line',
         smooth: true,
         symbol: 'none',
@@ -441,7 +457,7 @@ export function LatencyChart({
         //
         // 配置本身在 `dataGaps.gapMarkArea` —— 吞吐图用的是同一份,
         // 免得两个图的灰带颜色/最小宽度各自漂移。
-        markArea: gapMarkArea(chartData.gaps),
+        markArea: gapMarkArea(chartData.gaps, t('dashboard:chart.no_data_short')),
         areaStyle: {
           color: {
             type: 'linear',
@@ -463,7 +479,7 @@ export function LatencyChart({
         },
       },
       {
-        name: '丢包率',
+        name: t('dashboard:chart.loss_series'),
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
@@ -478,7 +494,7 @@ export function LatencyChart({
         },
       },
       {
-        name: '卫星切换',
+        name: t('dashboard:chart.handoff_series'),
         type: 'scatter',
         data: chartData.satellites,
         // ⚠️ 图层显隐有两道闸:
@@ -530,7 +546,7 @@ export function LatencyChart({
         style={{ height }}
         className="flex items-center justify-center text-muted-foreground"
       >
-        {isLoading ? '加载中...' : '暂无数据'}
+        {isLoading ? t('common:loading') : t('dashboard:chart.no_data')}
       </div>
     );
   }
@@ -541,7 +557,7 @@ export function LatencyChart({
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-accent-green" />
-          延迟与丢包走势
+          {t('dashboard:chart.latency_title')}
         </h3>
         <div className="flex items-center gap-1 bg-muted/40 border border-border rounded-md p-1">
           {LATENCY_DIMENSIONS.map((dim) => (
@@ -549,7 +565,7 @@ export function LatencyChart({
               key={dim.id}
               onClick={() => dim.available && setMode(dim.id)}
               disabled={!dim.available}
-              title={dim.available ? undefined : '该维度暂未接入采集源'}
+              title={dim.available ? undefined : t('dashboard:chart.mode_unavailable')}
               className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                 mode === dim.id
                   ? 'bg-accent-green/20 text-accent-green'
@@ -558,7 +574,7 @@ export function LatencyChart({
                     : 'text-muted-foreground/40 cursor-not-allowed'
               }`}
             >
-              {dim.label}
+              {t(`dashboard:${dim.labelKey}`)}
             </button>
           ))}
         </div>
@@ -567,10 +583,10 @@ export function LatencyChart({
       {/* 图例标签 */}
       <div className="flex gap-1 mb-1 text-[11px]">
         <span className="px-2 py-0.5 rounded bg-accent-green/15 text-accent-green">
-          延迟 (ms)
+          {t('dashboard:chart.latency_ms')}
         </span>
         <span className="px-2 py-0.5 rounded bg-danger-red/15 text-danger-red">
-          丢包率 (%)
+          {t('dashboard:chart.loss_pct')}
         </span>
         {/*
           卫星切换图例 —— **可点击**切换显隐。
@@ -593,8 +609,8 @@ export function LatencyChart({
             aria-pressed={handoffsVisible}
             title={
               handoffsVisible
-                ? '点击隐藏卫星切换标记'
-                : '点击显示卫星切换标记'
+                ? t('dashboard:chart.handoff_hide')
+                : t('dashboard:chart.handoff_show')
             }
             /*
              * 关闭态的视觉：**整体降级**, 不加删除线。
@@ -629,7 +645,7 @@ export function LatencyChart({
                     'bg-muted/40 text-accent-yellow opacity-30 hover:opacity-70'
               }`}
           >
-            ★ 卫星切换
+            {t('dashboard:chart.handoff_legend')}
           </button>
         )}
       </div>
@@ -647,8 +663,15 @@ export function LatencyChart({
         />
         <span>
           {trailingGap
-            ? `数据缺失 · 最后采集于 ${lastSampleLabel}（延迟 ${formatMs(lastLatency)} ms / 丢包 ${formatPct(lastLoss)}%）`
-            : `当前 ${mode === 'public' ? '公网' : mode === 'pop' ? 'PoP' : '网关'}延迟: ${formatMs(lastLatency)} ms，丢包率: ${formatPct(lastLoss)}%`}
+            ? t('dashboard:chart.trailing_gap', {
+                time: lastSampleLabel,
+                latency: formatMs(lastLatency),
+                loss: formatPct(lastLoss),
+              })
+            : t(`dashboard:chart.current_${mode}`, {
+                latency: formatMs(lastLatency),
+                loss: formatPct(lastLoss),
+              })}
         </span>
       </div>
     </div>

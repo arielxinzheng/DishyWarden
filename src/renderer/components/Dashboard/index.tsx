@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -26,9 +27,7 @@ import {
   formatBandwidth,
   formatPercentage,
   getSignalQuality,
-  getSignalQualityLabel,
   getObstructionSeverity,
-  getObstructionSeverityLabel,
 } from '../../../core/telemetry';
 import { LatencyChart } from './LatencyChart';
 import { ThroughputChart } from './ThroughputChart';
@@ -63,16 +62,45 @@ const TIME_RANGE_SECONDS: Record<TimeRange, number> = {
 // 字节 → GB 数值（保留 2 位），单位由 UI 单独渲染
 const toGb = (bytes: number) => (bytes / 1024 ** 3).toFixed(2);
 
-/** 断流时长的人话表述 —— 「31 分钟」比「1860000 ms」有用得多 */
-const formatSilentMs = (ms: number): string => {
+/**
+ * 断流时长 → 语义码 + 插值参数。
+ *
+ * 逻辑层只给数值, 句子由字典模板拼（`数据已 {{count}} 分钟未更新`）——
+ * 中文的「分钟」/ 英文的 "min" 才能各归各的语言。
+ */
+const staleBannerOf = (
+  ms: number,
+): { key: string; params: Record<string, number> } => {
   const sec = Math.round(ms / 1000);
-  if (sec < 90) return `${sec} 秒`;
+  if (sec < 90) {
+    return { key: 'dashboard:stale.banner_seconds', params: { count: sec } };
+  }
   const min = Math.round(sec / 60);
-  if (min < 90) return `${min} 分钟`;
-  return `${(min / 60).toFixed(1)} 小时`;
+  if (min < 90) {
+    return { key: 'dashboard:stale.banner_minutes', params: { count: min } };
+  }
+  return { key: 'dashboard:stale.banner_hours', params: { hours: Number((min / 60).toFixed(1)) } };
+};
+
+/** 信号质量语义码 → 字典键 */
+const SIGNAL_QUALITY_KEY: Record<string, string> = {
+  excellent: 'dashboard:metric.quality_excellent',
+  good: 'dashboard:metric.quality_good',
+  fair: 'dashboard:metric.quality_fair',
+  poor: 'dashboard:metric.quality_poor',
+  no_signal: 'dashboard:metric.quality_none',
+};
+
+/** 累计遮挡严重度语义码 → 字典键 */
+const OBSTRUCTION_SEVERITY_KEY: Record<string, string> = {
+  none: 'dashboard:obstruction.level_none',
+  minor: 'dashboard:obstruction.level_light',
+  moderate: 'dashboard:obstruction.level_moderate',
+  severe: 'dashboard:obstruction.level_severe',
 };
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { telemetry, isConnected, isLoading, error, refresh, obstruction } = useDish();
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
@@ -100,7 +128,6 @@ export default function Dashboard() {
     return {
       from,
       to,
-      leftLabel: plan?.label ?? `${timeRange} ago`,
       maxSlots: plan?.slots ?? 30,
     };
   }, [timeRange, history]);
@@ -218,7 +245,7 @@ export default function Dashboard() {
         setDishEndpoint(addr);
       } catch (err) {
         // 拿不到统计 ⇒ isFirstInstallFailure 返回 false, 走原有降级 UI
-        console.warn('[Dashboard] 读取库统计/设备地址失败:', err);
+        console.warn('[Dashboard] failed to read storage stats / dish address:', err);
       }
     })();
     return () => { cancelled = true; };
@@ -292,8 +319,10 @@ export default function Dashboard() {
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-accent-green" />
-          <p className="text-muted-foreground">正在连接 Starlink 设备...</p>
-          <p className="text-xs text-muted-foreground mt-2">请确保设备已接入网络</p>
+          <p className="text-muted-foreground">{t('dashboard:app.connecting')}</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            {t('dashboard:app.ensure_network')}
+          </p>
         </div>
       </div>
     );
@@ -307,16 +336,16 @@ export default function Dashboard() {
           <AlertDescription className="ml-7">
             <div className="space-y-4">
               <div>
-                <p className="font-semibold mb-1">无法连接到 Starlink 设备</p>
+                <p className="font-semibold mb-1">{t('dashboard:app.connect_failed')}</p>
                 <p className="text-sm">{error}</p>
               </div>
               <div className="text-sm space-y-1">
-                <p className="font-semibold">请检查：</p>
+                <p className="font-semibold">{t('dashboard:app.check_list')}</p>
                 <ul className="list-disc ml-4 space-y-1">
-                  <li>Starlink 终端是否已通电并启动完成</li>
-                  <li>本机是否已连接到 Starlink 网络（通常是 192.168.100.x）</li>
-                  <li>防火墙或网络安全软件是否阻止了连接</li>
-                  <li>Starlink 设备地址是否正确（默认: 192.168.100.1:9200）</li>
+                  <li>{t('dashboard:app.check_power')}</li>
+                  <li>{t('dashboard:app.check_network')}</li>
+                  <li>{t('dashboard:app.check_firewall')}</li>
+                  <li>{t('dashboard:app.check_address')}</li>
                 </ul>
               </div>
               <button
@@ -324,7 +353,7 @@ export default function Dashboard() {
                 disabled={isLoading}
                 className="px-4 py-2 bg-accent-green/20 hover:bg-accent-green/30 text-accent-green rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLoading ? '重试中...' : '重试连接'}
+                {isLoading ? t('dashboard:app.retrying') : t('dashboard:app.retry')}
               </button>
             </div>
           </AlertDescription>
@@ -369,13 +398,16 @@ export default function Dashboard() {
   const alignmentUncertaintyText =
     alignmentUncertainty !== undefined ? `${alignmentUncertainty.toFixed(1)}°` : '—';
 
+  // 断流时长 → 语义码，句子由字典模板拼（不在这里写「分钟」/「秒」）
+  const staleBanner = staleBannerOf(staleness.silentMs);
+
   return (
     <div className="p-8 space-y-8">
       {/* Header with controls */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl font-bold">仪表盘</h1>
-          <p className="text-muted-foreground mt-1">实时监控星链终端状态</p>
+          <h1 className="text-3xl font-bold">{t('dashboard:app.title')}</h1>
+          <p className="text-muted-foreground mt-1">{t('dashboard:app.subtitle')}</p>
         </div>
         
         {/* Right controls area */}
@@ -386,7 +418,7 @@ export default function Dashboard() {
             className={isConnected ? 'text-accent-green border-accent-green px-4 py-2' : 'text-muted-foreground px-4 py-2'}
           >
             <span className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-accent-green animate-pulse' : 'bg-muted-foreground'}`}></span>
-            {isConnected ? '实时监控中' : '连接断开'}
+            {isConnected ? t('dashboard:status.live') : t('dashboard:status.disconnected')}
           </Badge>
 
           {/* Time range selector */}
@@ -414,7 +446,7 @@ export default function Dashboard() {
             >
               <Clock className={`w-4 h-4 text-sky-blue ${refreshInterval !== 'manual' ? '' : 'opacity-60'}`} />
               <span className="font-mono text-xs">
-                {refreshInterval === 'manual' ? '手动' : refreshInterval}
+                {refreshInterval === 'manual' ? t('dashboard:app.manual') : refreshInterval}
               </span>
               <ChevronDown className="w-3 h-3 text-muted-foreground" />
             </button>
@@ -434,7 +466,7 @@ export default function Dashboard() {
                   >
                     {refreshInterval === interval && <span className="w-3">✓</span>}
                     {refreshInterval !== interval && <span className="w-3"></span>}
-                    <span>{interval === 'manual' ? '手动' : interval}</span>
+                    <span>{interval === 'manual' ? t('dashboard:app.manual') : interval}</span>
                   </button>
                 ))}
               </div>
@@ -446,7 +478,7 @@ export default function Dashboard() {
             onClick={handleManualRefresh}
             disabled={isRefreshing}
             className="w-9 h-9 flex items-center justify-center rounded-md border border-border hover:border-accent-green/50 hover:bg-muted/60 transition-colors disabled:opacity-50"
-            title="立即刷新"
+            title={t('dashboard:app.refresh_now')}
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-accent-green' : 'text-muted-foreground'}`} />
           </button>
@@ -459,7 +491,7 @@ export default function Dashboard() {
             className="hidden lg:flex items-center gap-2 px-3 py-2 rounded-md border border-sky-blue/40 bg-sky-blue/10 text-sky-blue hover:bg-sky-blue/20 transition-colors text-sm"
           >
             <Globe className="w-4 h-4" />
-            <span className="font-medium">官网</span>
+            <span className="font-medium">{t('dashboard:app.official_site')}</span>
           </a>
         </div>
       </div>
@@ -480,10 +512,12 @@ export default function Dashboard() {
             <div className="flex items-center gap-3">
               <AlertCircle className={`w-5 h-5 ${hasCriticalAlerts ? 'text-danger-red' : 'text-warning-orange'}`} />
               <span className={`font-medium ${hasCriticalAlerts ? 'text-danger-red' : 'text-warning-orange'}`}>
-                {hasCriticalAlerts ? '⚠️ 检测到严重告警' : '⚠️ 检测到网络环境异常'}
+                {hasCriticalAlerts
+                  ? t('dashboard:alert_drawer.critical_banner')
+                  : t('dashboard:alert_drawer.warning_banner')}
               </span>
               <Badge variant={hasCriticalAlerts ? 'destructive' : 'secondary'}>
-                {visibleAlerts.length} 个
+                {t('dashboard:alert_drawer.count', { count: visibleAlerts.length })}
               </Badge>
             </div>
             <button 
@@ -495,7 +529,7 @@ export default function Dashboard() {
                 }
               `}
             >
-              查看详情
+              {t('dashboard:alert_drawer.open_detail')}
             </button>
           </div>
         </div>
@@ -505,7 +539,7 @@ export default function Dashboard() {
       <Drawer
         open={alertDrawerOpen}
         onClose={() => setAlertDrawerOpen(false)}
-        title="活跃告警"
+        title={t('dashboard:alert_drawer.title')}
         width="md"
       >
         <AlertDrawerContent 
@@ -555,14 +589,14 @@ export default function Dashboard() {
               {/* 1. Overall status */}
               <div className="p-5">
                 <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                  状态
+                  {t('dashboard:overview.status')}
                 </div>
                 <div className={`mt-2 flex items-center gap-2 text-xl font-bold ${isConnected ? 'text-accent-green' : 'text-danger-red'}`}>
                   <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-accent-green animate-pulse' : 'bg-danger-red animate-pulse'}`}></span>
-                  <span>{isConnected ? '正常' : '离线'}</span>
+                  <span>{isConnected ? t('dashboard:overview.ok') : t('dashboard:overview.offline')}</span>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  24h 可用率{' '}
+                  {t('dashboard:overview.availability_24h')}{' '}
                   <span className={`font-mono ${availabilityColor}`}>{availabilityText}</span>
                 </div>
               </div>
@@ -570,7 +604,7 @@ export default function Dashboard() {
               {/* 2. Today's data usage */}
               <div className="p-5">
                 <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                  24h 用量
+                  {t('dashboard:overview.usage_24h')}
                 </div>
                 <div className="mt-2 text-2xl font-extrabold text-slate-100 font-mono">
                   <span>{usageTotalGb}</span>
@@ -585,7 +619,7 @@ export default function Dashboard() {
               {/* 3. Anomalies & outages */}
               <div className="p-5">
                 <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                  中断次数
+                  {t('dashboard:overview.outages')}
                 </div>
                 <div
                   className={`mt-2 text-2xl font-extrabold font-mono ${
@@ -599,45 +633,53 @@ export default function Dashboard() {
                   {outageCount === null ? (
                     <span>—</span>
                   ) : outageCount === 0 ? (
-                    <span>无中断</span>
+                    <span>{t('dashboard:overview.no_outage')}</span>
                   ) : (
                     <>
                       <span>{outageCount}</span>
-                      <span className="text-sm text-muted-foreground ml-1">次</span>
+                      <span className="text-sm text-muted-foreground ml-1">
+                        {t('dashboard:overview.outage_unit')}
+                      </span>
                     </>
                   )}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {outageCount === null ? '暂无历史样本' : '近 24h 统计'}
+                  {outageCount === null
+                    ? t('dashboard:overview.no_samples')
+                    : t('dashboard:overview.history_24h')}
                 </div>
               </div>
 
               {/* 4. Alignment status — 取自 alignmentStats，无数据时显示占位 */}
               <div className="p-5">
                 <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                  对准状态
+                  {t('dashboard:overview.alignment')}
                 </div>
                 <div className={`mt-2 text-2xl font-extrabold font-mono ${isAligned ? 'text-accent-green' : 'text-warning-orange'}`}>
-                  {isAligned ? '已对准' : '校准中'}
+                  {isAligned ? t('dashboard:overview.aligned') : t('dashboard:overview.aligning')}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1 font-mono">
-                  误差 {alignmentUncertaintyText} · 锁星{' '}
-                  {telemetry.secondsToFirstNonemptySlot > 0
-                    ? `${telemetry.secondsToFirstNonemptySlot}s`
-                    : '—'}
+                  {t('dashboard:overview.uncertainty', { value: alignmentUncertaintyText })}
+                  {' · '}
+                  {t('dashboard:overview.first_fix', {
+                    value:
+                      telemetry.secondsToFirstNonemptySlot > 0
+                        ? `${telemetry.secondsToFirstNonemptySlot}s`
+                        : '—',
+                  })}
                 </div>
               </div>
 
               {/* 5. Uptime */}
               <div className="p-5 col-span-2 md:col-span-3 lg:col-span-1">
                 <div className="flex items-center gap-2 text-sm uppercase tracking-[0.12em] font-semibold text-slate-200">
-                  运行时间
+                  {t('dashboard:overview.uptime')}
                 </div>
                 <div className="mt-2 text-2xl font-extrabold text-slate-100 font-mono">
                   {telemetry.uptime > 0 ? formatUptime(telemetry.uptime) : '—'}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  固件 {telemetry.softwareVersion || '—'}
+                  {t('dashboard:overview.firmware', { version: telemetry.softwareVersion || '—' })}
                 </div>
               </div>
             </div>
@@ -653,11 +695,9 @@ export default function Dashboard() {
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-orange" />
             <div className="text-sm leading-5">
               <span className="font-semibold text-warning-orange">
-                数据已 {formatSilentMs(staleness.silentMs)} 未更新
+                {t(staleBanner.key, staleBanner.params)}
               </span>
-              <span className="text-muted-foreground">
-                {' '}· 下方数值为最后一次成功采集的结果; 图表上的断口与状态条上的灰块即采集中断区间
-              </span>
+              <span className="text-muted-foreground"> {t('dashboard:stale.banner_detail')}</span>
             </div>
           </div>
         )}
@@ -679,15 +719,21 @@ export default function Dashboard() {
       {/* 6 metric cards row with mini charts —— pt-3 让拓扑与矩阵之间的呼吸更足 */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 pt-3">
         <MetricCard
-          title="连接状态"
-          value={telemetry.state === 'ONLINE' ? '在线' : telemetry.state || '—'}
-          subtitle={`信号${getSignalQualityLabel(getSignalQuality(telemetry.snr))}`}
+          title={t('dashboard:metric.connection')}
+          value={
+            telemetry.state === 'ONLINE' ? t('dashboard:metric.online') : telemetry.state || '—'
+          }
+          subtitle={t('dashboard:metric.signal', {
+            quality: t(
+              SIGNAL_QUALITY_KEY[getSignalQuality(telemetry.snr)] ?? 'dashboard:metric.quality_none',
+            ),
+          })}
           dotColor={telemetry.state === 'ONLINE' ? '#4ade80' : '#94a3b8'}
           series={metricSeries.availability}
           chartType="line"
           domain={[0, 1]}
-          legendLeft={chartWindow.leftLabel}
-          legendRight="Now"
+          legendLeft={t(`dashboard:metric.range_${timeRange}`)}
+          legendRight={t('dashboard:metric.now')}
           chartAreaRef={statusCardRef}
         >
           {/* 状态色块条 —— 取代折线。
@@ -704,45 +750,64 @@ export default function Dashboard() {
         </MetricCard>
         
         <MetricCard
-          title="延迟"
+          title={t('dashboard:metric.latency')}
           value={formatLatency(telemetry.popPingLatencyMs)}
-          subtitle={latencyPeak === null ? '暂无历史样本' : `峰值 ${formatLatency(latencyPeak)}`}
+          subtitle={
+            latencyPeak === null
+              ? t('dashboard:metric.no_history')
+              : t('dashboard:metric.peak', { value: formatLatency(latencyPeak) })
+          }
           dotColor="#4ade80"
           series={metricSeries.latency}
           chartType="area"
         />
         
         <MetricCard
-          title="丢包率"
+          title={t('dashboard:metric.packet_loss')}
           value={formatPercentage(telemetry.popPingDropRate)}
-          subtitle={dropPeak === null ? '暂无历史样本' : `峰值 ${formatPercentage(dropPeak)}`}
+          subtitle={
+            dropPeak === null
+              ? t('dashboard:metric.no_history')
+              : t('dashboard:metric.peak', { value: formatPercentage(dropPeak) })
+          }
           dotColor={telemetry.popPingDropRate > 0.05 ? '#ef4444' : '#4ade80'}
           series={metricSeries.drop}
           chartType="line"
         />
         
         <MetricCard
-          title="下载速度"
+          title={t('dashboard:metric.downlink')}
           value={formatBandwidth(telemetry.downlinkThroughputBps)}
-          subtitle={downPeak === null ? '暂无历史样本' : `峰值 ${formatBandwidth(downPeak)}`}
+          subtitle={
+            downPeak === null
+              ? t('dashboard:metric.no_history')
+              : t('dashboard:metric.peak', { value: formatBandwidth(downPeak) })
+          }
           dotColor="#38bdf8"
           series={metricSeries.down}
           chartType="bars"
         />
         
         <MetricCard
-          title="上传速度"
+          title={t('dashboard:metric.uplink')}
           value={formatBandwidth(telemetry.uplinkThroughputBps)}
-          subtitle={upPeak === null ? '暂无历史样本' : `峰值 ${formatBandwidth(upPeak)}`}
+          subtitle={
+            upPeak === null
+              ? t('dashboard:metric.no_history')
+              : t('dashboard:metric.peak', { value: formatBandwidth(upPeak) })
+          }
           dotColor="#a78bfa"
           series={metricSeries.up}
           chartType="bars"
         />
         
         <MetricCard
-          title="累计遮挡率"
+          title={t('dashboard:metric.obstruction')}
           value={formatPercentage(telemetry.fractionObstructed)}
-          subtitle={getObstructionSeverityLabel(getObstructionSeverity(telemetry.fractionObstructed))}
+          subtitle={t(
+            OBSTRUCTION_SEVERITY_KEY[getObstructionSeverity(telemetry.fractionObstructed)] ??
+              'dashboard:obstruction.level_none',
+          )}
           dotColor={getDotColorFromSeverity(getObstructionSeverity(telemetry.fractionObstructed))}
           series={metricSeries.obstruction}
           chartType="area"
@@ -780,7 +845,7 @@ export default function Dashboard() {
         <div className="lg:col-span-7">
           <Card>
             <CardHeader>
-              <CardTitle>吞吐量</CardTitle>
+              <CardTitle>{t('dashboard:chart.throughput_title')}</CardTitle>
             </CardHeader>
             <CardContent>
               <ThroughputChart
@@ -844,6 +909,7 @@ interface ObstructionInsightCardProps {
 }
 
 function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCardProps) {
+  const { t } = useTranslation();
   // 数据来源决定一切:
   //   real -> 设备实测, 可以给方向/影响/视野遮挡占比
   //   mock -> 本地模拟, 只能画个样子, 且必须明确标出来
@@ -870,27 +936,43 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
     ? (obstructionRate * 100).toFixed(1)
     : null;
 
-  // 根据遮挡比例确定严重程度
+  // 根据遮挡比例确定严重程度（阈值不变，文案走字典）
   const getSeverityInfo = (rate: number) => {
-    if (rate < 0.02) return { label: '无遮挡', color: 'text-accent-green' };
-    if (rate < 0.05) return { label: '轻度遮挡', color: 'text-warning-orange' };
-    if (rate < 0.10) return { label: '中度遮挡', color: 'text-orange-500' };
-    return { label: '严重遮挡', color: 'text-danger-red' };
+    if (rate < 0.02) {
+      return { label: t('dashboard:obstruction.level_none'), color: 'text-accent-green' };
+    }
+    if (rate < 0.05) {
+      return { label: t('dashboard:obstruction.level_light'), color: 'text-warning-orange' };
+    }
+    if (rate < 0.10) {
+      return { label: t('dashboard:obstruction.level_moderate'), color: 'text-orange-500' };
+    }
+    return { label: t('dashboard:obstruction.level_severe'), color: 'text-danger-red' };
   };
 
   const severity = getSeverityInfo(obstructionRate);
   const impact = assessObstructionImpact(obstructionRate);
+  const impactLabel = t(impact.labelKey);
 
-  // 方向只在真实数据上给 —— mock 图的方向是随机生成的, 展示它就是误导
-  const showDirection = isReal && stats?.dominantDirection;
-  const ageText = obstruction ? describeObstructionAge(obstruction.timestamp) : null;
+  // 方向只在真实数据上给 —— mock 图的方向是随机生成的, 展示它就是误导。
+  // 方位码（N/NE/…）来自 lib 的语义层, 文案在 dashboard 字典里。
+  const directionLabel =
+    isReal && stats?.dominantDirection
+      ? t(`dashboard:direction.${stats.dominantDirection.toLowerCase()}`)
+      : null;
+
+  // 采集时刻 → 语义码 + 可选 count（labelKey 在 obstruction 命名空间）
+  const age = obstruction ? describeObstructionAge(obstruction.timestamp) : null;
+  const ageText = age
+    ? t(age.labelKey, age.count !== undefined ? { count: age.count } : undefined)
+    : null;
 
   return (
     <Card>
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-semibold text-slate-300">
-            遮挡概览
+            {t('dashboard:obstruction.card_title')}
           </h3>
         </div>
 
@@ -906,7 +988,7 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
         ) : (
           <div className="mx-auto mt-1 flex items-center justify-center rounded border border-dashed border-slate-700 text-xs text-muted-foreground"
                style={{ width: 360, height: 280 }}>
-            暂无遮挡图数据
+            {t('dashboard:obstruction.no_map')}
           </div>
         )}
 
@@ -923,12 +1005,12 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
 
         <div className="space-y-2 text-sm">
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">主遮挡方向</span>
+            <span className="text-slate-400">{t('dashboard:obstruction.direction')}</span>
             <span className="text-slate-200">
-              {showDirection ? (
+              {directionLabel ? (
                 <>
                   <Activity className="w-3 h-3 inline mr-1 text-sky-blue" />
-                  {stats?.dominantDirection}
+                  {directionLabel}
                   {stats?.dominantAzimuth != null && (
                     <span className="text-xs text-muted-foreground ml-1 font-mono">
                       {stats.dominantAzimuth.toFixed(0)}°
@@ -936,32 +1018,34 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
                   )}
                 </>
               ) : (
-                <span className="text-muted-foreground text-xs">无实测数据</span>
+                <span className="text-muted-foreground text-xs">
+                  {t('dashboard:obstruction.no_measured')}
+                </span>
               )}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">影响</span>
-            <span className={impact.color}>{impact.label}</span>
+            <span className="text-slate-400">{t('dashboard:obstruction.impact')}</span>
+            <span className={impact.color}>{impactLabel}</span>
           </div>
           {ageText && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">数据时间</span>
+              <span className="text-slate-400">{t('dashboard:obstruction.data_time')}</span>
               <span className="text-xs text-muted-foreground">{ageText}</span>
             </div>
           )}
           {obstruction && !isReal && (
             <div className="text-xs text-warning-orange bg-warning-orange/10 border border-warning-orange/30 rounded px-2 py-1">
-              当前显示模拟数据（非设备实测）。设备返回遮挡图后会自动切换。
+              {t('dashboard:obstruction.mock_banner')}
             </div>
           )}
           {!obstruction && (
             <div className="text-xs text-muted-foreground bg-ink-800/50 border border-border/50 rounded px-2 py-1">
-              设备尚未返回视野遮挡图。
+              {t('dashboard:obstruction.no_map_banner')}
             </div>
           )}
           <div className="text-xs text-center text-slate-500 mt-2 cursor-pointer hover:text-sky-blue transition-colors">
-            点击可查看详细障碍图
+            {t('dashboard:obstruction.view_detail')}
           </div>
         </div>
       </CardContent>
@@ -971,6 +1055,7 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
 
 // 路由跟踪卡片
 function RouteTraceCard() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<{
     target: string;
@@ -990,42 +1075,43 @@ function RouteTraceCard() {
   }, []);
 
   const loadTarget = async () => {
-    let t = '';
+    // ⚠️ 变量名不能叫 `t` —— 会遮蔽上面的翻译函数
+    let configured = '';
     try {
       if (window.electronAPI?.getConfig) {
         const cfg = await window.electronAPI.getConfig();
-        t = cfg.probe?.traceTarget ?? '';
+        configured = cfg.probe?.traceTarget ?? '';
       }
     } catch {
       // 配置读不到就用默认, 不阻塞卡片
     }
-    const finalTarget = t || 'example.com';
+    const finalTarget = configured || 'example.com';
     setTarget(finalTarget);
     runTrace(finalTarget);
   };
 
   const runTrace = async (targetOverride?: string) => {
     if (!window.electronAPI?.runTraceroute) {
-      setError('Traceroute 仅在 Electron 环境可用');
+      setError(t('dashboard:route.only_electron'));
       return;
     }
 
-    const t = (targetOverride ?? target).trim() || 'example.com';
+    const traceTarget = (targetOverride ?? target).trim() || 'example.com';
     setLoading(true);
     setError(null);
 
     try {
-      const result = await window.electronAPI.runTraceroute(t);
+      const result = await window.electronAPI.runTraceroute(traceTarget);
       // 防御: IPC 返回的结构不可信(旧版本/异常路径), 缺 hops 会让
       // 下面的 data.hops.length 抛错 ⇒ 整个仪表盘被 ErrorBoundary 清空。
       if (!result || !Array.isArray(result.hops)) {
         setData(null);
-        setError('路由跟踪返回了无法解析的结果');
+        setError(t('dashboard:route.unparseable'));
         return;
       }
       setData(result);
     } catch (err: any) {
-      setError(err.message || '执行失败');
+      setError(err.message || t('dashboard:route.exec_failed'));
     } finally {
       setLoading(false);
     }
@@ -1051,14 +1137,14 @@ function RouteTraceCard() {
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-semibold text-slate-300 shrink-0">
             <Activity className="w-4 h-4 inline mr-2 text-accent-green" />
-            路由跟踪
+            {t('dashboard:route.title')}
           </h3>
           <div className="flex items-center gap-2 flex-1 justify-end">
             {/* 目标只读显示 —— 编辑入口统一在设置页的「探针节点管理」,
                 避免同一个配置有两个地方能改。 */}
             <span
               className="font-mono text-[11px] text-slate-400 truncate"
-              title="路由跟踪目标(在设置页修改)"
+              title={t('dashboard:route.target_title')}
             >
               {target || '—'}
             </span>
@@ -1067,7 +1153,7 @@ function RouteTraceCard() {
               disabled={loading}
               className="text-xs text-accent-green hover:text-accent-green/80 disabled:opacity-50 shrink-0"
             >
-              {loading ? '执行中...' : '刷新'}
+              {loading ? t('dashboard:route.running') : t('dashboard:route.refresh')}
             </button>
           </div>
         </div>
@@ -1080,7 +1166,7 @@ function RouteTraceCard() {
 
         {loading && !data && (
           <div className="text-xs text-slate-400 py-8 text-center">
-            正在追踪路由...
+            {t('dashboard:route.tracing')}
           </div>
         )}
 
@@ -1127,11 +1213,11 @@ function RouteTraceCard() {
             </div>
 
             <div className="mt-3 border-t border-slate-700/40 pt-2 text-[11px] text-slate-500 font-mono flex flex-wrap gap-x-4 gap-y-1">
-              <span>目标: {data.target}</span>
-              <span>跳数: {data.hops.length}</span>
-              <span>平均延迟: {avgLatency.toFixed(1)} ms</span>
+              <span>{t('dashboard:route.target', { target: data.target })}</span>
+              <span>{t('dashboard:route.hops', { count: data.hops.length })}</span>
+              <span>{t('dashboard:route.avg_latency', { value: avgLatency.toFixed(1) })}</span>
               <span className={data.completed ? 'text-accent-green' : 'text-warning-orange'}>
-                {data.completed ? '已到达' : '未到达'}
+                {data.completed ? t('dashboard:route.reached') : t('dashboard:route.not_reached')}
               </span>
             </div>
           </>
@@ -1139,7 +1225,7 @@ function RouteTraceCard() {
 
         {data && data.hops.length === 0 && (
           <div className="text-xs text-slate-400 py-8 text-center">
-            无法获取路由信息
+            {t('dashboard:route.no_info')}
           </div>
         )}
       </CardContent>

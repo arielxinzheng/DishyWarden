@@ -275,10 +275,19 @@ export function findNullRuns<T>(items: Array<T | null>): IndexRun[] {
  *   颜色/标签/最小宽度会在两次改动后漂开 —— 最典型的是
  *   「一段 5 分钟的断流, 一张图有灰带另一张没有」。
  *
+ * ## i18n
+ *
+ * 灰带标签是**用户可见文案**, 本文件是纯逻辑层, 不能写死中文 ——
+ * 由渲染层把翻译好的文字传进来(`label`)。两个图表都调用同一份配置,
+ * 所以两个图上的灰带标签必然一致。
+ *
  * ⚠️ 单格断流(`to === from`)画不出带子(宽度为 0), 过滤掉;
  *    这种情况靠折线本身断开表达就够。
+ *
+ * @param runs  连续 null 段(下标区间)
+ * @param label 渲染层翻译好的「无数据」标签; 空串表示不显示标签
  */
-export function gapMarkArea(runs: IndexRun[]) {
+export function gapMarkArea(runs: IndexRun[], label = '') {
   return {
     silent: true,
     itemStyle: { color: 'rgba(148, 163, 184, 0.12)' },
@@ -288,7 +297,7 @@ export function gapMarkArea(runs: IndexRun[]) {
       .map((run) => [
         // ⚠️ 类目轴上写**数字**表示"第几个点"(下标), 不是取值。
         //    x 轴的类目值是我们格式化后的时间字符串, 拿时间戳匹配不上。
-        { xAxis: run.from, name: run.to - run.from >= 4 ? '无数据' : '' },
+        { xAxis: run.from, name: run.to - run.from >= 4 ? label : '' },
         { xAxis: run.to },
       ]),
   };
