@@ -441,6 +441,17 @@ describe('alerting 集成测试 - AlertManager', () => {
       expect(active).toHaveLength(0);
     });
 
+    it('SEARCHING（正在锁星）不应报「天线未连接」', async () => {
+      // 回归: 旧判据是 state !== 'ONLINE'，刚开始搜星的家庭网络会被判成
+      // critical「天线未连接」；恶劣天气导致 SNR 掉到噪声底时也会触发，
+      // 和 frequent_searching 双报。只有 OFFLINE 才是真的离线。
+      const data = createMockTelemetry({ state: 'SEARCHING', uptime: 3600 });
+      await manager.checkTelemetry(data);
+
+      const active = manager.getActiveAlerts();
+      expect(active.some((a) => a.alert_type === 'dish_offline')).toBe(false);
+    });
+
     it('离线触发 critical 告警', async () => {
       const data = createMockTelemetry({ state: 'OFFLINE' });
 

@@ -118,3 +118,60 @@ expect(healthy.popPingDropRate).toBe(0);   // 修复前是 0.6
 **任何"缺失就沿用上一帧"的兜底，都要先问一句：这个字段的 0 是不是合法值？**
 在 `defaults: false` 的 proto3 世界里，缺失恰恰意味着 0。
 量值必须归零，只有"空才异常"的分类字段（字符串/布尔/结构体）才适合带旧值。
+
+---
+
+## 7. 追加修复：连接状态语义与 `dish_offline` 判据
+
+跟进同一轮排查发现的第二层问题。
+
+### 现象
+
+激活 DishyMock 的 `weather` 场景（丢包 12% + `isSnrAboveNoiseFloor=false`
++ 全图 SNR 降到 8 dB）后，SLMonitor 冒出三条告警：
+
+```
+high_packet_loss   critical   丢包率 12.0%          ← 合理
+dish_offline       critical   天线未连接            ← 误报（下行 143 Mbps）
+frequent_searching warning    天线持续搜索卫星       ← 误报（同一根因）
+```
+
+而真正该报的 `severe_weather` **反而漏报**（它要求 `state === 'ONLINE'`）。
+
+### 根因（两层）
+
+1. **状态判定跑在 SNR 赋值之前**：`parseStatus` 末尾就调 `deriveState`，
+   而 `current` 固件没有 `snr` 字段（真实 SNR 在随后拉取的遮挡图里），
+   于是 `snrOk || snr > 0` 的兜底永远拿不到真实值 ⇒ 一律落到 SEARCHING。
+2. **判据本身也过宽**：`dish_offline` 用 `state !== 'ONLINE'`，把 BOOTING
+   （刚开机）、SEARCHING（正在锁星）也算成「天线未连接」并给到 critical；
+   而 `frequent_searching` 又对 SEARCHING 单独报一次 ⇒ 同一件事报两遍。
+
+### 修法
+
+- **状态只看「有没有数据」**，不再用 SNR 否决连通性：
+  ```
+  uptime < 60s                → BOOTING
+  有下行吞吐                   → ONLINE        ← 数据在流动就是通的
+  无下行、路由器还连着         → SEARCHING     ← 正常锁星过程
+  无下行、连路由器都看不到     → OFFLINE       ← 设备在线却不在服务
+  ```
+  SNR 是**质量**指标，不参与**连通性**判定 —— 恶劣天气下 SNR 掉到噪声底，
+  但下行 140 Mbps，链路显然通着。
+- **`dish_offline` 判据收窄为 `state === 'OFFLINE'`**，描述改为
+  「设备在线但未对外提供服务」，与 `frequent_searching` 不再重叠。
+- 去掉 `getTelemetry` 里上一轮加的那次「拿到遮挡图 SNR 后复核」——
+  状态已不再依赖 SNR，复核成为死代码。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `vitest run` | 20 文件 / **301 测试全过**（新增 6 项状态语义用例） |
+| 重启后采集 | `state=ONLINE` |
+| weather 场景活跃时 | 活跃告警只剩 `high_packet_loss` + `severe_weather`，两条误报自动 resolve |
+
+新增回归用例：
+- `manager.test.ts`：SEARCHING **不应**报 `dish_offline`
+- `dishClient.desired.test.ts`：有下行 ⇒ ONLINE ／ 无下行+路由器 ⇒ SEARCHING ／
+  无下行+无路由器 ⇒ OFFLINE ／ uptime<60 ⇒ BOOTING ／ 恶劣天气仍判 ONLINE

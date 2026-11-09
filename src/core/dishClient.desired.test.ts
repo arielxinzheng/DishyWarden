@@ -172,3 +172,61 @@ describe('parseStatus —— 物理量缺失必须归零，不能沿用上一帧
     expect(rebooted.uptime).toBe(0);
   });
 });
+
+/**
+ * ===== 连接状态推导：必须分清 SEARCHING 与 OFFLINE =====
+ *
+ * 旧实现把所有"无下行"的情况都算成 SEARCHING，于是
+ * dish_offline（判据 state !== 'ONLINE'）与 frequent_searching（state === 'SEARCHING'）
+ * 会对同一件事双报；而真正该报的 severe_weather 又要求 state === 'ONLINE' 反而漏报。
+ */
+describe('deriveState（经由 parseStatus）—— 状态语义', () => {
+  const online = (over: Record<string, unknown> = {}) => ({
+    downlinkThroughputBps: 140e6,
+    deviceState: { uptimeS: 3600 },
+    isSnrAboveNoiseFloor: true,
+    ...over,
+  });
+
+  it('有下行且有 SNR 证据 ⇒ ONLINE', () => {
+    const { parse } = mapper();
+    expect(parse(online()).state).toBe('ONLINE');
+  });
+
+  it('无下行但路由器还连着 ⇒ SEARCHING（正在锁星，属正常过程）', () => {
+    const { parse } = mapper();
+    const t = parse({
+      downlinkThroughputBps: 0,
+      connectedRouters: ['router-1'],
+      deviceState: { uptimeS: 3600 },
+    });
+    expect(t.state).toBe('SEARCHING');
+  });
+
+  it('无下行且看不到任何路由器 ⇒ OFFLINE（设备在线却不在服务）', () => {
+    const { parse } = mapper();
+    const t = parse({
+      downlinkThroughputBps: 0,
+      deviceState: { uptimeS: 3600 },
+    });
+    expect(t.state).toBe('OFFLINE');
+  });
+
+  it('刚开机（uptime < 60s）优先判 BOOTING，不报离线', () => {
+    const { parse } = mapper();
+    const t = parse({ downlinkThroughputBps: 0, deviceState: { uptimeS: 12 } });
+    expect(t.state).toBe('BOOTING');
+  });
+
+  it('恶劣天气（丢包 12% + SNR 低于噪声底，但下行仍在）⇒ ONLINE', () => {
+    const { parse } = mapper();
+    const t = parse({
+      popPingDropRate: 0.12,
+      downlinkThroughputBps: 140e6,
+      isSnrAboveNoiseFloor: false,
+      deviceState: { uptimeS: 90970 },
+    });
+    // 关键: 没有真实 snr 字段时，snr=0，但下行健康 ⇒ 不能判成搜星/离线
+    expect(t.state).toBe('ONLINE');
+  });
+});

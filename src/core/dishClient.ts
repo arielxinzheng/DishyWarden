@@ -261,16 +261,7 @@ export class DishClient {
         telemetry.obstructionMapTimestamp = undefined;
       }
 
-      // ⚠️ 必须在这里**复核**一次状态。
-      //
-      // `parseStatus` 判状态时 `status.snr` 还不存在 —— `current` 固件根本没有
-      // 这个字段（只给 `isSnrAboveNoiseFloor` 布尔量），真实 SNR 在上一步的
-      // 遮挡图里。若不复核，`isSnrAboveNoiseFloor=false` 的场合（典型: 恶劣天气
-      // 导致 SNR 低于噪声底）会被判成 SEARCHING，进而误报：
-      //   dish_offline（critical, "天线未连接"）—— 实际下行仍有 140 Mbps
-      //   frequent_searching（warning, "持续搜星"）—— 实际链路是通的
-      // 而真正应该触发的 severe_weather 因为要求 state === 'ONLINE' 反而漏报。
-      telemetry.state = this.deriveState(status, telemetry);
+      // 状态判定已不再依赖 SNR（见 deriveState 注释），因此这里无需复核。
 
       this.lastTelemetry = telemetry;
       return telemetry;
@@ -486,8 +477,7 @@ export class DishClient {
       dishIssues,
     };
 
-    // 帧内初判。⚠️ 这一步跑的时候还拿不到真实 SNR —— 它在遮挡图里，
-    // 由 `getTelemetry` 随后拉取。所以 getTelemetry 拿到遮挡图 SNR 后会**复核**一次。
+    // 连接状态只看「有没有数据」，不看 SNR（质量指标不该否决连通性）
     telemetry.state = this.deriveState(status, telemetry);
     return telemetry;
   }
@@ -515,24 +505,33 @@ export class DishClient {
       return 'BOOTING';
     }
 
-    // 有下行带宽说明链路是通的
+    // 有下行吞吐 ⇒ 数据确实在流动 ⇒ 链路是通的。
+    //
+    // 注意: **不要再用 SNR 去否决连接状态**。SNR 是质量指标，不是连通性指标：
+    // 恶劣天气下 SNR 掉到噪声底、`isSnrAboveNoiseFloor=false`，但下行仍有 140 Mbps，
+    // 链路显然通着。上一版用 `snrOk || snr > 0` 兜底，而 current 固件的
+    // dishGetStatus 压根没有 snr 字段（真实 SNR 在遮挡图里），于是这类场景
+    // 被判成 SEARCHING ⇒ 误报「天线未连接」+「持续搜星」。
     const hasDownlink = telemetry.downlinkThroughputBps > 0;
+    if (hasDownlink) {
+      return 'ONLINE';
+    }
+
     const hasRouter = Array.isArray(status.connectedRouters)
       ? (status.connectedRouters as unknown[]).length > 0
       : false;
 
-    if (!hasDownlink && !hasRouter) {
+    // 无下行但路由器还连着 ⇒ 天线在正常锁星，别升级成故障
+    if (hasRouter) {
       return 'SEARCHING';
     }
 
-    // SNR 高于噪声底 (isSnrAboveNoiseFloor 是设备直接给的布尔量)
-    const snrOk = status.isSnrAboveNoiseFloor === true;
-    if (snrOk || telemetry.snr > 0) {
-      return 'ONLINE';
-    }
-
-    return 'SEARCHING';
+    // 无下行、也看不到任何已连接路由器 —— 设备能应答 gRPC（否则这一帧根本
+    // 拿不到 status），但对外什么都传不出来。这才是「离线」。
+    // 开机早期已由 BOOTING 拦住，所以这里按 uptime 区分初装与真离线。
+    return telemetry.uptime >= 60 ? 'OFFLINE' : 'SEARCHING';
   }
+
   
   /**
    * 模拟卫星切换: 真实 Starlink 约每 15s 交接一次, 这里用 2 分钟一轮,

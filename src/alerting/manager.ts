@@ -95,9 +95,13 @@ export class AlertManager extends EventEmitter {
         name: '天线设备离线',
         enabled: true,
         severity: 'critical',
-        condition: (data) => data.state !== 'ONLINE',
+        // ⚠️ 只认 OFFLINE。旧判据是 `state !== 'ONLINE'`，把 BOOTING(刚开机)
+        // 和 SEARCHING(正在锁星) 也当成「天线未连接」并升级成 critical ——
+        // 这两者都是正常过程；SEARCHING 另有 frequent_searching 规则负责，
+        // 两条同时报等于同一件事报警两遍。
+        condition: (data) => data.state === 'OFFLINE',
         summary: () => 'Starlink 天线未连接',
-        description: (data) => `天线状态: ${data.state}, 无法连接到卫星网络`,
+        description: (data) => `天线状态: ${data.state}，设备在线但未对外提供服务`,
         evidence: (data) => ({
           state: data.state,
           uptime_seconds: data.uptime || 0,
