@@ -121,7 +121,7 @@ export default function ObstructionMap() {
         <h1 className="text-3xl font-bold text-white">{t('obstruction:page.title')}</h1>
 
         {/* 全局语言切换（需求指定的「右上角」位置） */}
-        <LanguageSwitcher variant="label" />
+        <LanguageSwitcher variant="icon" />
       </div>
 
       {/* 数据来源与新鲜度 —— 模拟图和实测图视觉几乎一样, 必须标出来 */}

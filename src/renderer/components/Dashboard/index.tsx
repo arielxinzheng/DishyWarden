@@ -496,7 +496,7 @@ export default function Dashboard() {
           </a>
 
           {/* 全局语言切换（需求指定的「右上角」位置） */}
-          <LanguageSwitcher variant="label" />
+          <LanguageSwitcher variant="icon" />
         </div>
       </div>
 

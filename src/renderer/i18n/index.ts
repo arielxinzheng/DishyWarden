@@ -52,11 +52,29 @@ export const NAMESPACES = [
 export type Namespace = (typeof NAMESPACES)[number];
 
 /** 默认语言（需求指定简体中文），缺失时统一降级到 en */
-export const DEFAULT_LANGUAGE: LanguageCode = 'zh-CN';
 export const FALLBACK_LANGUAGE: LanguageCode = 'en';
 
-/** localStorage 键名：用户显式选择过语言后一直沿用 */
-export const LANGUAGE_STORAGE_KEY = 'dishywarden-language';
+/**
+ * localStorage 键名。
+ *
+ * 用的是 `i18next-browser-languagedetector` 的**默认键** `i18nextLng`
+ * （插件自己的读写约定），这样任何按标准约定存语言的工具/插件都能互通。
+ */
+export const LANGUAGE_STORAGE_KEY = 'i18nextLng';
+
+/** 早期版本用过自定义键，迁移一次以免老用户的选择丢失 */
+const LEGACY_LANGUAGE_KEY = 'dishywarden-language';
+
+function migrateLegacyLanguageKey(): void {
+  try {
+    const legacy = localStorage.getItem(LEGACY_LANGUAGE_KEY);
+    if (legacy && !localStorage.getItem(LANGUAGE_STORAGE_KEY)) {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, legacy);
+    }
+  } catch {
+    // localStorage 不可用（隐私模式等）—— 忽略，走浏览器语言探测
+  }
+}
 
 const localeModules = import.meta.glob('../../../locales/*/*.json');
 
@@ -100,6 +118,8 @@ const asyncChunkBackend = {
   },
 };
 
+migrateLegacyLanguageKey();
+
 export const i18nReady = i18n
   .use(LanguageDetector)
   .use(asyncChunkBackend)
@@ -112,10 +132,15 @@ export const i18nReady = i18n
     // 只在"当前语言"上加载，不做 zh → zh-CN 的隐式展开（我们只维护显式语言包）
     load: 'currentOnly',
     detection: {
-      // 先看用户选择，再退到浏览器语言
+      // ① 用户显式选择（localStorage `i18nextLng`）→ ② 浏览器/系统语言（navigator）
+      // 只要用户切过一次，localStorage 永远优先（detector 的 order 就是优先级）
       order: ['localStorage', 'navigator'],
       lookupLocalStorage: LANGUAGE_STORAGE_KEY,
       caches: ['localStorage'],
+      // 探测器拿到 `zh-Hans` / `ja-JP` / `ar` 这类标记时，先收敛到受支持的语言码；
+      // 不支持的语言（如阿拉伯语）直接落到 `en`，不会去加载不存在的语言包。
+      // ⚠️ 这个钩子是 **detector 插件**的选项（i18next v24 运行时本身没有同名顶层选项）。
+      convertDetectedLanguage: (lng: string) => resolveLanguage(lng),
     },
     interpolation: {
       // React 自己会转义，i18next 再转一次会把 < 变成 &lt;
@@ -150,20 +175,39 @@ i18n.on('languageChanged', (lng) => {
 // 初始化时（首次探测出语言后）也要写一次标题
 void i18nReady.then(() => syncDocumentTitle());
 
-/** 把浏览器探测出的 `zh` / `zh-Hans` 之类收敛到受支持的显式语言码 */
-export function normalizeLanguage(lng: string | undefined): LanguageCode {
-  if (!lng) return DEFAULT_LANGUAGE;
-    const lower = lng.toLowerCase();
-  if (lower === 'zh' || lower.startsWith('zh-')) {
-    return lower.includes('tw') || lower.includes('hk') || lower.includes('hant')
-      ? FALLBACK_LANGUAGE // 繁体目前未提供，降级英文而不是显示空白
-      : 'zh-CN';
-  }
+/**
+ * 把任意语言标记（`zh-Hans`、`ja-JP`、`ar`…）解析成**受支持的**语言码。
+ *
+ * 判定顺序与需求一致：
+ *   1. 用户显式选择（localStorage `i18nextLng`）—— detector 负责，优先级最高；
+ *   2. 浏览器 / 系统语言（`navigator.language`）—— 由本函数收敛到受支持的码；
+ *   3. 不支持的语言（如阿拉伯语）⇒ **静默降级到 `en`**，不报错、不露键名。
+ *
+ * 纯函数、无副作用，方便单测。
+ */
+export function resolveLanguage(detected: string | undefined | null): LanguageCode {
+  if (!detected) return FALLBACK_LANGUAGE;
+  const lower = detected.toLowerCase().trim();
+
+  // 精确命中（含 zh-cn 这类带地区码的写法）
   const exact = SUPPORTED_LANGUAGES.find((l) => l.code.toLowerCase() === lower);
   if (exact) return exact.code;
+
+  if (lower === 'zh' || lower.startsWith('zh-')) {
+    // 繁体目前没有语言包 ⇒ 按"不支持"处理，静默降级英文
+    const traditional = ['tw', 'hk', 'mo', 'hant'].some((t) => lower.includes(t));
+    return traditional ? FALLBACK_LANGUAGE : 'zh-CN';
+  }
+
+  // 只剩语种部分：ja-JP → ja、ko-KR → ko、vi-VN → vi
   const base = lower.split('-')[0];
   const byBase = SUPPORTED_LANGUAGES.find((l) => l.code.split('-')[0] === base);
-  return (byBase?.code ?? DEFAULT_LANGUAGE) as LanguageCode;
+  return (byBase?.code ?? FALLBACK_LANGUAGE) as LanguageCode;
+}
+
+/** 兼容旧调用点：显示当前语言时用的收敛函数 */
+export function normalizeLanguage(lng: string | undefined): LanguageCode {
+  return resolveLanguage(lng);
 }
 
 export default i18n;

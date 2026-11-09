@@ -304,7 +304,7 @@ export default function Settings() {
           </Button>
 
           {/* 全局语言切换（需求指定的「右上角」位置） */}
-          <LanguageSwitcher variant="label" />
+          <LanguageSwitcher variant="icon" />
         </div>
       </div>
 
@@ -331,7 +331,7 @@ export default function Settings() {
               <div className="text-sm font-medium">{t('settings:appearance.language')}</div>
               <p className="text-xs text-muted-foreground">{t('settings:appearance.language_hint')}</p>
             </div>
-            <LanguageSwitcher />
+            <LanguageSwitcher variant="label" />
           </div>
         </CardContent>
       </Card>

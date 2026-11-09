@@ -142,3 +142,48 @@ i18next 的键是运行期字符串，TypeScript 完全管不到 —— 拼错�
    之后切语言不会重命名已有节点。
 4. 瞬时提示（保存成功/失败、错误横幅）在**触发时**按当时语言生成，切语言不会重译已显示的旧提示。
 5. 尚未提供繁体中文（`zh-TW`）：探测到会降级到英文而不是显示空白。
+
+---
+
+## 10. 追加：语言自动嗅探 + 切换器 UI 收敛
+
+### 检测优先级（严格按需求）
+
+| 优先级 | 来源 | 实现 |
+|---|---|---|
+| ① 用户显式选择 | localStorage `i18nextLng` | `detection.order: ['localStorage', 'navigator']` + `lookupLocalStorage` |
+| ② 浏览器/系统语言 | `navigator.language` | 同上，第二顺位 |
+| ③ 未支持的语言 | —— | `resolveLanguage()` 静默降级 **en**，不报错、不露键名 |
+
+- 存储键改用 `i18next-browser-languagedetector` 的**默认键 `i18nextLng`**（原先是自定义键），
+  任何按标准约定存语言的工具都能互通；旧键 `dishywarden-language` 会**自动迁移**一次，老用户的选择不丢。
+- 语言标记收敛由 detector 的 `detection.convertDetectedLanguage` 完成（注意这是**插件**的选项，
+  i18next v24 运行时本身没有同名顶层选项）：
+  `zh`/`zh-Hans` → `zh-CN`、`ja-JP` → `ja`、`ko-KR` → `ko`、`vi-VN` → `vi`、
+  `zh-TW`/`zh-Hant`（无语言包）与 `ar`/`fr` 等一律 → **`en`**。
+
+实测（Playwright 改浏览器 locale）：
+
+| 场景 | 结果 |
+|---|---|
+| 系统 zh-CN / ja-JP / ko-KR / vi-VN | 分别进入中文 / 日文 / 韩文 / 越南文 ✓ |
+| 系统 ar-SA、fr-FR（无语言包） | **静默降级英文**，无报错、无键名 ✓ |
+| 系统 ar-SA + 用户此前选了 ja | **ja**（用户选择优先）✓ |
+| 系统 zh-CN + 用户此前选了 ko | **ko** ✓ |
+| 旧键 `dishywarden-language=vi` | 自动迁移到 `i18nextLng=vi` ✓ |
+
+### 切换器 UI 收敛
+
+原来的长条 `<select>`（宽度随语言名变化，`简体中文` 与 `Tiếng Việt` 长度差很多）换成
+**🌐 图标按钮 + 悬浮/点击展开的下拉菜单**：
+
+- 页面右上角：**32×32 纯图标按钮**（原来 96px 宽的下拉），省出横向空间；
+- 侧栏 / 设置页：图标 + 当前语言名（保留可读性）；
+- 交互：hover 即开、点击可固定、Esc 关闭、点击别处关闭、当前语言带 ✓；
+- 无障碍：`aria-haspopup` / `aria-expanded` / `role=menu` / `role=menuitemradio` + `aria-checked`。
+
+### 新增测试
+
+`src/renderer/i18n/language.test.ts`（8 例）：纯函数 `resolveLanguage()` 的收敛规则 ——
+精确命中、大小写、中文各种写法、繁体降级、带地区码收敛、未支持语言降级、空值降级、
+结果必为受支持语言码。

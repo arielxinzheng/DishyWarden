@@ -53,7 +53,7 @@ export default function Layout() {
 
         {/* 语言切换器：全局可达，结果持久化到 localStorage */}
         <div className="pt-4 pb-3 border-t border-ink-700">
-          <LanguageSwitcher className="w-full justify-between" />
+          <LanguageSwitcher variant="label" className="w-full justify-between" />
         </div>
 
         <div className="pt-3 border-t border-ink-700 text-xs text-muted-foreground">
