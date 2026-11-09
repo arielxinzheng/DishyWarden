@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -38,20 +39,21 @@ interface ProbeNodesCardProps {
   onTraceTargetChange: (target: string) => void;
 }
 
-const TYPE_LABEL: Record<ProbeType, string> = {
-  icmp: 'ICMP',
-  dns: 'DNS',
+/** 探测类型显示名对应的 i18n 键(ICMP/DNS/TLS 本身是协议名, 只有「双轨」需要翻译) */
+const TYPE_LABEL_KEY: Record<ProbeType, string> = {
+  icmp: 'settings:probes.type_icmp',
+  dns: 'settings:probes.type_dns',
   // dns_dual：同时探「用户态解析器」和「基准解析器(8.8.8.8)」，
   // 用来区分「本机 DNS 坏了」和「上游 DNS 坏了」
-  dns_dual: 'DNS·双轨',
-  tls: 'TLS',
+  dns_dual: 'settings:probes.type_dns_dual',
+  tls: 'settings:probes.type_tls',
 };
 
-const TYPE_OPTIONS: { value: ProbeType; label: string }[] = [
-  { value: 'icmp', label: 'ICMP' },
-  { value: 'dns', label: 'DNS' },
-  { value: 'dns_dual', label: 'DNS·双轨' },
-  { value: 'tls', label: 'TLS' },
+const TYPE_OPTIONS: { value: ProbeType; labelKey: string }[] = [
+  { value: 'icmp', labelKey: 'settings:probes.type_icmp' },
+  { value: 'dns', labelKey: 'settings:probes.type_dns' },
+  { value: 'dns_dual', labelKey: 'settings:probes.type_dns_dual' },
+  { value: 'tls', labelKey: 'settings:probes.type_tls' },
 ];
 
 /** 生成一个短 id */
@@ -65,6 +67,7 @@ export function ProbeNodesCard({
   onNodesChange,
   onTraceTargetChange,
 }: ProbeNodesCardProps) {
+  const { t } = useTranslation();
   const [states, setStates] = useState<ProbeNodeState[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProbeNodeConfig | null>(null);
@@ -114,7 +117,7 @@ export function ProbeNodesCard({
   const addNode = () => {
     const node: ProbeNodeConfig = {
       id: newId(),
-      name: '新探针',
+      name: t('settings:probes.default_name'),
       target: '',
       type: 'icmp',
       intervalSec: 60,
@@ -153,52 +156,52 @@ export function ProbeNodesCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Radar className="w-4 h-4 text-accent-green" />
-          探针节点管理 (Probe Node Management)
+          {t('settings:probes.title')}
         </CardTitle>
         <CardDescription>
-          配置网络连通性探测目标, 主动探测各层连通性, 辅助故障定位
+          {t('settings:probes.description')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* 路由跟踪目标 */}
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">路由跟踪目标 (Traceroute Target)</label>
+          <label className="text-sm font-medium">{t('settings:probes.trace_target')}</label>
           <Input
             value={traceTarget}
             onChange={(e) => onTraceTargetChange(e.target.value)}
-            placeholder="example.com"
+            placeholder={t('settings:probes.trace_target_placeholder')}
           />
           <p className="text-xs text-muted-foreground">
-            仪表盘「路由跟踪」卡追踪的目标。留空则使用 example.com。
+            {t('settings:probes.trace_target_hint')}
           </p>
         </div>
 
         {/* 节点列表 */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">探测节点列表</div>
+            <div className="text-sm font-medium">{t('settings:probes.node_list')}</div>
             <Button variant="outline" size="sm" onClick={addNode}>
               <Plus className="w-4 h-4 mr-1" />
-              新增探针
+              {t('settings:probes.add')}
             </Button>
           </div>
 
           {nodes.length === 0 ? (
             <div className="text-xs text-muted-foreground py-6 text-center border border-dashed border-border rounded-md">
-              暂无探针节点, 点「新增探针」添加
+              {t('settings:probes.empty')}
             </div>
           ) : (
             <div className="border border-border rounded-md overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
-                    <th className="text-left font-medium px-3 py-2">节点名称</th>
-                    <th className="text-left font-medium px-3 py-2">影响对象</th>
-                    <th className="text-left font-medium px-3 py-2 w-16">类型</th>
-                    <th className="text-left font-medium px-3 py-2 w-16">间隔</th>
-                    <th className="text-left font-medium px-3 py-2 w-16">超时</th>
-                    <th className="text-left font-medium px-3 py-2 w-28">状态</th>
-                    <th className="text-right font-medium px-3 py-2 w-24">操作</th>
+                    <th className="text-left font-medium px-3 py-2">{t('settings:probes.col_name')}</th>
+                    <th className="text-left font-medium px-3 py-2">{t('settings:probes.col_target')}</th>
+                    <th className="text-left font-medium px-3 py-2 w-16">{t('settings:probes.col_type')}</th>
+                    <th className="text-left font-medium px-3 py-2 w-16">{t('settings:probes.col_interval')}</th>
+                    <th className="text-left font-medium px-3 py-2 w-16">{t('settings:probes.col_timeout')}</th>
+                    <th className="text-left font-medium px-3 py-2 w-28">{t('settings:probes.col_status')}</th>
+                    <th className="text-right font-medium px-3 py-2 w-24">{t('settings:probes.col_actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -229,7 +232,7 @@ export function ProbeNodesCard({
                             <Input
                               value={draft.target}
                               onChange={(e) => setDraft({ ...draft, target: e.target.value })}
-                              placeholder="IP 或域名"
+                              placeholder={t('settings:probes.target_placeholder')}
                               className="h-7 text-xs font-mono"
                             />
                           ) : (
@@ -246,11 +249,11 @@ export function ProbeNodesCard({
                               className="bg-transparent border border-border rounded px-1.5 py-0.5 text-xs"
                             >
                               {TYPE_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>{o.label}</option>
+                                <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
                               ))}
                             </select>
                           ) : (
-                            <span className="text-slate-400">{TYPE_LABEL[node.type]}</span>
+                            <span className="text-slate-400">{t(TYPE_LABEL_KEY[node.type])}</span>
                           )}
                         </td>
 
@@ -285,16 +288,18 @@ export function ProbeNodesCard({
                         {/* 状态 */}
                         <td className="px-3 py-2">
                           {!node.enabled ? (
-                            <span className="text-muted-foreground">停用</span>
+                            <span className="text-muted-foreground">{t('settings:probes.status_disabled')}</span>
                           ) : !st?.last ? (
-                            <span className="text-muted-foreground">未探测</span>
+                            <span className="text-muted-foreground">{t('settings:probes.not_probed')}</span>
                           ) : st.last.ok ? (
                             <span className="text-accent-green">
-                              {st.last.rttMs !== null ? `${st.last.rttMs.toFixed(0)}ms` : '可达'}
+                              {st.last.rttMs !== null ? `${st.last.rttMs.toFixed(0)}ms` : t('settings:probes.reachable')}
                             </span>
                           ) : (
                             <span className="text-red-400" title={st.last.error}>
-                              不可达{st.consecutiveFailures > 1 ? ` ×${st.consecutiveFailures}` : ''}
+                              {st.consecutiveFailures > 1
+                                ? t('settings:probes.unreachable_failures', { value: st.consecutiveFailures })
+                                : t('settings:probes.unreachable')}
                             </span>
                           )}
                         </td>
@@ -304,10 +309,10 @@ export function ProbeNodesCard({
                           <div className="flex items-center justify-end gap-1">
                             {editing && draft ? (
                               <>
-                                <Button variant="ghost" size="sm" onClick={commitEdit} title="保存">
+                                <Button variant="ghost" size="sm" onClick={commitEdit} title={t('settings:probes.save_title')}>
                                   <Save className="w-3.5 h-3.5" />
                                 </Button>
-                                <Button variant="ghost" size="sm" onClick={cancelEdit} title="取消">
+                                <Button variant="ghost" size="sm" onClick={cancelEdit} title={t('common:cancel')}>
                                   <X className="w-3.5 h-3.5" />
                                 </Button>
                               </>
@@ -318,34 +323,34 @@ export function ProbeNodesCard({
                                   size="sm"
                                   onClick={() => testNode(node.id)}
                                   disabled={testingId === node.id}
-                                  title="立即测试"
+                                  title={t('settings:probes.test_now')}
                                 >
                                   {testingId === node.id
                                     ? <RotateCw className="w-3.5 h-3.5 animate-spin" />
                                     : <CheckCircle className="w-3.5 h-3.5" />}
                                 </Button>
-                                <Button variant="ghost" size="sm" onClick={() => startEdit(node)} title="编辑">
+                                <Button variant="ghost" size="sm" onClick={() => startEdit(node)} title={t('settings:probes.edit')}>
                                   <Pencil className="w-3.5 h-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => toggleEnabled(node.id)}
-                                  title={node.enabled ? '停用' : '启用'}
+                                  title={node.enabled ? t('settings:probes.disable') : t('settings:probes.enable')}
                                 >
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
                                     node.enabled
                                       ? 'border-accent-green/40 text-accent-green'
                                       : 'border-border text-muted-foreground'
                                   }`}>
-                                    {node.enabled ? '启用' : '停用'}
+                                    {node.enabled ? t('settings:probes.status_enabled') : t('settings:probes.status_disabled')}
                                   </span>
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => removeNode(node.id)}
-                                  title="删除"
+                                  title={t('settings:probes.delete')}
                                 >
                                   <Trash2 className="w-3.5 h-3.5 text-red-400/70 hover:text-red-400" />
                                 </Button>
@@ -362,8 +367,7 @@ export function ProbeNodesCard({
           )}
 
           <p className="text-xs text-muted-foreground">
-            ICMP 探测用 ping 命令; DNS 探测解析域名; TLS 探测握手并校验证书。
-            改动后需点顶部「保存」才会生效。
+            {t('settings:probes.footer')}
           </p>
         </div>
       </CardContent>

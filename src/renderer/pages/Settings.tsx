@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -11,8 +12,10 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin } from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 export default function Settings() {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -114,9 +117,9 @@ export default function Settings() {
       // 保存探针配置(节点列表 + 路由跟踪目标)
       await window.electronAPI.updateProbeConfig(config.probe);
 
-      setMessage({ type: 'success', text: '配置已保存' });
+      setMessage({ type: 'success', text: t('settings:save.success') });
     } catch (error) {
-      setMessage({ type: 'error', text: '保存失败: ' + (error as Error).message });
+      setMessage({ type: 'error', text: t('settings:save.failed', { error: (error as Error).message }) });
     } finally {
       setSaving(false);
     }
@@ -129,12 +132,17 @@ export default function Settings() {
     try {
       const result = await window.electronAPI.checkGrafanaConnection();
       if (result.connected) {
-        setMessage({ type: 'success', text: 'Grafana 连接成功' });
+        setMessage({ type: 'success', text: t('settings:grafana.check_success') });
       } else {
-        setMessage({ type: 'error', text: 'Grafana 连接失败: ' + (result.error || '未知错误') });
+        setMessage({
+          type: 'error',
+          text: t('settings:grafana.check_failed', {
+            error: result.error || t('settings:grafana.unknown_error'),
+          }),
+        });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: '检查失败: ' + (error as Error).message });
+      setMessage({ type: 'error', text: t('settings:grafana.check_error', { error: (error as Error).message }) });
     } finally {
       setGrafanaChecking(false);
     }
@@ -151,30 +159,35 @@ export default function Settings() {
       if (result.success) {
         setMessage({
           type: 'success',
-          text: `Grafana 配置成功! Dashboard URL: ${result.dashboardUrl}`,
+          text: t('settings:grafana.provision_success', { url: result.dashboardUrl }),
         });
       } else {
-        setMessage({ type: 'error', text: '配置失败: ' + (result.error || '未知错误') });
+        setMessage({
+          type: 'error',
+          text: t('settings:grafana.provision_failed', {
+            error: result.error || t('settings:grafana.unknown_error'),
+          }),
+        });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: '配置失败: ' + (error as Error).message });
+      setMessage({ type: 'error', text: t('settings:grafana.provision_failed', { error: (error as Error).message }) });
     } finally {
       setGrafanaProvisioning(false);
     }
   };
 
   const handleReset = async () => {
-    if (!window.electronAPI || !confirm('确定要重置所有配置为默认值吗?')) return;
+    if (!window.electronAPI || !confirm(t('settings:save.reset_confirm'))) return;
 
     setSaving(true);
     try {
       const result = await window.electronAPI.resetConfig();
       if (result.requiresRestart) {
-        setMessage({ type: 'success', text: '配置已重置,请重启应用生效' });
+        setMessage({ type: 'success', text: t('settings:save.reset_success') });
       }
       await loadConfig();
     } catch (error) {
-      setMessage({ type: 'error', text: '重置失败: ' + (error as Error).message });
+      setMessage({ type: 'error', text: t('settings:save.reset_failed', { error: (error as Error).message }) });
     } finally {
       setSaving(false);
     }
@@ -183,7 +196,7 @@ export default function Settings() {
   // 获取当前地理位置
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setMessage({ type: 'error', text: '您的浏览器不支持地理定位功能,请手动输入经纬度' });
+      setMessage({ type: 'error', text: t('settings:location.not_supported') });
       return;
     }
 
@@ -197,20 +210,23 @@ export default function Settings() {
         setLatitude(lat);
         setLongitude(lon);
         setGeoLoading(false);
-        setMessage({ type: 'success', text: `已获取当前位置: ${lat}, ${lon}。请点击"保存位置"按钮保存。` });
+        setMessage({
+          type: 'success',
+          text: t('settings:location.got_position', { lat, lon }),
+        });
       },
       (error) => {
         setGeoLoading(false);
-        let errorMsg = '获取位置失败';
+        let errorMsg = t('settings:location.fetch_failed');
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            errorMsg = '用户拒绝了地理定位请求。请手动输入经纬度或在浏览器设置中允许定位权限后重试。';
+            errorMsg = t('settings:location.permission_denied');
             break;
           case error.POSITION_UNAVAILABLE:
-            errorMsg = '位置信息不可用,请手动输入经纬度';
+            errorMsg = t('settings:location.position_unavailable');
             break;
           case error.TIMEOUT:
-            errorMsg = '获取位置超时,请重试或手动输入经纬度';
+            errorMsg = t('settings:location.timeout');
             break;
         }
         setMessage({ type: 'error', text: errorMsg });
@@ -225,22 +241,22 @@ export default function Settings() {
 
   // 保存位置信息
   const handleSaveLocation = () => {
-    console.log('保存位置被点击', { latitude, longitude });
+    console.log('Save location clicked', { latitude, longitude });
     
     const lat = parseFloat(latitude);
     const lon = parseFloat(longitude);
 
-    console.log('解析后的值', { lat, lon });
+    console.log('Parsed values', { lat, lon });
 
     // 验证经纬度范围
     if (isNaN(lat) || lat < -90 || lat > 90) {
-      const errorMsg = `纬度必须在 -90 到 90 之间 (当前值: ${latitude})`;
+      const errorMsg = t('settings:location.lat_invalid', { value: latitude });
       console.error(errorMsg);
       setMessage({ type: 'error', text: errorMsg });
       return;
     }
     if (isNaN(lon) || lon < -180 || lon > 180) {
-      const errorMsg = `经度必须在 -180 到 180 之间 (当前值: ${longitude})`;
+      const errorMsg = t('settings:location.lon_invalid', { value: longitude });
       console.error(errorMsg);
       setMessage({ type: 'error', text: errorMsg });
       return;
@@ -249,12 +265,12 @@ export default function Settings() {
     // 保存到 localStorage
     localStorage.setItem('terminal_latitude', latitude);
     localStorage.setItem('terminal_longitude', longitude);
-    console.log('保存成功到localStorage');
+    console.log('Saved to localStorage');
     
     // 触发自定义事件通知其他页面位置已更新
     window.dispatchEvent(new CustomEvent('terminal-location-updated'));
     
-    setMessage({ type: 'success', text: '终端位置已保存' });
+    setMessage({ type: 'success', text: t('settings:location.saved') });
   };
 
   // 清除位置信息
@@ -263,28 +279,28 @@ export default function Settings() {
     setLongitude('');
     localStorage.removeItem('terminal_latitude');
     localStorage.removeItem('terminal_longitude');
-    setMessage({ type: 'success', text: '终端位置已清除' });
+    setMessage({ type: 'success', text: t('settings:location.cleared') });
   };
 
   if (loading || !config) {
-    return <div className="p-8">加载中...</div>;
+    return <div className="p-8">{t('common:loading')}</div>;
   }
 
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">设置</h1>
-          <p className="text-muted-foreground mt-1">配置数据采集和告警通知</p>
+          <h1 className="text-3xl font-bold">{t('layout:nav_settings')}</h1>
+          <p className="text-muted-foreground mt-1">{t('settings:subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleReset} disabled={saving}>
             <RotateCcw className="w-4 h-4 mr-2" />
-            重置
+            {t('settings:save.reset')}
           </Button>
           <Button onClick={handleSave} disabled={saving}>
             <Save className="w-4 h-4 mr-2" />
-            {saving ? '保存中...' : '保存'}
+            {saving ? t('settings:save.saving') : t('settings:save.button')}
           </Button>
         </div>
       </div>
@@ -300,16 +316,33 @@ export default function Settings() {
         </Alert>
       )}
 
+      {/* 通用 / 外观分区：语言切换器放在第一项 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('settings:appearance.title')}</CardTitle>
+          <CardDescription>{t('settings:appearance.description')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium">{t('settings:appearance.language')}</div>
+              <p className="text-xs text-muted-foreground">{t('settings:appearance.language_hint')}</p>
+            </div>
+            <LanguageSwitcher />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 数据采集配置 */}
       <Card>
         <CardHeader>
-          <CardTitle>数据采集</CardTitle>
-          <CardDescription>配置 Starlink 设备连接和采集参数</CardDescription>
+          <CardTitle>{t('settings:collector.title')}</CardTitle>
+          <CardDescription>{t('settings:collector.description')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Dish 地址</label>
+              <label className="text-sm font-medium">{t('settings:collector.dish_address')}</label>
               <Input
                 value={config.collector.dishAddress}
                 onChange={(e) =>
@@ -318,12 +351,12 @@ export default function Settings() {
                     collector: { ...config.collector, dishAddress: e.target.value },
                   })
                 }
-                placeholder="192.168.100.1"
+                placeholder={t('settings:collector.dish_address_placeholder')}
               />
-              <p className="text-xs text-muted-foreground">Starlink 终端设备地址</p>
+              <p className="text-xs text-muted-foreground">{t('settings:collector.dish_address_hint')}</p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Dish gRPC 端口</label>
+              <label className="text-sm font-medium">{t('settings:collector.dish_port')}</label>
               <Input
                 type="number"
                 value={config.collector.dishPort}
@@ -339,7 +372,7 @@ export default function Settings() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Router 地址</label>
+              <label className="text-sm font-medium">{t('settings:collector.router_address')}</label>
               <Input
                 value={config.collector.routerAddress}
                 onChange={(e) =>
@@ -348,17 +381,17 @@ export default function Settings() {
                     collector: { ...config.collector, routerAddress: e.target.value },
                   })
                 }
-                placeholder="192.168.100.1"
+                placeholder={t('settings:collector.router_address_placeholder')}
               />
               <p className="text-xs text-muted-foreground">
-                路由器地址（用于 ICMP Ping 探测）
+                {t('settings:collector.router_address_hint')}
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">采集间隔(秒)</label>
+              <label className="text-sm font-medium">{t('settings:collector.interval')}</label>
               <Input
                 type="number"
                 value={config.collector.interval / 1000}
@@ -374,10 +407,10 @@ export default function Settings() {
                 min="10"
                 max="300"
               />
-              <p className="text-xs text-muted-foreground">推荐 30 秒</p>
+              <p className="text-xs text-muted-foreground">{t('settings:collector.interval_hint')}</p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">历史缓冲大小</label>
+              <label className="text-sm font-medium">{t('settings:collector.buffer_size')}</label>
               <Input
                 type="number"
                 value={config.collector.bufferSize}
@@ -388,7 +421,7 @@ export default function Settings() {
                   })
                 }
               />
-              <p className="text-xs text-muted-foreground">保留的历史数据点数</p>
+              <p className="text-xs text-muted-foreground">{t('settings:collector.buffer_size_hint')}</p>
             </div>
           </div>
         </CardContent>
@@ -400,38 +433,38 @@ export default function Settings() {
           <div className="flex items-center gap-2">
             <MapPin className="w-5 h-5" />
             <div>
-              <CardTitle>终端位置 (Terminal Location)</CardTitle>
-              <CardDescription>设置终端设备的地理位置,用于计算卫星仰角和方位角</CardDescription>
+              <CardTitle>{t('settings:location.title')}</CardTitle>
+              <CardDescription>{t('settings:location.description')}</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">纬度 Latitude</label>
+              <label className="text-sm font-medium">{t('settings:location.latitude')}</label>
               <Input
                 type="number"
                 step="0.000001"
                 value={latitude}
                 onChange={(e) => setLatitude(e.target.value)}
-                placeholder="40.050835"
+                placeholder={t('settings:location.latitude_placeholder')}
                 min="-90"
                 max="90"
               />
-              <p className="text-xs text-muted-foreground">范围: -90° 到 +90° (北纬为正)</p>
+              <p className="text-xs text-muted-foreground">{t('settings:location.latitude_range')}</p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">经度 Longitude</label>
+              <label className="text-sm font-medium">{t('settings:location.longitude')}</label>
               <Input
                 type="number"
                 step="0.000001"
                 value={longitude}
                 onChange={(e) => setLongitude(e.target.value)}
-                placeholder="116.296371"
+                placeholder={t('settings:location.longitude_placeholder')}
                 min="-180"
                 max="180"
               />
-              <p className="text-xs text-muted-foreground">范围: -180° 到 +180° (东经为正)</p>
+              <p className="text-xs text-muted-foreground">{t('settings:location.longitude_range')}</p>
             </div>
           </div>
 
@@ -445,22 +478,24 @@ export default function Settings() {
               {geoLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  获取中...
+                  {t('settings:location.fetching')}
                 </>
               ) : (
                 <>
                   <MapPin className="w-4 h-4 mr-2" />
-                  获取当前位置
+                  {t('settings:location.get_current')}
                 </>
               )}
             </Button>
             <Button 
               onClick={handleSaveLocation} 
               disabled={!latitude || !longitude}
-              title={!latitude || !longitude ? '请先输入经纬度或获取当前位置' : '保存终端位置到本地存储'}
+              title={!latitude || !longitude
+                ? t('settings:location.save_disabled_hint')
+                : t('settings:location.save_tooltip')}
             >
               <Save className="w-4 h-4 mr-2" />
-              保存位置
+              {t('settings:location.save')}
             </Button>
             <Button
               variant="outline"
@@ -468,33 +503,33 @@ export default function Settings() {
               disabled={!latitude && !longitude}
             >
               <RotateCcw className="w-4 h-4 mr-2" />
-              清除
+              {t('settings:location.clear')}
             </Button>
           </div>
 
           {/* 常驻提示: 否则按钮灰着时用户不知道为什么要先填经纬度 */}
           {!latitude || !longitude ? (
             <p className="text-xs text-muted-foreground">
-              请先填写上面的纬度和经度, 或点「获取当前位置」自动填充, 然后才能保存。
+              {t('settings:location.need_coords')}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              保存后「卫星雷达」页面会立即按该位置重新计算卫星仰角。
+              {t('settings:location.saved_hint')}
             </p>
           )}
 
           <Alert className="border-blue-500/50 bg-blue-500/10">
             <AlertCircle className="h-4 w-4 text-blue-500" />
             <AlertDescription className="ml-7 text-sm">
-              <strong>使用说明:</strong>
+              <strong>{t('settings:location.usage_title')}</strong>
               <br />
-              1. 点击"获取当前位置"自动填充经纬度(需要浏览器定位权限)
+              1. {t('settings:location.usage_1')}
               <br />
-              2. 或者手动输入经纬度坐标
+              2. {t('settings:location.usage_2')}
               <br />
-              3. 填写完成后点击"保存位置"按钮保存到本地
+              3. {t('settings:location.usage_3')}
               <br />
-              <span className="text-xs opacity-80">数据仅保存在本地浏览器中,不会上传到服务器</span>
+              <span className="text-xs opacity-80">{t('settings:location.privacy')}</span>
             </AlertDescription>
           </Alert>
         </CardContent>
@@ -503,13 +538,13 @@ export default function Settings() {
       {/* 告警阈值 */}
       <Card>
         <CardHeader>
-          <CardTitle>告警阈值</CardTitle>
-          <CardDescription>配置触发告警的阈值条件</CardDescription>
+          <CardTitle>{t('settings:thresholds.title')}</CardTitle>
+          <CardDescription>{t('settings:thresholds.description')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
             <label htmlFor="high-latency-threshold" className="block text-sm font-medium mb-2">
-              高延迟告警阈值 (毫秒)
+              {t('settings:thresholds.high_latency')}
             </label>
             <input
               type="number"
@@ -530,13 +565,13 @@ export default function Settings() {
               max="1000"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              当 PoP 延迟超过此值时触发告警（默认 100ms）
+              {t('settings:thresholds.high_latency_hint')}
             </p>
           </div>
 
           <div>
             <label htmlFor="high-packet-loss-threshold" className="block text-sm font-medium mb-2">
-              高丢包告警阈值 (%)
+              {t('settings:thresholds.high_packet_loss')}
             </label>
             <input
               type="number"
@@ -557,7 +592,7 @@ export default function Settings() {
               step="0.1"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              当丢包率超过此值时触发告警（默认 10%）
+              {t('settings:thresholds.high_packet_loss_hint')}
             </p>
           </div>
         </CardContent>
@@ -582,11 +617,13 @@ export default function Settings() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Telegram 通知</CardTitle>
-              <CardDescription>通过 Telegram Bot 接收告警通知</CardDescription>
+              <CardTitle>{t('settings:notifications.telegram_title')}</CardTitle>
+              <CardDescription>{t('settings:notifications.telegram_description')}</CardDescription>
             </div>
             <Badge variant={config.notifications.telegram?.enabled ? 'default' : 'secondary'}>
-              {config.notifications.telegram?.enabled ? '已启用' : '未启用'}
+              {config.notifications.telegram?.enabled
+                ? t('settings:status.enabled')
+                : t('settings:status.disabled')}
             </Badge>
           </div>
         </CardHeader>
@@ -611,14 +648,14 @@ export default function Settings() {
               className="w-4 h-4"
             />
             <label htmlFor="telegram-enabled" className="text-sm font-medium">
-              启用 Telegram 通知
+              {t('settings:notifications.telegram_enable')}
             </label>
           </div>
 
           {config.notifications.telegram?.enabled && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Bot Token</label>
+                <label className="text-sm font-medium">{t('settings:notifications.bot_token')}</label>
                 <Input
                   type="password"
                   value={config.notifications.telegram.botToken}
@@ -634,15 +671,15 @@ export default function Settings() {
                       },
                     })
                   }
-                  placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                  placeholder={t('settings:notifications.bot_token_placeholder')}
                 />
                 <p className="text-xs text-muted-foreground">
-                  从 @BotFather 获取
+                  {t('settings:notifications.bot_token_hint')}
                 </p>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Chat ID</label>
+                <label className="text-sm font-medium">{t('settings:notifications.chat_id')}</label>
                 <Input
                   value={config.notifications.telegram.chatId}
                   onChange={(e) =>
@@ -657,10 +694,10 @@ export default function Settings() {
                       },
                     })
                   }
-                  placeholder="123456789"
+                  placeholder={t('settings:notifications.chat_id_placeholder')}
                 />
                 <p className="text-xs text-muted-foreground">
-                  发送 /start 给 @userinfobot 获取
+                  {t('settings:notifications.chat_id_hint')}
                 </p>
               </div>
             </>
@@ -673,11 +710,13 @@ export default function Settings() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Webhook 通知</CardTitle>
-              <CardDescription>发送告警到自定义 HTTP 端点</CardDescription>
+              <CardTitle>{t('settings:notifications.webhook_title')}</CardTitle>
+              <CardDescription>{t('settings:notifications.webhook_description')}</CardDescription>
             </div>
             <Badge variant={config.notifications.webhook?.enabled ? 'default' : 'secondary'}>
-              {config.notifications.webhook?.enabled ? '已启用' : '未启用'}
+              {config.notifications.webhook?.enabled
+                ? t('settings:status.enabled')
+                : t('settings:status.disabled')}
             </Badge>
           </div>
         </CardHeader>
@@ -702,14 +741,14 @@ export default function Settings() {
               className="w-4 h-4"
             />
             <label htmlFor="webhook-enabled" className="text-sm font-medium">
-              启用 Webhook 通知
+              {t('settings:notifications.webhook_enable')}
             </label>
           </div>
 
           {config.notifications.webhook?.enabled && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Webhook URL</label>
+                <label className="text-sm font-medium">{t('settings:notifications.webhook_url')}</label>
                 <Input
                   value={config.notifications.webhook.url}
                   onChange={(e) =>
@@ -724,12 +763,12 @@ export default function Settings() {
                       },
                     })
                   }
-                  placeholder="https://example.com/webhook"
+                  placeholder={t('settings:notifications.webhook_url_placeholder')}
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">HTTP 方法</label>
+                <label className="text-sm font-medium">{t('settings:notifications.http_method')}</label>
                 <select
                   value={config.notifications.webhook.method || 'POST'}
                   onChange={(e) =>
@@ -760,11 +799,13 @@ export default function Settings() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Grafana 集成</CardTitle>
-              <CardDescription>自动配置 Prometheus 数据源和 Dashboard</CardDescription>
+              <CardTitle>{t('settings:grafana.title')}</CardTitle>
+              <CardDescription>{t('settings:grafana.description')}</CardDescription>
             </div>
             <Badge variant={config.grafana?.enabled ? 'default' : 'secondary'}>
-              {config.grafana?.enabled ? '已启用' : '未启用'}
+              {config.grafana?.enabled
+                ? t('settings:status.enabled')
+                : t('settings:status.disabled')}
             </Badge>
           </div>
         </CardHeader>
@@ -786,14 +827,14 @@ export default function Settings() {
               className="w-4 h-4"
             />
             <label htmlFor="grafana-enabled" className="text-sm font-medium">
-              启用 Grafana 集成
+              {t('settings:grafana.enable')}
             </label>
           </div>
 
           {config.grafana?.enabled && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Grafana URL</label>
+                <label className="text-sm font-medium">{t('settings:grafana.url')}</label>
                 <Input
                   value={config.grafana.url}
                   onChange={(e) =>
@@ -805,13 +846,13 @@ export default function Settings() {
                       },
                     })
                   }
-                  placeholder="http://localhost:3000"
+                  placeholder={t('settings:grafana.url_placeholder')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">用户名</label>
+                  <label className="text-sm font-medium">{t('settings:grafana.username')}</label>
                   <Input
                     value={config.grafana.username}
                     onChange={(e) =>
@@ -823,12 +864,12 @@ export default function Settings() {
                         },
                       })
                     }
-                    placeholder="admin"
+                    placeholder={t('settings:grafana.username_placeholder')}
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">密码</label>
+                  <label className="text-sm font-medium">{t('settings:grafana.password')}</label>
                   <Input
                     type="password"
                     value={config.grafana.password}
@@ -841,14 +882,14 @@ export default function Settings() {
                         },
                       })
                     }
-                    placeholder="admin"
+                    placeholder={t('settings:grafana.password_placeholder')}
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">
-                  API Key (可选,优先于用户名密码)
+                  {t('settings:grafana.api_key')}
                 </label>
                 <Input
                   type="password"
@@ -862,7 +903,7 @@ export default function Settings() {
                       },
                     })
                   }
-                  placeholder="留空使用用户名密码认证"
+                  placeholder={t('settings:grafana.api_key_placeholder')}
                 />
               </div>
 
@@ -875,10 +916,10 @@ export default function Settings() {
                   {grafanaChecking ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      检查中...
+                      {t('settings:grafana.checking')}
                     </>
                   ) : (
-                    '测试连接'
+                    t('settings:grafana.test_connection')
                   )}
                 </Button>
 
@@ -886,20 +927,19 @@ export default function Settings() {
                   {grafanaProvisioning ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      配置中...
+                      {t('settings:grafana.provisioning')}
                     </>
                   ) : (
                     <>
                       <ExternalLink className="w-4 h-4 mr-2" />
-                      一键配置
+                      {t('settings:grafana.provision')}
                     </>
                   )}
                 </Button>
               </div>
 
               <p className="text-xs text-muted-foreground">
-                点击"一键配置"将自动在 Grafana 中创建 Prometheus 数据源和 Starlink 监控
-                Dashboard
+                {t('settings:grafana.provision_hint')}
               </p>
             </>
           )}
