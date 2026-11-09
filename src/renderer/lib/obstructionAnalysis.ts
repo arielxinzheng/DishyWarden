@@ -22,16 +22,37 @@
  * ⇒ 现在所有下游（分析、3D 渲染、图例）**只认这里的分类器**，
  *   刻度归一化也只在这里做一次，两边不可能再分叉。
  *
+ * ## 为什么这里不出现任何文案
+ *
+ * 本模块是**纯逻辑**：方位、分级、影响、检出时间一律返回语义码 / i18n 键，
+ * 由视图层（页面、3D 图例）用 `t()` 翻译。单元测试因此只断言语义，
+ * 不依赖用户当前语言 —— 翻译换语言时测试不该红。
+ *
  * 坐标系: 矩阵行=y(从上到下), 列=x(从左到右), 中心为天顶。
  * Starlink 的遮挡图以天线朝向为基准, 所以这里的方位是
  * "相对天线朝向的方位", 不是正北。
  */
 
+/** 8 方位语义码（罗盘方位，N = 正北 = 矩阵上方） */
+export type CompassDirection = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+
+/** 8 方位码表，顺序即 0°/45°/90°/…（用于校验与遍历，不含任何文案） */
+export const COMPASS_DIRECTIONS: readonly CompassDirection[] = [
+  'N',
+  'NE',
+  'E',
+  'SE',
+  'S',
+  'SW',
+  'W',
+  'NW',
+] as const;
+
 export interface ObstructionStats {
   /** 遮挡像素占比 0..1（只算"部分遮挡"及以上） */
   obstructionPercentage: number;
-  /** 主遮挡方向(8 方位中文), 遮挡分布没有明显偏向时为 null */
-  dominantDirection: string | null;
+  /** 主遮挡方向(8 方位语义码), 遮挡分布没有明显偏向时为 null */
+  dominantDirection: CompassDirection | null;
   /** 主遮挡方向的方位角(度, 0=正北顺时针), 无则 null */
   dominantAzimuth: number | null;
   /** 最大遮挡度（**归一化后** 0..1，不是原始的 0..255） */
@@ -66,15 +87,37 @@ export const OBSTRUCTION_LEVELS = {
   partialMax: 0.65,
 } as const;
 
-/** 四色分级的唯一出处：3D 画布、卡点、图例都从这里取 */
+/**
+ * 四色分级的唯一出处：3D 画布、卡点、图例都从这里取。
+ *
+ * 只保留「色值 + i18n 键」：原来的 `label`(英文) / `zh`(中文) 两套文案
+ * 已收敛成一个键，按当前语言取一条 —— 中英混排的 `无遮挡 (Clear view)`
+ * 也随之消失。
+ */
 export const OBSTRUCTION_LEVEL_COLORS: Record<
   ObstructionLevel,
-  { canvas: string; dot: string; label: string; zh: string }
+  { canvas: string; dot: string; labelKey: string }
 > = {
-  unmapped: { canvas: 'rgba(107, 114, 128, 0.45)', dot: 'bg-gray-600', label: 'Unmapped', zh: '未扫描' },
-  clear: { canvas: 'rgba(209, 213, 219, 0.90)', dot: 'bg-gray-300', label: 'Clear view', zh: '无遮挡' },
-  partial: { canvas: 'rgba(194, 65, 12, 0.92)', dot: 'bg-orange-700', label: 'Partial', zh: '部分遮挡' },
-  blocked: { canvas: 'rgba(239, 68, 68, 0.95)', dot: 'bg-red-500', label: 'Obstructions', zh: '完全遮挡' },
+  unmapped: {
+    canvas: 'rgba(107, 114, 128, 0.45)',
+    dot: 'bg-gray-600',
+    labelKey: 'obstruction:legend.unmapped',
+  },
+  clear: {
+    canvas: 'rgba(209, 213, 219, 0.90)',
+    dot: 'bg-gray-300',
+    labelKey: 'obstruction:legend.clear',
+  },
+  partial: {
+    canvas: 'rgba(194, 65, 12, 0.92)',
+    dot: 'bg-orange-700',
+    labelKey: 'obstruction:legend.partial',
+  },
+  blocked: {
+    canvas: 'rgba(239, 68, 68, 0.95)',
+    dot: 'bg-red-500',
+    labelKey: 'obstruction:legend.blocked',
+  },
 };
 
 /**
@@ -116,12 +159,10 @@ export function isObstructedLevel(level: ObstructionLevel): boolean {
   return level === 'partial' || level === 'blocked';
 }
 
-const DIRECTIONS = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
-
-/** 方位角(度) → 8 方位中文名 */
-export function azimuthToDirection(azimuthDeg: number): string {
+/** 方位角(度) → 8 方位语义码 */
+export function azimuthToDirection(azimuthDeg: number): CompassDirection {
   const idx = Math.round(((((azimuthDeg % 360) + 360) % 360) / 45)) % 8;
-  return DIRECTIONS[idx];
+  return COMPASS_DIRECTIONS[idx]!;
 }
 
 /**
@@ -193,7 +234,7 @@ export function analyzeObstructionMap(map: number[][]): ObstructionStats | null 
   if (totalPixels === 0) return null;
 
   let dominantAzimuth: number | null = null;
-  let dominantDirection: string | null = null;
+  let dominantDirection: CompassDirection | null = null;
 
   if (weightSum > 0 && center > 0) {
     const cx = weightedX / weightSum;
@@ -221,26 +262,67 @@ export function analyzeObstructionMap(map: number[][]): ObstructionStats | null 
   };
 }
 
+/** 影响评估的定性分级（语义码） */
+export type ObstructionImpactLevel = 'none' | 'low' | 'medium' | 'high';
+
+export interface ObstructionImpact {
+  level: ObstructionImpactLevel;
+  /** 文字颜色 class（纯样式，不是文案） */
+  color: string;
+  /** 文案键：视图层用 t(labelKey) 取当前语言 */
+  labelKey: string;
+}
+
 /**
  * 按视野遮挡占比给出定性影响评估。
  * 阈值与 Dashboard 的 getSeverityInfo 保持一致。
+ *
+ * 返回的是语义码 + 文案键，**不再返回中文句子**。
  */
-export function assessObstructionImpact(
-  percentage: number
-): { label: string; color: string } {
-  if (percentage < 0.02) return { label: '无影响', color: 'text-accent-green' };
-  if (percentage < 0.05) return { label: '低', color: 'text-accent-green' };
-  if (percentage < 0.10) return { label: '中', color: 'text-warning-orange' };
-  return { label: '高', color: 'text-danger-red' };
+export function assessObstructionImpact(percentage: number): ObstructionImpact {
+  if (percentage < 0.02) {
+    return { level: 'none', color: 'text-accent-green', labelKey: 'obstruction:impact.none' };
+  }
+  if (percentage < 0.05) {
+    return { level: 'low', color: 'text-accent-green', labelKey: 'obstruction:impact.low' };
+  }
+  if (percentage < 0.10) {
+    return { level: 'medium', color: 'text-warning-orange', labelKey: 'obstruction:impact.medium' };
+  }
+  return { level: 'high', color: 'text-danger-red', labelKey: 'obstruction:impact.high' };
 }
 
-/** 把遮挡图的采集时刻格式化成一句人话 */
-export function describeObstructionAge(timestamp: number, now = Date.now()): string {
+/** 遮挡图检出时间的语义描述单位 */
+export type ObstructionAgeUnit = 'unknown' | 'just_now' | 'minutes' | 'hours' | 'days';
+
+export interface ObstructionAge {
+  unit: ObstructionAgeUnit;
+  /** 只有 minutes/hours/days 时存在 */
+  count?: number;
+  /** 文案键：视图层用 t(labelKey, { count }) 取当前语言 */
+  labelKey: string;
+}
+
+/**
+ * 把遮挡图的采集时刻折算成「多久之前」的语义描述。
+ *
+ * 视图层拿到 unit + count 后自己挑文案（例如 `{{count}} 分钟前采集`），
+ * 这里绝不拼中文 —— 否则切到英文时底部状态行会突然冒出中文。
+ */
+export function describeObstructionAge(timestamp: number, now = Date.now()): ObstructionAge {
   const mins = Math.round((now - timestamp) / 60000);
-  if (!Number.isFinite(mins)) return '时间未知';
-  if (mins < 1) return '刚刚采集';
-  if (mins < 60) return `${mins} 分钟前采集`;
+  if (!Number.isFinite(mins)) {
+    return { unit: 'unknown', labelKey: 'obstruction:age.unknown' };
+  }
+  if (mins < 1) {
+    return { unit: 'just_now', labelKey: 'obstruction:age.just_now' };
+  }
+  if (mins < 60) {
+    return { unit: 'minutes', count: mins, labelKey: 'obstruction:age.minutes' };
+  }
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} 小时前采集`;
-  return `${Math.floor(hours / 24)} 天前采集`;
+  if (hours < 24) {
+    return { unit: 'hours', count: hours, labelKey: 'obstruction:age.hours' };
+  }
+  return { unit: 'days', count: Math.floor(hours / 24), labelKey: 'obstruction:age.days' };
 }

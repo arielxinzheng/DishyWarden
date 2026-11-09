@@ -1,0 +1,84 @@
+{
+  "page": {
+    "title": "Obstructions",
+    "loading": "Loading obstruction map…",
+    "load_failed": "Failed to load: {{error}}",
+    "no_data_title": "No obstruction map yet",
+    "no_data_desc": "The device has not returned a field-of-view obstruction map yet. It appears automatically once the connection recovers."
+  },
+  "source": {
+    "real": "Obstruction map measured by the device",
+    "mock": "Currently showing simulated data (not measured by the device). It switches automatically once the device returns a map.",
+    "age_suffix": " · {{age}}"
+  },
+  "stat": {
+    "total_pixels": "Total pixels",
+    "obstructed_pixels": "Obstructed pixels",
+    "obstruction_pct": "Fraction obstructed",
+    "max_obstruction": "Peak obstruction",
+    "direction": "Dominant direction",
+    "impact": "Impact assessment"
+  },
+  "tip": {
+    "scale": "Range 0 to 1: how much the signal is attenuated at <strong>the worst point in view</strong>.",
+    "extremes": "0 = that part of the sky is completely clear; 1 = a physical obstacle completely blocks the signal.",
+    "compare": "Unlike “fraction obstructed”: this metric looks at <strong>how bad a single point is</strong>, while the fraction measures <strong>how much of the view is blocked</strong>.",
+    "threshold": "Card colour uses the same thresholds as the 3D view: ≤ {{clearMax}} clear · ≤ {{partialMax}} partial · > {{partialMax}} blocked"
+  },
+  "direction": {
+    "none": "No dominant obstruction",
+    "hint": "Azimuth ≈ {{deg}}° (relative to dish orientation)",
+    "hint_uniform": "Obstruction is evenly distributed across the view; no dominant direction"
+  },
+  "impact": {
+    "none": "None",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High"
+  },
+  "data_notes": {
+    "title": "Data notes",
+    "body": "This view shows the dish field of view as a 3D hemisphere: the centre is the zenith and the edge is the horizon. The colour scale uses the same classifier as “fraction obstructed” above (normalized obstruction ≤ {{clearMax}} counts as clear, above {{partialMax}} counts as fully blocked), so the red/orange area always matches the percentage."
+  },
+  "legend": {
+    "unmapped": "Unmapped",
+    "clear": "Clear view",
+    "partial": "Partial",
+    "blocked": "Obstructions"
+  },
+  "events": {
+    "title": "Obstruction event history (last 7 days)",
+    "empty": "No obstruction events in the last 7 days"
+  },
+  "event": {
+    "severity_low": "Minor",
+    "severity_medium": "Moderate",
+    "severity_high": "Severe",
+    "duration": "Duration: {{duration}}",
+    "avg_obstruction": "Avg obstruction: {{value}}%",
+    "peak": "Peak: {{value}}%"
+  },
+  "duration": {
+    "seconds": "{{count}}s",
+    "minutes": "{{count}} min",
+    "hours": "{{count}} h",
+    "hours_minutes": "{{count}} h {{mins}} min"
+  },
+  "dir": {
+    "n": "North",
+    "ne": "Northeast",
+    "e": "East",
+    "se": "Southeast",
+    "s": "South",
+    "sw": "Southwest",
+    "w": "West",
+    "nw": "Northwest"
+  },
+  "age": {
+    "unknown": "Time unknown",
+    "just_now": "Collected just now",
+    "minutes": "Collected {{count}} min ago",
+    "hours": "Collected {{count}} h ago",
+    "days": "Collected {{count}} d ago"
+  }
+}

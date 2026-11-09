@@ -13,6 +13,7 @@
 
 import { DIAL_COLORS, arcPath, dialPalette, donutSectorPath, polar } from './dialGeometry';
 import { DialPill } from './dialPill';
+import { dialAriaLabel, dialHintMain, dialHintSub } from './guidanceText';
 import type { DialModel } from './alignmentGuidance';
 
 interface GaugeGeometry {
@@ -84,7 +85,7 @@ const GAUGE: Record<'compass' | 'elevation', GaugeGeometry> = {
 export interface GaugeDialProps {
   variant: 'compass' | 'elevation';
   model: DialModel;
-  /** 无障碍描述，例如「方位角校准盘」 */
+  /** 无障碍描述，例如「方位角校准盘」—— 由页面传入已翻译的文案 */
   ariaLabel: string;
 }
 
@@ -94,12 +95,16 @@ export function GaugeDial({ variant, model, ariaLabel }: GaugeDialProps) {
   const ticks: number[] = [];
   for (let deg = geo.tickFrom; deg <= geo.tickTo; deg += geo.tickStep) ticks.push(deg);
 
+  // 引导牌与无障碍描述都由语义码在此处取当前语言 —— 盘本身不存任何文案
+  const hintMain = dialHintMain(model);
+  const hintSub = dialHintSub(model);
+
   return (
     <svg
       viewBox="0 0 200 200"
       className="w-full max-w-[280px]"
       role="img"
-      aria-label={`${ariaLabel}：${model.hintMain}，${model.hintSub}`}
+      aria-label={dialAriaLabel(ariaLabel, model)}
     >
       {/* 推荐范围扇带 —— 未进带时灰色，进带时转绿（配色唯一来源：dialGeometry.dialPalette）
           描边勾出整个扇区（含两条径向边），指针停在带内缘时也能看出区间有多宽 */}
@@ -181,8 +186,8 @@ export function GaugeDial({ variant, model, ariaLabel }: GaugeDialProps) {
       <DialPill
         cx={geo.pillX}
         cy={geo.pillY}
-        main={model.hintMain}
-        sub={model.hintSub}
+        main={hintMain}
+        sub={hintSub}
         color={model.inBand ? DIAL_COLORS.pointerIn : DIAL_COLORS.text}
         width={geo.pillWidth}
       />

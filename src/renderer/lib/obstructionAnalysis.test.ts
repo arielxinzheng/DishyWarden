@@ -1,7 +1,10 @@
 /**
  * obstructionAnalysis.ts 单元测试
- * 
- * 覆盖：遮挡图分析、方位角转换、几何计算
+ *
+ * 覆盖：遮挡图分析、方位角转换、几何计算、语义码输出。
+ *
+ * 注意：本文件的断言对象是**语义码 / i18n 键**，不是任何语言的文案 ——
+ * 翻译集中在视图层，换语言不该让单测变红。
  */
 
 import { describe, it, expect } from 'vitest';
@@ -10,59 +13,61 @@ import {
   azimuthToDirection,
   assessObstructionImpact,
   classifyObstruction,
+  describeObstructionAge,
   detectObstructionScale,
   normalizeObstructionValue,
   OBSTRUCTION_LEVELS,
+  OBSTRUCTION_LEVEL_COLORS,
 } from './obstructionAnalysis';
 
 describe('obstructionAnalysis.ts - 方位角转换', () => {
   describe('azimuthToDirection', () => {
-    it('0° = 北', () => {
-      expect(azimuthToDirection(0)).toBe('北');
+    it('0° = N', () => {
+      expect(azimuthToDirection(0)).toBe('N');
     });
 
-    it('45° = 东北', () => {
-      expect(azimuthToDirection(45)).toBe('东北');
+    it('45° = NE', () => {
+      expect(azimuthToDirection(45)).toBe('NE');
     });
 
-    it('90° = 东', () => {
-      expect(azimuthToDirection(90)).toBe('东');
+    it('90° = E', () => {
+      expect(azimuthToDirection(90)).toBe('E');
     });
 
-    it('135° = 东南', () => {
-      expect(azimuthToDirection(135)).toBe('东南');
+    it('135° = SE', () => {
+      expect(azimuthToDirection(135)).toBe('SE');
     });
 
-    it('180° = 南', () => {
-      expect(azimuthToDirection(180)).toBe('南');
+    it('180° = S', () => {
+      expect(azimuthToDirection(180)).toBe('S');
     });
 
-    it('225° = 西南', () => {
-      expect(azimuthToDirection(225)).toBe('西南');
+    it('225° = SW', () => {
+      expect(azimuthToDirection(225)).toBe('SW');
     });
 
-    it('270° = 西', () => {
-      expect(azimuthToDirection(270)).toBe('西');
+    it('270° = W', () => {
+      expect(azimuthToDirection(270)).toBe('W');
     });
 
-    it('315° = 西北', () => {
-      expect(azimuthToDirection(315)).toBe('西北');
+    it('315° = NW', () => {
+      expect(azimuthToDirection(315)).toBe('NW');
     });
 
     it('处理负角度（归一化）', () => {
-      expect(azimuthToDirection(-45)).toBe('西北');
+      expect(azimuthToDirection(-45)).toBe('NW');
     });
 
     it('处理超过 360° 的角度', () => {
-      expect(azimuthToDirection(405)).toBe('东北'); // 405 - 360 = 45
+      expect(azimuthToDirection(405)).toBe('NE'); // 405 - 360 = 45
     });
 
-    it('边界情况：22.5° 四舍五入到北', () => {
-      expect(azimuthToDirection(22)).toBe('北');
+    it('边界情况：22.5° 四舍五入到 N', () => {
+      expect(azimuthToDirection(22)).toBe('N');
     });
 
-    it('边界情况：23° 四舍五入到东北', () => {
-      expect(azimuthToDirection(23)).toBe('东北');
+    it('边界情况：23° 四舍五入到 NE', () => {
+      expect(azimuthToDirection(23)).toBe('NE');
     });
   });
 });
@@ -82,7 +87,7 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
       // 5x5 全零矩阵
       const map = Array(5).fill(0).map(() => Array(5).fill(0));
       const result = analyzeObstructionMap(map);
-      
+
       expect(result).toBeDefined();
       expect(result!.obstructionPercentage).toBe(0);
       expect(result!.maxObstruction).toBe(0);
@@ -94,7 +99,7 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
       // 5x5 全 255 矩阵
       const map = Array(5).fill(0).map(() => Array(5).fill(255));
       const result = analyzeObstructionMap(map);
-      
+
       expect(result).toBeDefined();
       expect(result!.obstructionPercentage).toBe(1);
       // 0..255 老刻度会被归一化成 0..1
@@ -107,7 +112,7 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
       // 创建 11x11 矩阵，右侧一半遮挡
       const size = 11;
       const center = 5;
-      const map = Array(size).fill(0).map((_, y) => 
+      const map = Array(size).fill(0).map((_, y) =>
         Array(size).fill(0).map((_, x) => {
           const dx = x - center;
           const dy = y - center;
@@ -123,18 +128,18 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
       expect(result).toBeDefined();
       expect(result!.obstructionPercentage).toBeGreaterThan(0.3);
       expect(result!.obstructionPercentage).toBeLessThan(0.7);
-      
+
       // 主遮挡方向应该在东侧（90° ± 45°）
       expect(result!.dominantAzimuth).toBeGreaterThan(45);
       expect(result!.dominantAzimuth).toBeLessThan(135);
-      expect(['东北', '东', '东南']).toContain(result!.dominantDirection);
+      expect(['NE', 'E', 'SE']).toContain(result!.dominantDirection);
     });
 
     it('南侧遮挡（下侧）', () => {
       // 创建 11x11 矩阵，下侧遮挡
       const size = 11;
       const center = 5;
-      const map = Array(size).fill(0).map((_, y) => 
+      const map = Array(size).fill(0).map((_, y) =>
         Array(size).fill(0).map((_, x) => {
           const dx = x - center;
           const dy = y - center;
@@ -148,17 +153,17 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
 
       const result = analyzeObstructionMap(map);
       expect(result).toBeDefined();
-      
+
       // 主遮挡方向应该在南侧（180° ± 45°）
       expect(result!.dominantAzimuth).toBeGreaterThan(135);
       expect(result!.dominantAzimuth).toBeLessThan(225);
-      expect(['东南', '南', '西南']).toContain(result!.dominantDirection);
+      expect(['SE', 'S', 'SW']).toContain(result!.dominantDirection);
     });
 
     it('只统计圆形视野内的像素', () => {
       // 创建 11x11 矩阵，四角设置高值（应被忽略）
       const size = 11;
-      const map = Array(size).fill(0).map((_, y) => 
+      const map = Array(size).fill(0).map((_, y) =>
         Array(size).fill(0).map((_, x) => {
           // 四角设置为 255
           if ((y === 0 || y === size - 1) && (x === 0 || x === size - 1)) {
@@ -170,7 +175,7 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
 
       const result = analyzeObstructionMap(map);
       expect(result).toBeDefined();
-      
+
       // 四角的 255 值应该被排除，所以遮挡占比应该是 0
       expect(result!.obstructionPercentage).toBe(0);
       expect(result!.obstructedPixels).toBe(0);
@@ -180,31 +185,31 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
       // 创建 11x11 矩阵，东侧少量高强度遮挡 vs 西侧大量低强度遮挡
       const size = 11;
       const center = 5;
-      const map = Array(size).fill(0).map((_, y) => 
+      const map = Array(size).fill(0).map((_, y) =>
         Array(size).fill(0).map((_, x) => {
           const dx = x - center;
           const dy = y - center;
           const distance = Math.sqrt(dx * dx + dy * dy);
-          
+
           if (distance > center) return 0;
-          
+
           // 东侧（右侧）：少量像素，高强度
           if (x === center + 2 && Math.abs(dy) <= 1) {
             return 250;
           }
-          
+
           // 西侧（左侧）：多像素，低强度
           if (x < center - 1) {
             return 50;
           }
-          
+
           return 0;
         })
       );
 
       const result = analyzeObstructionMap(map);
       expect(result).toBeDefined();
-      
+
       // 权重计算应该使主遮挡方向偏向东侧（高强度的一侧）
       // 但具体结果取决于像素分布，这里主要验证不会因低强度像素多而偏向西侧
       expect(result!.dominantDirection).toBeDefined();
@@ -227,46 +232,108 @@ describe('obstructionAnalysis.ts - 遮挡图分析', () => {
 
 describe('obstructionAnalysis.ts - 影响评估', () => {
   describe('assessObstructionImpact', () => {
-    it('< 2% 为无影响', () => {
+    it('< 2% 为 none', () => {
       const result = assessObstructionImpact(0.01);
-      expect(result.label).toBe('无影响');
+      expect(result.level).toBe('none');
+      expect(result.labelKey).toBe('obstruction:impact.none');
       expect(result.color).toContain('green');
     });
 
-    it('2-5% 为低影响', () => {
+    it('2-5% 为 low', () => {
       const result = assessObstructionImpact(0.03);
-      expect(result.label).toBe('低');
+      expect(result.level).toBe('low');
+      expect(result.labelKey).toBe('obstruction:impact.low');
       expect(result.color).toContain('green');
     });
 
-    it('5-10% 为中等影响', () => {
+    it('5-10% 为 medium', () => {
       const result = assessObstructionImpact(0.07);
-      expect(result.label).toBe('中');
+      expect(result.level).toBe('medium');
+      expect(result.labelKey).toBe('obstruction:impact.medium');
       expect(result.color).toContain('orange');
     });
 
-    it('>= 10% 为高影响', () => {
+    it('>= 10% 为 high', () => {
       const result = assessObstructionImpact(0.15);
-      expect(result.label).toBe('高');
+      expect(result.level).toBe('high');
+      expect(result.labelKey).toBe('obstruction:impact.high');
       expect(result.color).toContain('red');
     });
 
     it('边界值测试：恰好 2%', () => {
-      const result = assessObstructionImpact(0.02);
-      expect(result.label).toBe('低');
+      expect(assessObstructionImpact(0.02).level).toBe('low');
     });
 
     it('边界值测试：恰好 5%', () => {
-      const result = assessObstructionImpact(0.05);
-      expect(result.label).toBe('中');
+      expect(assessObstructionImpact(0.05).level).toBe('medium');
     });
 
     it('边界值测试：恰好 10%', () => {
-      const result = assessObstructionImpact(0.10);
-      expect(result.label).toBe('高');
+      expect(assessObstructionImpact(0.10).level).toBe('high');
     });
   });
 });
+
+/**
+ * 检出时间：只出语义单位 + 数量，文案由视图层翻译。
+ * 断言里刻意不出现任何中文。
+ */
+describe('obstructionAnalysis.ts - 检出时间语义', () => {
+  const now = 1_700_000_000_000;
+
+  it('无效时间戳走 unknown，不给 count', () => {
+    const age = describeObstructionAge(Number.NaN, now);
+    expect(age.unit).toBe('unknown');
+    expect(age.count).toBeUndefined();
+    expect(age.labelKey).toBe('obstruction:age.unknown');
+  });
+
+  it('不足 1 分钟走 just_now，不给 count', () => {
+    const age = describeObstructionAge(now - 10_000, now);
+    expect(age.unit).toBe('just_now');
+    expect(age.count).toBeUndefined();
+    expect(age.labelKey).toBe('obstruction:age.just_now');
+  });
+
+  it('分钟级带 count', () => {
+    const age = describeObstructionAge(now - 25 * 60_000, now);
+    expect(age.unit).toBe('minutes');
+    expect(age.count).toBe(25);
+    expect(age.labelKey).toBe('obstruction:age.minutes');
+  });
+
+  it('小时级带 count', () => {
+    const age = describeObstructionAge(now - 5 * 3_600_000, now);
+    expect(age.unit).toBe('hours');
+    expect(age.count).toBe(5);
+    expect(age.labelKey).toBe('obstruction:age.hours');
+  });
+
+  it('天级带 count', () => {
+    const age = describeObstructionAge(now - 3 * 24 * 3_600_000, now);
+    expect(age.unit).toBe('days');
+    expect(age.count).toBe(3);
+    expect(age.labelKey).toBe('obstruction:age.days');
+  });
+});
+
+/**
+ * 四色分级只剩「色值 + i18n 键」，不再夹带中英文文案。
+ */
+describe('obstructionAnalysis.ts - 四色分级配色表', () => {
+  it('每个等级都有 canvas/dot/labelKey，且色值未被文案污染', () => {
+    for (const level of ['unmapped', 'clear', 'partial', 'blocked'] as const) {
+      const entry = OBSTRUCTION_LEVEL_COLORS[level];
+      expect(typeof entry.canvas).toBe('string');
+      expect(typeof entry.dot).toBe('string');
+      expect(entry.labelKey).toBe(`obstruction:legend.${level}`);
+      expect(entry.canvas).toMatch(/^rgba\(/);
+      expect(entry.dot).toMatch(/^bg-/);
+      expect(Object.keys(entry).sort()).toEqual(['canvas', 'dot', 'labelKey']);
+    }
+  });
+});
+
 /**
  * ===== 回归：数字与图形「互相打脸」的那个 bug =====
  *

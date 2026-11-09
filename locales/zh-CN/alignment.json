@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "Alignment / 校准",
+    "loading": "加载校准数据…",
+    "load_failed": "加载失败: {{error}}",
+    "no_data": "暂无校准数据",
+    "aria_rotation_dial": "方位角校准盘",
+    "aria_tilt_dial": "仰角校准盘",
+    "subtitle_rotation": "方位角",
+    "subtitle_tilt": "仰角"
+  },
+  "att": {
+    "converged_label": "姿态传感器已就绪",
+    "converged_detail": "姿态滤波器已收敛，读数可用于判断天线朝向",
+    "convergence_warning_label": "姿态传感器正在收敛",
+    "convergence_warning_detail": "滤波器还没稳定，读数会持续漂移，请稍等十几秒",
+    "initializing_label": "姿态传感器初始化中",
+    "initializing_detail": "天线刚上电，正在建立姿态基准",
+    "reset_label": "姿态传感器已重置",
+    "reset_detail": "设备检测到移动或重启，正在重新校准",
+    "invalid_label": "姿态数据异常",
+    "invalid_detail": "设备自检未通过，建议断电重启天线",
+    "unreported_label": "暂未收到姿态状态",
+    "unreported_detail": "设备尚未上报姿态估计结果，请确认已连接到天线",
+    "unknown_label": "姿态状态未知（{{state}}）",
+    "unknown_detail": "当前固件上报了本软件未识别的状态值",
+    "precision_note": " (精度 ±{{deg}})"
+  },
+  "verdict": {
+    "calibrating": "正在校准",
+    "calibrating_detail": "姿态传感器尚未就绪，指针会漂移，请等待状态变为「已就绪」",
+    "missing_expected": "部分期望值缺失",
+    "missing_expected_detail": "设备未上报推荐的朝向或仰角，无法自动判断是否对齐",
+    "aligned": "✅ 已对齐",
+    "aligned_detail": "朝向与仰角都在推荐范围内，可以固定安装",
+    "almost": "还差一点"
+  },
+  "guidance": {
+    "aligned": "已对齐",
+    "no_expected": "无期望值",
+    "no_expected_band": "设备未上报推荐朝向",
+    "no_expected_band_tilt": "设备未上报推荐仰角",
+    "rotate_east": "向东旋转 {{deg}}",
+    "rotate_west": "向西旋转 {{deg}}",
+    "raise": "需抬高 {{deg}}",
+    "lower": "需降低 {{deg}}",
+    "recommended": "推荐 {{low}}–{{high}}"
+  },
+  "dial": {
+    "aria": "{{name}}：{{main}}，{{sub}}"
+  },
+  "flash": {
+    "aligned": "已对齐",
+    "detail": "朝向与仰角都在推荐范围内"
+  },
+  "param": {
+    "current_azimuth": "当前方位角",
+    "desired_azimuth": "期望方位角",
+    "deviation": "偏差",
+    "recommended_range": "推荐范围",
+    "current_elevation": "当前仰角",
+    "desired_elevation": "期望仰角",
+    "physical_tilt": "终端物理倾斜角"
+  },
+  "usage": {
+    "title": "如何读取此图",
+    "band_desc": "<arc>外圈亮弧</arc>标出推荐范围的位置（推荐 = 期望值 ± {{tol}}，即总共 {{total}} 宽）。<band>内圈扇带</band>就是推荐范围本身：",
+    "band_in_band": "灰色表示还没进带，绿色表示已进带。",
+    "band_no_band": "设备未上报期望值，本页不画推荐范围。",
+    "pointer": "<strong>橙色指针</strong>是设备当前实际指向。进带后指针变绿，盘心会直接告诉你「还需向东旋转多少度」「还需抬高多少度」；环外的小三角指示转动方向。",
+    "tilt": "<strong>TILT 盘的指针取波束仰角</strong>，与设备给出的期望仰角同坐标系；底部「终端物理倾斜角」是另一个量，两者相差一个固定安装偏移，仅供参考。"
+  },
+  "legend": {
+    "out_of_band": "还没进带",
+    "in_band": "已进带",
+    "pointer": "橙色指针 = 当前实际指向"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "page": {
+    "title": "Satellite radar",
+    "subtitle": "Real-time satellite positions from the SGP4 orbit model and TLE data"
+  },
+  "radar": {
+    "tle_updated_minutes": "· TLE updated {{count}} min ago",
+    "refresh_tle": "Refresh TLE",
+    "clear_cache": "Clear cache",
+    "retry": "Retry",
+    "retry_after_clear": "Clear cache and retry",
+    "link_settings": "Go to Settings"
+  },
+  "error": {
+    "no_location": "Terminal location not set. Configure latitude/longitude on the Settings page.",
+    "no_tle": "No TLE data retrieved",
+    "no_visible": "No visible satellites at the current location",
+    "tle_fetch": "Could not fetch ephemeris data. Check the network connection and retry.",
+    "load_failed": "Failed to load satellite data",
+    "hint_location": "Fill in the terminal latitude/longitude on the Settings page to compute satellite elevations.",
+    "hint_tle": "Ephemeris data is required to compute satellite positions. Check the network connection and retry."
+  },
+  "location": {
+    "prefix": "Observer: {{lat}}°N, {{lon}}°E",
+    "loaded_satellites": " · {{count}} satellite ephemerides loaded",
+    "serving_id": " · Current serving satellite: {{id}}"
+  },
+  "tle": {
+    "degraded_warning": "Orbit parameters may have drifted, so elevations may be off; it refreshes automatically when the network recovers.",
+    "freshness_network": "Latest ephemeris fetched from the network",
+    "freshness_cache_under_hour": "Ephemeris updated less than an hour ago",
+    "freshness_cache_hours": "Ephemeris updated {{count}} h ago",
+    "freshness_stale_cache_hours": "Offline: using cached ephemeris from {{count}} h ago",
+    "freshness_stale_cache_days": "Offline: using cached ephemeris from {{count}} d ago",
+    "freshness_seed_hours": "Offline: using built-in ephemeris ({{count}} h old)",
+    "freshness_seed_days": "Offline: using built-in ephemeris ({{count}} d old)"
+  },
+  "loading": {
+    "calculating": "Computing satellite positions…",
+    "with_source": "Computing with {{source}}",
+    "tle": "Loading TLE data and running SGP4 orbit propagation"
+  },
+  "sky": {
+    "title": "Sky view",
+    "desc": "Polar radar · centre is the zenith (90°)",
+    "note_base": "Centre = zenith | edge = horizon | purple cross = dish beam pointing",
+    "note_estimated_suffix": " | pulse marker = estimated serving satellite",
+    "note_serving_suffix": " | green pulse = current serving satellite"
+  },
+  "serving": {
+    "estimated": "Current serving satellite (estimated)",
+    "active": "Current serving satellite (active)",
+    "verified": "Verified",
+    "confidence": "Confidence: {{level}}",
+    "confidence_high": "high",
+    "confidence_medium": "medium",
+    "confidence_low": "low",
+    "separation_from_boresight": "{{deg}}° from the beam",
+    "azimuth": "Azimuth",
+    "elevation": "Elevation",
+    "distance": "Distance",
+    "track_duration": "Tracked for",
+    "track_duration_value": "{{count}} min",
+    "badge": "Serving"
+  },
+  "stats": {
+    "separation_elevation": "Separation / elevation",
+    "separation_elevation_sub": "To serving satellite / elevation",
+    "visible_count": "Visible satellites",
+    "avg_elevation": "Avg elevation {{deg}}°",
+    "runners": "Candidate satellites",
+    "runners_sub": "Separation < 25°",
+    "distinct_orbits": "Distinct orbits",
+    "distinct_sub": "Candidates + serving",
+    "unit_satellites": "satellites"
+  },
+  "runners": {
+    "title": "Candidate satellites",
+    "desc": "Satellites closest to the current serving satellite"
+  },
+  "list": {
+    "title": "Satellite details",
+    "sorted_by": "Sorted by separation",
+    "th_name_norad": "Satellite / NORAD",
+    "th_duration_min": "Duration (min)",
+    "th_separation": "Separation",
+    "th_elevation": "Elevation",
+    "th_distance": "Distance",
+    "th_first_seen": "First seen",
+    "th_last_seen": "Last seen"
+  },
+  "legend": {
+    "visible": "Visible satellite",
+    "runners": "Candidate satellite",
+    "serving": "Current serving",
+    "serving_estimated": "Current serving (estimated)",
+    "boresight": "Dish beam"
+  },
+  "est": {
+    "no_boresight": "The device did not report the beam pointing, so the serving satellite cannot be estimated",
+    "no_visible": "No visible satellites in the current field of view",
+    "abnormal_orbits": "All candidate satellites have implausible ranges; the ephemeris data may be faulty",
+    "tight_unique": "The beam is {{sep}}° from this candidate and there is no other contender",
+    "tight_unique_margin": "The beam is {{sep}}° from this candidate; the runner-up is {{margin}}° behind",
+    "tight_continuous": "The beam is {{sep}}° from this candidate; a neighbour is only {{margin}}° away but matches the previous frame",
+    "tight_ambiguous": "The beam is {{sep}}° from this candidate, but a neighbour is only {{margin}}° away; a single frame cannot distinguish them",
+    "margin_high_offset": "The best candidate leads the runner-up by {{margin}}°, but is {{sep}}° from the beam; the ephemeris may be stale",
+    "margin_low_offset": "The best candidate leads the runner-up by {{margin}}°, but is {{sep}}° from the beam; there is a deviation",
+    "continuous_ambiguous": "Candidates are close together ({{margin}}°) and {{sep}}° from the beam; cannot distinguish reliably",
+    "margin_ambiguous": "Candidates are only {{margin}}° apart; cannot distinguish reliably",
+    "outside_window": "The closest candidate is {{sep}}° away (outside the 3° matching window); the ephemeris may be stale or the location misconfigured",
+    "device_id": "Serving satellite ID reported by the device"
+  }
+}

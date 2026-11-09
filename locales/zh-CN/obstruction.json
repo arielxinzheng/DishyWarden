@@ -1,0 +1,84 @@
+{
+  "page": {
+    "title": "Obstructions / 障碍图",
+    "loading": "加载障碍图数据…",
+    "load_failed": "加载失败: {{error}}",
+    "no_data_title": "暂无障碍图数据",
+    "no_data_desc": "设备尚未返回视野遮挡图。恢复连接后会自动显示。"
+  },
+  "source": {
+    "real": "设备实测遮挡图",
+    "mock": "当前显示模拟数据（非设备实测）。设备返回遮挡图后会自动切换。",
+    "age_suffix": " · {{age}}"
+  },
+  "stat": {
+    "total_pixels": "总像素数",
+    "obstructed_pixels": "障碍像素",
+    "obstruction_pct": "视野遮挡占比",
+    "max_obstruction": "最大遮挡度",
+    "direction": "主遮挡方向",
+    "impact": "影响评估"
+  },
+  "tip": {
+    "scale": "取值范围 0 ~ 1，表示<strong>视野内最严重那一点</strong>的信号衰减程度。",
+    "extremes": "0 = 该区域天空完全干净；1 = 物理障碍物已将信号完全挡死。",
+    "compare": "与「视野遮挡占比」的区别：这个看<strong>单点有多严重</strong>，占比看<strong>被挡住的范围有多大</strong>。",
+    "threshold": "卡片颜色与 3D 图同源阈值：≤ {{clearMax}} 无遮挡 · ≤ {{partialMax}} 部分 · > {{partialMax}} 完全"
+  },
+  "direction": {
+    "none": "无明显遮挡",
+    "hint": "方位角约 {{deg}}°（相对天线朝向）",
+    "hint_uniform": "遮挡在视野内分布均匀，没有占主导的方位"
+  },
+  "impact": {
+    "none": "无影响",
+    "low": "低",
+    "medium": "中",
+    "high": "高"
+  },
+  "data_notes": {
+    "title": "数据说明",
+    "body": "此视图使用 3D 半球形透视投影显示天线视野。中心代表天顶（正上方），边缘代表地平线。颜色分级与上方「视野遮挡占比」使用同一套判据（归一化遮挡度 ≤ {{clearMax}} 记作无遮挡，超过 {{partialMax}} 记作完全遮挡），所以红/橙面积与占比数字一定对得上。"
+  },
+  "legend": {
+    "unmapped": "未扫描",
+    "clear": "无遮挡",
+    "partial": "部分遮挡",
+    "blocked": "完全遮挡"
+  },
+  "events": {
+    "title": "遮挡事件历史（最近 7 天）",
+    "empty": "过去 7 天无遮挡事件记录"
+  },
+  "event": {
+    "severity_low": "轻微",
+    "severity_medium": "中等",
+    "severity_high": "严重",
+    "duration": "持续 {{duration}}",
+    "avg_obstruction": "平均遮挡率: {{value}}%",
+    "peak": "峰值: {{value}}%"
+  },
+  "duration": {
+    "seconds": "{{count}}秒",
+    "minutes": "{{count}}分钟",
+    "hours": "{{count}}小时",
+    "hours_minutes": "{{count}}小时{{mins}}分钟"
+  },
+  "dir": {
+    "n": "北",
+    "ne": "东北",
+    "e": "东",
+    "se": "东南",
+    "s": "南",
+    "sw": "西南",
+    "w": "西",
+    "nw": "西北"
+  },
+  "age": {
+    "unknown": "时间未知",
+    "just_now": "刚刚采集",
+    "minutes": "{{count}} 分钟前采集",
+    "hours": "{{count}} 小时前采集",
+    "days": "{{count}} 天前采集"
+  }
+}

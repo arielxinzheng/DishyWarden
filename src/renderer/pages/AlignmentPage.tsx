@@ -1,20 +1,28 @@
+import { Trans, useTranslation } from 'react-i18next';
 import { useDish } from '../hooks/useDish';
 import { AlignmentFlash } from '../components/Alignment/AlignmentFlash';
 import { GaugeDial } from '../components/Alignment/GaugeDial';
 import { describeAttitudeState, type AttitudeTone } from '../components/Alignment/attitudeState';
+import {
+  attitudeDetail,
+  attitudeLabel,
+  verdictDetail,
+  verdictHeadline,
+} from '../components/Alignment/guidanceText';
 import {
   DEFAULT_TOLERANCE_DEG,
   elevationModel,
   judgeAlignment,
   rotationModel,
 } from '../components/Alignment/alignmentGuidance';
-import { formatDeg, formatSignedDeg, normalizeAzimuth } from '../components/Alignment/format';
+import { formatDeg, formatSignedDeg } from '../components/Alignment/format';
 
 /**
  * 校准页面。
  *
  * 这个组件只负责取数与排版，「差多少度 / 算不算对齐 / 该说什么话」全部
- * 委托给 Alignment/ 下的三个纯模块（attitudeState / alignmentGuidance / format）。
+ * 委托给 Alignment/ 下的纯模块（attitudeState / alignmentGuidance）——
+ * 前者只出语义码，guidanceText 负责把语义码翻成当前语言。
  * 之前这些判断直接写在 JSX 里，方位角和仰角各写一份，两盘能给出矛盾结论。
  */
 
@@ -22,17 +30,18 @@ const TONE_TEXT: Record<AttitudeTone, string> = {
   ok: 'text-green-500',
   warn: 'text-yellow-500',
   bad: 'text-red-500',
-  neutral: 'text-gray-400',
+  unknown: 'text-gray-400',
 };
 
 const TONE_DOT: Record<AttitudeTone, string> = {
   ok: 'bg-green-500',
   warn: 'bg-yellow-500',
   bad: 'bg-red-500',
-  neutral: 'bg-gray-500',
+  unknown: 'bg-gray-500',
 };
 
 export default function AlignmentPage() {
+  const { t } = useTranslation('alignment');
   const { telemetry, isLoading, error } = useDish();
 
   if (isLoading) {
@@ -40,7 +49,7 @@ export default function AlignmentPage() {
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-400">加载校准数据...</p>
+          <p className="text-gray-400">{t('alignment:page.loading')}</p>
         </div>
       </div>
     );
@@ -50,7 +59,7 @@ export default function AlignmentPage() {
     return (
       <div className="p-8">
         <div className="bg-red-900/20 border border-red-500 rounded-lg p-4">
-          <p className="text-red-400">加载失败: {error}</p>
+          <p className="text-red-400">{t('alignment:page.load_failed', { error })}</p>
         </div>
       </div>
     );
@@ -60,7 +69,7 @@ export default function AlignmentPage() {
     return (
       <div className="p-8">
         <div className="bg-yellow-900/20 border border-yellow-500 rounded-lg p-4">
-          <p className="text-yellow-400">暂无校准数据</p>
+          <p className="text-yellow-400">{t('alignment:page.no_data')}</p>
         </div>
       </div>
     );
@@ -73,24 +82,28 @@ export default function AlignmentPage() {
   const desiredElevation = stats?.desiredBoresightElevationDeg;
 
   // 三个纯函数决定页面上所有结论，视图不再自己判读
-  const attitude = describeAttitudeState(telemetry.attitudeEstimationState, stats?.attitudeUncertaintyDeg);
+  const attitudeView = describeAttitudeState(
+    telemetry.attitudeEstimationState,
+    stats?.attitudeUncertaintyDeg
+  );
   const rotation = rotationModel(azimuth, desiredAzimuth);
   const tilt = elevationModel(elevation, desiredElevation);
-  const verdict = judgeAlignment(attitude.converged, rotation, tilt);
+  const verdict = judgeAlignment(attitudeView.converged, rotation, tilt);
+
+  const attitudeText = attitudeLabel(attitudeView);
+  const attitudeSubText = attitudeDetail(attitudeView);
 
   const tolerance = DEFAULT_TOLERANCE_DEG;
   // 设备没上报期望值时盘上没有带，说明文案也不能再承诺「扇带」
   const hasBand = rotation.hasBand || tilt.hasBand;
   const rotationBand =
-    desiredAzimuth === undefined
+    rotation.bandLowDeg === null || rotation.bandHighDeg === null
       ? '—'
-      : `${formatDeg(normalizeAzimuth(desiredAzimuth - tolerance))}–${formatDeg(
-          normalizeAzimuth(desiredAzimuth + tolerance)
-        )}`;
+      : `${formatDeg(rotation.bandLowDeg)}–${formatDeg(rotation.bandHighDeg)}`;
   const tiltBand =
-    desiredElevation === undefined
+    tilt.bandLowDeg === null || tilt.bandHighDeg === null
       ? '—'
-      : `${formatDeg(desiredElevation - tolerance)}–${formatDeg(desiredElevation + tolerance)}`;
+      : `${formatDeg(tilt.bandLowDeg)}–${formatDeg(tilt.bandHighDeg)}`;
 
   return (
     <div className="p-8 space-y-6">
@@ -98,12 +111,12 @@ export default function AlignmentPage() {
           摆在标题行右侧，不悬浮、不覆盖任何内容。 */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Alignment / 校准</h1>
-          <p className={`flex items-center gap-2 font-medium ${TONE_TEXT[attitude.tone]}`}>
-            <span>{attitude.icon}</span>
-            <span>{attitude.label}</span>
+          <h1 className="text-3xl font-bold text-white mb-2">{t('alignment:page.title')}</h1>
+          <p className={`flex items-center gap-2 font-medium ${TONE_TEXT[attitudeView.tone]}`}>
+            <span>{attitudeView.icon}</span>
+            <span>{attitudeText}</span>
           </p>
-          <p className="text-xs text-gray-500 mt-1">{attitude.detail}</p>
+          <p className="text-xs text-gray-500 mt-1">{attitudeSubText}</p>
         </div>
         <AlignmentFlash aligned={verdict.aligned} />
       </div>
@@ -121,24 +134,36 @@ export default function AlignmentPage() {
             verdict.aligned ? 'text-green-400' : 'text-gray-100'
           }`}
         >
-          {verdict.headline}
+          {verdictHeadline(verdict)}
         </div>
-        <div className="text-sm text-gray-400 mt-1">{verdict.detail}</div>
+        <div className="text-sm text-gray-400 mt-1">{verdictDetail(verdict)}</div>
       </div>
 
       {/* 两个校准盘 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <DialCard
           title="ROTATION"
-          subtitle="方位角"
+          subtitle={t('alignment:page.subtitle_rotation')}
           dotClass={rotation.inBand ? TONE_DOT.ok : TONE_DOT.warn}
-          dial={<GaugeDial variant="compass" model={rotation} ariaLabel="方位角校准盘" />}
+          dial={
+            <GaugeDial
+              variant="compass"
+              model={rotation}
+              ariaLabel={t('alignment:page.aria_rotation_dial')}
+            />
+          }
         />
         <DialCard
           title="TILT"
-          subtitle="仰角"
+          subtitle={t('alignment:page.subtitle_tilt')}
           dotClass={tilt.inBand ? TONE_DOT.ok : TONE_DOT.warn}
-          dial={<GaugeDial variant="elevation" model={tilt} ariaLabel="仰角校准盘" />}
+          dial={
+            <GaugeDial
+              variant="elevation"
+              model={tilt}
+              ariaLabel={t('alignment:page.aria_tilt_dial')}
+            />
+          }
         />
       </div>
 
@@ -147,56 +172,78 @@ export default function AlignmentPage() {
         <ParamCard
           title="ROTATION"
           rows={[
-            { label: '当前方位角', value: formatDeg(azimuth) },
-            { label: '期望方位角', value: formatDeg(desiredAzimuth) },
-            { label: '偏差', value: formatSignedDeg(rotation.deltaDeg), tone: rotation.inBand ? 'good' : 'warn' },
-            { label: '推荐范围', value: rotationBand },
+            { label: t('alignment:param.current_azimuth'), value: formatDeg(azimuth) },
+            { label: t('alignment:param.desired_azimuth'), value: formatDeg(desiredAzimuth) },
+            {
+              label: t('alignment:param.deviation'),
+              value: formatSignedDeg(rotation.deltaDeg),
+              tone: rotation.inBand ? 'good' : 'warn',
+            },
+            { label: t('alignment:param.recommended_range'), value: rotationBand },
           ]}
         />
         <ParamCard
           title="TILT"
           rows={[
-            { label: '当前仰角', value: formatDeg(elevation) },
-            { label: '期望仰角', value: formatDeg(desiredElevation) },
-            { label: '偏差', value: formatSignedDeg(tilt.deltaDeg), tone: tilt.inBand ? 'good' : 'warn' },
-            { label: '推荐范围', value: tiltBand },
-            { label: '终端物理倾斜角', value: formatDeg(telemetry.tiltAngleDeg) },
+            { label: t('alignment:param.current_elevation'), value: formatDeg(elevation) },
+            { label: t('alignment:param.desired_elevation'), value: formatDeg(desiredElevation) },
+            {
+              label: t('alignment:param.deviation'),
+              value: formatSignedDeg(tilt.deltaDeg),
+              tone: tilt.inBand ? 'good' : 'warn',
+            },
+            { label: t('alignment:param.recommended_range'), value: tiltBand },
+            { label: t('alignment:param.physical_tilt'), value: formatDeg(telemetry.tiltAngleDeg) },
           ]}
         />
       </div>
 
       {/* 使用说明 */}
       <div className="rounded-xl border border-gray-700/60 bg-gray-900/50 p-6 space-y-3">
-        <h3 className="text-white font-bold">如何读取此图</h3>
+        <h3 className="text-white font-bold">{t('alignment:usage.title')}</h3>
 
         <p className="text-sm text-gray-400 leading-relaxed">
-          <strong className="text-gray-300">外圈亮弧</strong>标出推荐范围的位置（推荐 = 期望值 ±{' '}
-          {formatDeg(tolerance)}，即总共 {formatDeg(tolerance * 2)} 宽）。
-          <strong className="text-gray-300">内圈扇带</strong>就是推荐范围本身：
+          <Trans
+            i18nKey="alignment:usage.band_desc"
+            values={{ tol: formatDeg(tolerance), total: formatDeg(tolerance * 2) }}
+            components={{
+              arc: <strong className="text-gray-300" />,
+              band: <strong className="text-gray-300" />,
+            }}
+          />
           {hasBand ? (
-            <>
-              灰色表示还没进带，<span className="text-green-400">绿色</span>表示已进带。
-            </>
+            t('alignment:usage.band_in_band')
           ) : (
-            <>设备未上报期望值，本页不画推荐范围。</>
+            t('alignment:usage.band_no_band')
           )}
         </p>
 
         {/* 图例：光靠文字说「灰色/绿色」不如直接摆两个色块 */}
         <div className="flex flex-wrap items-center gap-5 pt-1">
-          <LegendSwatch color="rgba(148, 163, 184, 0.22)" border="rgba(203, 213, 225, 0.55)" label="还没进带" />
-          <LegendSwatch color="rgba(34, 197, 94, 0.34)" border="rgba(74, 222, 128, 0.85)" label="已进带" />
-          <LegendSwatch color="#f97316" label="橙色指针 = 当前实际指向" />
+          <LegendSwatch
+            color="rgba(148, 163, 184, 0.22)"
+            border="rgba(203, 213, 225, 0.55)"
+            label={t('alignment:legend.out_of_band')}
+          />
+          <LegendSwatch
+            color="rgba(34, 197, 94, 0.34)"
+            border="rgba(74, 222, 128, 0.85)"
+            label={t('alignment:legend.in_band')}
+          />
+          <LegendSwatch color="#f97316" label={t('alignment:legend.pointer')} />
         </div>
 
         <p className="text-sm text-gray-400 leading-relaxed">
-          <strong className="text-gray-300">橙色指针</strong>是设备当前实际指向。
-          进带后指针变绿，盘心会直接告诉你「还需向东旋转多少度」「还需抬高多少度」；
-          环外的小三角指示转动方向。
+          <Trans
+            i18nKey="alignment:usage.pointer"
+            components={{ strong: <strong className="text-gray-300" /> }}
+          />
         </p>
         <p className="text-sm text-gray-400 leading-relaxed">
-          <strong className="text-gray-300">TILT 盘的指针取波束仰角</strong>，与设备给出的期望仰角同坐标系；
-          底部「终端物理倾斜角」是另一个量，两者相差一个固定安装偏移，仅供参考。
+          <Trans
+            i18nKey="alignment:usage.tilt"
+            components={{ strong: <strong className="text-gray-300" /> }}
+          />
         </p>
       </div>
     </div>

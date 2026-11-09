@@ -44,6 +44,26 @@ export interface Boresight {
 /** 估算置信度 */
 export type EstimateConfidence = 'high' | 'medium' | 'low' | 'none';
 
+/**
+ * 估算原因的**语义码**（不是句子）。
+ *
+ * 视图层按语义码取对应文案，并把 separationDeg / marginDeg 等数值插进去；
+ * 本模块不拼任何自然语言，因此单元测试与语言无关。
+ */
+export type ServingReason =
+  | 'no_boresight'
+  | 'no_visible'
+  | 'abnormal_orbits'
+  | 'tight_fit_unique'
+  | 'tight_fit_unique_margin'
+  | 'tight_fit_continuous'
+  | 'tight_fit_ambiguous'
+  | 'margin_high_offset'
+  | 'margin_low_offset'
+  | 'continuous_ambiguous'
+  | 'margin_ambiguous'
+  | 'outside_window';
+
 export interface ServingSatelliteEstimate {
   /** 估算出的服务卫星; confidence === 'none' 时为 null */
   satellite: SatellitePosition | null;
@@ -56,8 +76,8 @@ export interface ServingSatelliteEstimate {
   marginDeg: number | null;
   /** 3° 内的候选数; 1 表示唯一解 */
   candidatesWithin3Deg: number;
-  /** 人类可读的原因 */
-  reason: string;
+  /** 估算原因的语义码，文案由视图层组装 */
+  reason: ServingReason;
 }
 
 /**
@@ -107,9 +127,7 @@ export function estimateServingSatellite(
       runnerUpSeparationDeg: null,
       marginDeg: null,
       candidatesWithin3Deg: 0,
-      reason: !boresight
-        ? '设备未上报波束指向，无法估算服务卫星'
-        : '当前视野内没有可见卫星',
+      reason: !boresight ? 'no_boresight' : 'no_visible',
     };
   }
 
@@ -129,7 +147,7 @@ export function estimateServingSatellite(
       runnerUpSeparationDeg: null,
       marginDeg: null,
       candidatesWithin3Deg: 0,
-      reason: '所有候选卫星的轨道距离异常，可能是星历数据有问题',
+      reason: 'abnormal_orbits',
     };
   }
 
@@ -164,7 +182,7 @@ export function estimateServingSatellite(
     : false;
 
   let confidence: EstimateConfidence;
-  let reason: string;
+  let reason: ServingReason;
 
   // **贴合度**与**排他性**是两件事:
   //   贴合度 = 最优候选离波束多近（波束基本指着它 → 贴合度高）
@@ -177,40 +195,35 @@ export function estimateServingSatellite(
   if (tightFit && (margin === null || margin >= HIGH_MARGIN_DEG)) {
     // 波束明确指着某颗，且没有同样贴近的竞争者
     confidence = 'high';
-    reason = margin === null
-      ? `波束指向与该候选相差 ${best.sep.toFixed(2)}°，且无其他竞争者`
-      : `波束指向与该候选相差 ${best.sep.toFixed(2)}°，次优落后 ${margin.toFixed(1)}°`;
+    reason = margin === null ? 'tight_fit_unique' : 'tight_fit_unique_margin';
   } else if (tightFit && continuous) {
     // 贴合但有竞争者 —— 位置连续性提供额外支撑
     confidence = 'medium';
-    reason = `波束指向与该候选相差 ${best.sep.toFixed(2)}°，虽有相邻候选（差 ${margin?.toFixed(1) ?? '0'}°），但与上一帧一致`;
+    reason = 'tight_fit_continuous';
   } else if (tightFit) {
     confidence = 'medium';
-    reason = `波束指向与该候选相差 ${best.sep.toFixed(2)}°，但相邻候选仅差 ${margin?.toFixed(1) ?? '0'}°，单帧无法区分`;
+    reason = 'tight_fit_ambiguous';
   } else if (margin !== null && margin >= HIGH_MARGIN_DEG) {
     // 不贴近但排他性强 —— 通常意味着星历陈旧导致整体偏移
     confidence = 'low';
-    reason = `最优候选领先次优 ${margin.toFixed(1)}°，但与波束相差 ${best.sep.toFixed(2)}°，疑似星历陈旧`;
+    reason = 'margin_high_offset';
   } else if (margin !== null && margin >= MEDIUM_MARGIN_DEG) {
     confidence = 'low';
-    reason = `最优候选领先次优 ${margin.toFixed(1)}°，但与波束相差 ${best.sep.toFixed(2)}°，存在偏差`;
+    reason = 'margin_low_offset';
   } else if (continuous) {
     confidence = 'low';
-    reason = `相邻候选间隔小（${margin?.toFixed(1) ?? '0'}°），且与波束相差 ${best.sep.toFixed(2)}°，无法可靠区分`;
+    reason = 'continuous_ambiguous';
   } else {
     confidence = 'low';
-    reason = `相邻候选间隔仅 ${margin?.toFixed(1) ?? '0'}°，无法可靠区分`;
+    reason = 'margin_ambiguous';
   }
 
   if (candidatesWithin3 === 0) {
     // 波束指向 3° 内没有卫星 —— 星历陈旧或位置设置有误。
     // 说明里带上实际最近距离, 否则「3° 内没有卫星」听起来像"差很远",
-    // 而实际可能只差 3.06°。
+    // 而实际可能只差 3.06°（视图层用 separationDeg 插值）。
     confidence = 'low';
-    reason =
-      `波束指向 ${boresight.azimuthDeg.toFixed(1)}°/${boresight.elevationDeg.toFixed(1)}° ` +
-      `最近的候选在 ${best.sep.toFixed(2)}° 外（超出 3° 匹配窗口），` +
-      `可能是星历陈旧或位置设置有误`;
+    reason = 'outside_window';
   }
 
   return {

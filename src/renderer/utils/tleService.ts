@@ -128,19 +128,21 @@ async function fetchFromNetwork(): Promise<{ data: TLEData[]; origin: string; at
       const text = await fetchWithTimeout(up.url);
       const data = parseTLEText(text);
       if (data.length === 0) {
-        throw new Error('响应中没有有效的 TLE 记录');
+        throw new Error('empty-tle-response');
       }
       return { data, origin: up.name, attempts };
     } catch (e) {
+      // 失败原因是**技术码**（timeout / empty-tle-response / HTTP 5xx 原文），
+      // 只进日志与 attempts，不直接展示给用户 —— 展示文案由页面用 i18n 组装。
       const reason = e instanceof Error
-        ? (e.name === 'AbortError' ? `超时 (${FETCH_TIMEOUT_MS / 1000}s)` : e.message)
+        ? (e.name === 'AbortError' ? 'timeout' : e.message)
         : String(e);
       attempts.push({ source: up.name, error: reason });
     }
   }
 
   throw new TLEFetchError(
-    `无法获取星历数据: ${attempts.map((a) => `${a.source} ${a.error}`).join('; ')}`,
+    `ephemeris fetch failed: ${attempts.map((a) => `${a.source} ${a.error}`).join('; ')}`,
     attempts
   );
 }
@@ -178,7 +180,7 @@ function writeCache(data: TLEData[], origin: string): void {
     );
   } catch (e) {
     // localStorage 满了 (TLE 较大) —— 不致命, 只是下次要重新拉
-    console.warn('[tleService] 缓存写入失败:', e);
+    console.warn('[tleService] cache write failed:', e);
   }
 }
 
@@ -211,10 +213,10 @@ function readSeed(): Promise<{ data: TLEData[]; fetchedAt: number; source: strin
       if (typeof window === 'undefined' || !window.electronAPI?.getTLESeed) return null;
       const seed = await window.electronAPI.getTLESeed();
       if (!seed || !Array.isArray(seed.data) || seed.data.length === 0) return null;
-      console.log(`[tleService] 已从主进程加载内置星历 ${seed.data.length} 条`);
+      console.log(`[tleService] loaded ${seed.data.length} built-in ephemerides from the main process`);
       return { data: seed.data as TLEData[], fetchedAt: seed.fetchedAt, source: seed.source };
     } catch (e) {
-      console.warn('[tleService] 内置星历加载失败:', e);
+      console.warn('[tleService] failed to load built-in ephemeris:', e);
       return null;
     }
   })();
@@ -267,7 +269,7 @@ export async function getTLEData(forceRefresh = false): Promise<TLEResult> {
     // 4. 内置种子兜底
     const seed = await readSeed();
     if (seed) {
-      console.warn('[tleService] 网络不可用, 降级到内置种子数据');
+      console.warn('[tleService] network unavailable, falling back to built-in seed data');
       return {
         data: seed.data,
         source: 'seed',
@@ -291,18 +293,41 @@ async function refreshInBackground(): Promise<void> {
   }
 }
 
-/** 把新鲜度描述成一句人话 */
-export function describeFreshness(result: TLEResult): string {
+/** 数据新鲜度的**语义描述**：视图层据此挑文案与插值，模块本身不出句子 */
+export interface TLEAge {
+  unit: 'hours' | 'days';
+  count: number;
+}
+
+export type TLEFreshness =
+  | { kind: 'network' }
+  | { kind: 'cache_under_hour' }
+  | { kind: 'cache_hours'; count: number }
+  | { kind: 'stale_cache'; age: TLEAge }
+  | { kind: 'seed'; age: TLEAge };
+
+/**
+ * 把新鲜度折算成语义码。
+ *
+ * 原先这里返回「已从网络获取最新星历」这类中文句子 —— 渲染层拿到就直接拼进
+ * 提示条，切到英文时整条提示仍是中文。现在只给 kind + 数量，文案归视图层。
+ */
+export function describeFreshness(result: TLEResult): TLEFreshness {
   const hours = result.age / 3600000;
-  if (result.source === 'network') return '已从网络获取最新星历';
-  if (result.source === 'cache') return `星历数据 ${hours < 1 ? '不到 1 小时' : `${hours.toFixed(0)} 小时`}前更新`;
+  if (result.source === 'network') return { kind: 'network' };
+  if (result.source === 'cache') {
+    if (hours < 1) return { kind: 'cache_under_hour' };
+    return { kind: 'cache_hours', count: Math.round(hours) };
+  }
 
-  const ageText = hours < 24
-    ? `${hours.toFixed(0)} 小时前`
-    : `${Math.round(hours / 24)} 天前`;
+  const age: TLEAge =
+    hours < 24
+      ? { unit: 'hours', count: Math.round(hours) }
+      : { unit: 'days', count: Math.round(hours / 24) };
 
-  if (result.source === 'stale-cache') return `离线模式: 使用 ${ageText}的缓存星历`;
-  return `离线模式: 使用内置星历 (${ageText})`;
+  return result.source === 'stale-cache'
+    ? { kind: 'stale_cache', age }
+    : { kind: 'seed', age };
 }
 
 // ---------------------------------------------------------------------------

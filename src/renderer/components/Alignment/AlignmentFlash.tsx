@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface AlignmentFlashProps {
   aligned: boolean;
@@ -18,6 +19,7 @@ interface AlignmentFlashProps {
 const FLASH_DURATION_MS = 3200;
 
 export function AlignmentFlash({ aligned }: AlignmentFlashProps) {
+  const { t } = useTranslation('alignment');
   const [visible, setVisible] = useState(false);
   // 用 ref 而不是 state 记录「上一次是否已对齐」：它只用于比较，不参与渲染
   const wasAligned = useRef(false);
@@ -50,8 +52,8 @@ export function AlignmentFlash({ aligned }: AlignmentFlashProps) {
     >
       <div className="flex items-center gap-2 px-5 py-3 rounded-xl border border-green-500/60 bg-green-500/15 backdrop-blur-sm shadow-lg shadow-green-900/30">
         <span className="text-lg">✅</span>
-        <span className="text-sm font-semibold text-green-400">已对齐</span>
-        <span className="text-xs text-green-300/70">朝向与仰角都在推荐范围内</span>
+        <span className="text-sm font-semibold text-green-400">{t('alignment:flash.aligned')}</span>
+        <span className="text-xs text-green-300/70">{t('alignment:flash.detail')}</span>
       </div>
     </div>
   );

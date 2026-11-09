@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "Alignment",
+    "loading": "Loading alignment data…",
+    "load_failed": "Failed to load: {{error}}",
+    "no_data": "No alignment data",
+    "aria_rotation_dial": "Azimuth dial",
+    "aria_tilt_dial": "Elevation dial",
+    "subtitle_rotation": "Azimuth",
+    "subtitle_tilt": "Elevation"
+  },
+  "att": {
+    "converged_label": "Attitude sensor ready",
+    "converged_detail": "The attitude filter has converged; readings can be used to judge dish orientation",
+    "convergence_warning_label": "Attitude sensor converging",
+    "convergence_warning_detail": "The filter is not stable yet and readings keep drifting; please wait a few seconds",
+    "initializing_label": "Attitude sensor initializing",
+    "initializing_detail": "The dish just powered up and is establishing an attitude reference",
+    "reset_label": "Attitude sensor reset",
+    "reset_detail": "A move or reboot was detected; recalibrating",
+    "invalid_label": "Attitude data invalid",
+    "invalid_detail": "The device self-test failed; power-cycle the dish",
+    "unreported_label": "No attitude state received yet",
+    "unreported_detail": "The device has not reported an attitude estimate; check the dish connection",
+    "unknown_label": "Unknown attitude state ({{state}})",
+    "unknown_detail": "The current firmware reported a state this app does not recognize",
+    "precision_note": " (accuracy ±{{deg}})"
+  },
+  "verdict": {
+    "calibrating": "Calibrating",
+    "calibrating_detail": "The attitude sensor is not ready yet, so the pointer drifts. Wait until the state becomes “ready”.",
+    "missing_expected": "Expected values missing",
+    "missing_expected_detail": "The device has not reported the recommended orientation or elevation, so alignment cannot be judged automatically",
+    "aligned": "✅ Aligned",
+    "aligned_detail": "Orientation and elevation are both within the recommended range; you can fix the mount",
+    "almost": "Almost there"
+  },
+  "guidance": {
+    "aligned": "Aligned",
+    "no_expected": "No expected value",
+    "no_expected_band": "The device has not reported a recommended orientation",
+    "no_expected_band_tilt": "The device has not reported a recommended elevation",
+    "rotate_east": "Rotate {{deg}} east",
+    "rotate_west": "Rotate {{deg}} west",
+    "raise": "Raise by {{deg}}",
+    "lower": "Lower by {{deg}}",
+    "recommended": "Target {{low}}–{{high}}"
+  },
+  "dial": {
+    "aria": "{{name}}: {{main}}, {{sub}}"
+  },
+  "flash": {
+    "aligned": "Aligned",
+    "detail": "Orientation and elevation are within the recommended range"
+  },
+  "param": {
+    "current_azimuth": "Current azimuth",
+    "desired_azimuth": "Target azimuth",
+    "deviation": "Deviation",
+    "recommended_range": "Recommended range",
+    "current_elevation": "Current elevation",
+    "desired_elevation": "Target elevation",
+    "physical_tilt": "Physical tilt angle"
+  },
+  "usage": {
+    "title": "How to read this chart",
+    "band_desc": "The <arc>outer bright arc</arc> marks the recommended range (target ± {{tol}}, i.e. {{total}} wide in total). The <band>inner band</band> is the recommended range itself: ",
+    "band_in_band": "Grey means out of band, green means in band.",
+    "band_no_band": "The device has not reported expected values, so no recommended range is drawn.",
+    "pointer": "The <strong>orange pointer</strong> shows where the dish is actually pointing. Once in band it turns green and the dial centre tells you how many degrees to rotate east and how much to raise; the small triangle outside the ring indicates the direction to turn.",
+    "tilt": "<strong>The TILT dial pointer is the beam elevation</strong>, in the same coordinate system as the device's target elevation. The physical tilt angle at the bottom is a different quantity; the two differ by a fixed installation offset and are for reference only."
+  },
+  "legend": {
+    "out_of_band": "Out of band",
+    "in_band": "In band",
+    "pointer": "Orange pointer = current pointing"
+  }
+}

@@ -1,9 +1,10 @@
 /**
- * 校准页的几何与引导文案 —— 纯函数，不碰 React、不碰 SVG 坐标。
+ * 校准页的几何与引导语义 —— 纯函数，不碰 React、不碰 SVG 坐标、不碰文案。
  *
  * ## 分工
  *
  *   本文件          遥测数值 → 罗盘角空间的对齐模型（带在哪、指针在哪、该往哪转）
+ *   guidanceText.ts 语义码 → 当前语言的人话（唯一允许拼文案的地方）
  *   dialGeometry.ts 罗盘角 → SVG 路径 / 配色（纯函数，无 JSX）
  *   dialPill.tsx    圆心引导牌（唯一的 JSX 零件）
  *   GaugeDial.tsx   把一个模型画成盘
@@ -12,6 +13,15 @@
  * 之前这段逻辑散在 JSX 里，方位角和仰角各写一份三角函数，结果两盘对同一台
  * 设备能给出相反的结论。
  *
+ * ## 为什么这里只说「语义码」
+ *
+ * 本模块不返回任何句子，只返回：
+ *   - action：要用户做什么（对齐了 / 没期望值 / 旋转 / 抬高 / 降低）
+ *   - direction：往哪边动（cw = 罗盘角增大 / ccw = 罗盘角减小 / none）
+ *   - adjustDeg：要动多少度（绝对值）
+ *   - bandLow/HighDeg：推荐区间边界（视图层负责格式化与单位）
+ * 文案由视图层按 action + direction 组装，换语言时本模块与单测纹丝不动。
+ *
  * ## 角度约定
  *
  * 一律使用**罗盘角**：0° = 正上方，顺时针为正（N→E→S→W）。
@@ -19,7 +29,7 @@
  * 仰角 90° = 正上方 = 罗盘角 0°），于是两个盘共用同一套画法。
  */
 
-import { formatDeg, normalizeAzimuth } from './format';
+import { normalizeAzimuth } from './format';
 
 /**
  * 推荐带半宽（度）。
@@ -30,8 +40,19 @@ import { formatDeg, normalizeAzimuth } from './format';
  */
 export const DEFAULT_TOLERANCE_DEG = 5;
 
-/** 一个校准盘要画/要说的一切 */
+/** 罗盘角移动方向的语义码 */
+export type GuidanceDirection = 'cw' | 'ccw' | 'none';
+
+/** 圆心引导牌要表达的「动作」语义码 */
+export type GuidanceAction = 'aligned' | 'no_expected' | 'rotate' | 'raise' | 'lower';
+
+/** 需要用户实际搬动天线的动作（不含「已对齐 / 无期望值」） */
+export type MoveAction = 'rotate' | 'raise' | 'lower';
+
+/** 一个校准盘要画/要表达的一切（全部是数值与语义码，没有任何文案） */
 export interface DialModel {
+  /** 盘的类型：方位角盘 / 仰角盘（视图层据此选「朝向」「仰角」措辞） */
+  kind: 'rotation' | 'elevation';
   /** 设备是否给出了期望值。false 时盘上没有绿带，也不能判「已对齐」 */
   hasBand: boolean;
   /** 推荐带起点（罗盘角，允许为负/超过 360，绘制函数内部自己归一） */
@@ -48,23 +69,37 @@ export interface DialModel {
    * 供参数表如实展示，避免页面自己再算一遍 shortestDelta。
    */
   deltaDeg: number | null;
-  /** 圆心引导牌主文案：「向东旋转 15.0°」/「已对齐」/「无期望值」 */
-  hintMain: string;
-  /** 圆心引导牌副文案：「推荐 23.0°–33.0°」 */
-  hintSub: string;
+  /** 圆心引导牌要表达的动作 */
+  action: GuidanceAction;
+  /** 动作方向（cw = 顺时针/向东、ccw = 逆时针/向西、none = 无需动作） */
+  direction: GuidanceDirection;
+  /** 需要调整的角度绝对值（度）；无需调整时为 null */
+  adjustDeg: number | null;
+  /** 推荐区间下界（方位角已缩放 0–360；仰角为原始仰角）；无期望值时为 null */
+  bandLowDeg: number | null;
+  /** 推荐区间上界，同上 */
+  bandHighDeg: number | null;
   /** 圆周提示箭头方向：true = 罗盘角增大（顺时针）；null = 不画箭头 */
   nudgeClockwise: boolean | null;
 }
 
-const EMPTY_MODEL = (pointerCompass: number, hintSub: string): DialModel => ({
+/** 设备没给期望值时的空模型（无带、不判对齐、不给箭头） */
+const emptyModel = (
+  kind: DialModel['kind'],
+  pointerCompass: number
+): DialModel => ({
+  kind,
   hasBand: false,
   bandStartCompass: 0,
   bandSpanCompass: 0,
   pointerCompass,
   inBand: false,
   deltaDeg: null,
-  hintMain: '无期望值',
-  hintSub,
+  action: 'no_expected',
+  direction: 'none',
+  adjustDeg: null,
+  bandLowDeg: null,
+  bandHighDeg: null,
   nudgeClockwise: null,
 });
 
@@ -85,15 +120,16 @@ export function rotationModel(
   const pointerCompass = normalizeAzimuth(azimuthDeg ?? 0);
 
   if (desiredAzimuthDeg === undefined || !Number.isFinite(desiredAzimuthDeg)) {
-    return EMPTY_MODEL(pointerCompass, '设备未上报推荐朝向');
+    return emptyModel('rotation', pointerCompass);
   }
 
   const delta = shortestDelta(azimuthDeg ?? 0, desiredAzimuthDeg);
   const inBand = Math.abs(delta) <= toleranceDeg;
-  const bandStart = normalizeAzimuth(desiredAzimuthDeg - toleranceDeg);
-  const bandEnd = normalizeAzimuth(desiredAzimuthDeg + toleranceDeg);
+  const bandLow = normalizeAzimuth(desiredAzimuthDeg - toleranceDeg);
+  const bandHigh = normalizeAzimuth(desiredAzimuthDeg + toleranceDeg);
 
   return {
+    kind: 'rotation',
     hasBand: true,
     // 起点写成「期望 - 容差」而非归一化后的值：跨度 2×容差 可能跨 0°，
     // donutSectorPath 的「起点 + 正跨度」写法天然支持，归一化反而会画反。
@@ -102,8 +138,11 @@ export function rotationModel(
     pointerCompass,
     inBand,
     deltaDeg: delta,
-    hintMain: inBand ? '已对齐' : `向${delta > 0 ? '东' : '西'}旋转 ${formatDeg(Math.abs(delta))}`,
-    hintSub: `推荐 ${formatDeg(bandStart)}–${formatDeg(bandEnd)}`,
+    action: inBand ? 'aligned' : 'rotate',
+    direction: inBand ? 'none' : delta > 0 ? 'cw' : 'ccw',
+    adjustDeg: inBand ? null : Math.abs(delta),
+    bandLowDeg: bandLow,
+    bandHighDeg: bandHigh,
     nudgeClockwise: inBand ? null : delta > 0,
   };
 }
@@ -129,7 +168,7 @@ export function elevationModel(
   const pointerCompass = elevationToCompass(elevationDeg ?? 0);
 
   if (desiredElevationDeg === undefined || !Number.isFinite(desiredElevationDeg)) {
-    return EMPTY_MODEL(pointerCompass, '设备未上报推荐仰角');
+    return emptyModel('elevation', pointerCompass);
   }
 
   // 仰角空间的差值：正 = 需要抬高
@@ -139,6 +178,7 @@ export function elevationModel(
   const highElevation = desiredElevationDeg + toleranceDeg;
 
   return {
+    kind: 'elevation',
     hasBand: true,
     // 仰角越高 → 罗盘角越小，所以带起点取「期望 + 容差」的罗盘角
     bandStartCompass: elevationToCompass(highElevation),
@@ -146,20 +186,33 @@ export function elevationModel(
     pointerCompass,
     inBand,
     deltaDeg: delta,
-    hintMain: inBand ? '已对齐' : `需${delta > 0 ? '抬高' : '降低'} ${formatDeg(Math.abs(delta))}`,
-    hintSub: `推荐 ${formatDeg(lowElevation)}–${formatDeg(highElevation)}`,
+    action: inBand ? 'aligned' : delta > 0 ? 'raise' : 'lower',
+    // 抬高 = 罗盘角变小 = 逆时针；降低 = 顺时针
+    direction: inBand ? 'none' : delta > 0 ? 'ccw' : 'cw',
+    adjustDeg: inBand ? null : Math.abs(delta),
+    bandLowDeg: lowElevation,
+    bandHighDeg: highElevation,
     // 抬高 = 罗盘角变小 = 逆时针；降低 = 顺时针
     nudgeClockwise: inBand ? null : delta < 0,
   };
 }
 
+export interface PendingAdjustment {
+  action: MoveAction;
+  direction: GuidanceDirection;
+  /** 需要调整的角度绝对值（度） */
+  adjustDeg: number;
+}
+
+export type AlignmentVerdictCode = 'calibrating' | 'missing_expected' | 'aligned' | 'almost';
+
 export interface AlignmentVerdict {
   /** 三件事同时成立才算对齐：滤波器收敛 + 两个盘都进带 */
   aligned: boolean;
-  /** 顶部横幅主文案 */
-  headline: string;
-  /** 顶部横幅副文案：说清楚「还差什么」 */
-  detail: string;
+  /** 结论语义码，视图层据此选顶部横幅主文案 */
+  code: AlignmentVerdictCode;
+  /** 还没到位的动作，视图层按 action/direction/adjustDeg 组装副文案 */
+  pending: PendingAdjustment[];
 }
 
 /**
@@ -175,37 +228,24 @@ export function judgeAlignment(
   tilt: DialModel
 ): AlignmentVerdict {
   if (!converged) {
-    return {
-      aligned: false,
-      headline: '正在校准',
-      detail: '姿态传感器尚未就绪，指针会漂移，请等待状态变为「已就绪」',
-    };
+    return { aligned: false, code: 'calibrating', pending: [] };
   }
 
   if (!rotation.hasBand || !tilt.hasBand) {
-    return {
-      aligned: false,
-      headline: '部分期望值缺失',
-      detail: '设备未上报推荐的朝向或仰角，无法自动判断是否对齐',
-    };
+    return { aligned: false, code: 'missing_expected', pending: [] };
   }
 
   if (rotation.inBand && tilt.inBand) {
-    return {
-      aligned: true,
-      headline: '✅ 已对齐',
-      detail: '朝向与仰角都在推荐范围内，可以固定安装',
-    };
+    return { aligned: true, code: 'aligned', pending: [] };
   }
 
-  const pending = [
-    rotation.inBand ? null : rotation.hintMain,
-    tilt.inBand ? null : tilt.hintMain,
-  ].filter((item): item is string => item !== null);
+  const pending: PendingAdjustment[] = [rotation, tilt]
+    .filter((model) => !model.inBand && model.action !== 'aligned' && model.action !== 'no_expected')
+    .map((model) => ({
+      action: model.action as MoveAction,
+      direction: model.direction,
+      adjustDeg: model.adjustDeg ?? 0,
+    }));
 
-  return {
-    aligned: false,
-    headline: '还差一点',
-    detail: pending.join(' · '),
-  };
+  return { aligned: false, code: 'almost', pending };
 }

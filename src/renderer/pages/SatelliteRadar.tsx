@@ -4,13 +4,21 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as echarts from 'echarts';
 import { useDish } from '../hooks/useDish';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { RefreshCw, MapPin, AlertCircle, Loader2 } from 'lucide-react';
-import { getTLEData, describeFreshness, clearTLECache, getCacheInfo } from '../utils/tleService';
+import {
+  getTLEData,
+  describeFreshness,
+  clearTLECache,
+  getCacheInfo,
+  TLEFetchError,
+  type TLEFreshness,
+} from '../utils/tleService';
 import {
   calculateMultipleSatellites,
   filterVisibleSatellites,
@@ -21,8 +29,45 @@ import {
 import {
   estimateServingSatellite,
   MAX_PLAUSIBLE_RANGE_KM,
+  type EstimateConfidence,
+  type ServingReason,
   type ServingSatelliteEstimate,
 } from '../utils/servingSatellite';
+
+/** 页面级错误语义码（文案由 ERROR_KEYS 取字典，错误详情只进控制台） */
+type RadarErrorCode = 'no_location' | 'no_tle' | 'no_visible' | 'tle_fetch_failed' | 'load_failed';
+
+const ERROR_KEYS: Record<RadarErrorCode, string> = {
+  no_location: 'satellite:error.no_location',
+  no_tle: 'satellite:error.no_tle',
+  no_visible: 'satellite:error.no_visible',
+  tle_fetch_failed: 'satellite:error.tle_fetch',
+  load_failed: 'satellite:error.load_failed',
+};
+
+/** 估算原因语义码 → 字典键（数值由页面从 estimate 里取，不在逻辑模块里拼） */
+const ESTIMATE_REASON_KEYS: Record<ServingReason | 'device_id', string> = {
+  no_boresight: 'satellite:est.no_boresight',
+  no_visible: 'satellite:est.no_visible',
+  abnormal_orbits: 'satellite:est.abnormal_orbits',
+  tight_fit_unique: 'satellite:est.tight_unique',
+  tight_fit_unique_margin: 'satellite:est.tight_unique_margin',
+  tight_fit_continuous: 'satellite:est.tight_continuous',
+  tight_fit_ambiguous: 'satellite:est.tight_ambiguous',
+  margin_high_offset: 'satellite:est.margin_high_offset',
+  margin_low_offset: 'satellite:est.margin_low_offset',
+  continuous_ambiguous: 'satellite:est.continuous_ambiguous',
+  margin_ambiguous: 'satellite:est.margin_ambiguous',
+  outside_window: 'satellite:est.outside_window',
+  device_id: 'satellite:est.device_id',
+};
+
+const CONFIDENCE_LABEL_KEYS: Record<EstimateConfidence, string> = {
+  high: 'satellite:serving.confidence_high',
+  medium: 'satellite:serving.confidence_medium',
+  low: 'satellite:serving.confidence_low',
+  none: 'satellite:serving.confidence_low',
+};
 
 // 卫星数据类型
 interface SatelliteData {
@@ -39,22 +84,24 @@ interface SatelliteData {
 }
 
 export default function SatelliteRadar() {
+  const { t, i18n } = useTranslation('satellite');
   const { telemetry } = useDish();
   const radarRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const loadingRef = useRef(false); // 使用 ref 跟踪加载状态，避免闭包问题
-  
+
   const [satellites, setSatellites] = useState<SatelliteData[]>([]);
   const [servingSat, setServingSat] = useState<SatelliteData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<RadarErrorCode | null>(null);
   const [locationError, setLocationError] = useState(false);
   const [cacheInfo, setCacheInfo] = useState({ hasCached: false, age: null as number | null, count: null as number | null });
   // 星历来源与新鲜度: 离线兜底时需要告诉用户数据有多旧
-  const [tleInfo, setTleInfo] = useState<{ source: string; text: string; degraded: boolean } | null>(null);
+  const [tleInfo, setTleInfo] = useState<{ source: string; freshness: TLEFreshness; degraded: boolean } | null>(null);
   // 服务卫星估算结果 (含置信度与原因)
   const [estimate, setEstimate] = useState<ServingSatelliteEstimate | null>(null);
-  const [estimateNote, setEstimateNote] = useState<string | null>(null);
+  // 估算原因的语义码（'device_id' = 设备真上报了 ID，不是估算）
+  const [estimateReason, setEstimateReason] = useState<ServingReason | 'device_id' | null>(null);
   // 上一帧的服务卫星, 用于时间连续性判断 (交接瞬间相邻候选难分, 连续性可破)
   const servingSatRef = useRef<{ norad: string; name: string } | null>(null);
   // 设备波束指向 —— 提到组件层, chart effect 与重算 effect 都要依赖它
@@ -62,13 +109,45 @@ export default function SatelliteRadar() {
   const bsAz = telemetry?.boresightAzimuthDeg;
   const bsEl = telemetry?.boresightElevationDeg;
 
+  /** 星历新鲜度语义码 → 当前语言文案 */
+  const freshnessText = (freshness: TLEFreshness): string => {
+    switch (freshness.kind) {
+      case 'network':
+        return t('satellite:tle.freshness_network');
+      case 'cache_under_hour':
+        return t('satellite:tle.freshness_cache_under_hour');
+      case 'cache_hours':
+        return t('satellite:tle.freshness_cache_hours', { count: freshness.count });
+      case 'stale_cache':
+        return freshness.age.unit === 'hours'
+          ? t('satellite:tle.freshness_stale_cache_hours', { count: freshness.age.count })
+          : t('satellite:tle.freshness_stale_cache_days', { count: freshness.age.count });
+      case 'seed':
+        return freshness.age.unit === 'hours'
+          ? t('satellite:tle.freshness_seed_hours', { count: freshness.age.count })
+          : t('satellite:tle.freshness_seed_days', { count: freshness.age.count });
+    }
+  };
+
+  /** 估算原因语义码 → 当前语言文案（把 estimate 里的数值作为插值传入） */
+  const estimateReasonText = (
+    reason: ServingReason | 'device_id',
+    current: ServingSatelliteEstimate | null
+  ): string => {
+    const sep = Number.isFinite(current?.separationDeg) ? current!.separationDeg.toFixed(2) : '—';
+    const margin = current?.marginDeg !== null && current?.marginDeg !== undefined
+      ? current.marginDeg.toFixed(1)
+      : '0';
+    return t(ESTIMATE_REASON_KEYS[reason], { sep, margin });
+  };
+
   // 转换 SatellitePosition 为 SatelliteData
   const convertToSatelliteData = (
     pos: SatellitePosition,
     serving: SatellitePosition | null
   ): SatelliteData => {
     const separation = serving ? calculateAngularSeparation(pos, serving) : 0;
-    
+
     return {
       name: pos.name,
       norad: pos.noradId,
@@ -76,8 +155,9 @@ export default function SatelliteRadar() {
       elevation: pos.elevation,
       separation: `${separation.toFixed(1)}°`,
       range: `${Math.round(pos.range)} km`,
-      firstSeen: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-      lastSeen: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      // 时间格式跟随当前语言（原来固定 zh-CN，英文界面会出现中文日期顺序）
+      firstSeen: new Date().toLocaleTimeString(i18n.language, { hour12: false }),
+      lastSeen: new Date().toLocaleTimeString(i18n.language, { hour12: false }),
       minutes: 0, // 暂时设为 0，需要历史跟踪
       serving: pos.noradId === serving?.noradId,
     };
@@ -93,7 +173,7 @@ export default function SatelliteRadar() {
 
     loadingRef.current = true;
     setLoading(true);
-    setError(null);
+    setErrorCode(null);
     setLocationError(false);
 
     try {
@@ -101,7 +181,7 @@ export default function SatelliteRadar() {
       const observer = getObserverLocation();
       if (!observer) {
         setLocationError(true);
-        setError('未设置终端位置，请前往设置页面配置经纬度');
+        setErrorCode('no_location');
         loadingRef.current = false;
         setLoading(false);
         return;
@@ -113,12 +193,12 @@ export default function SatelliteRadar() {
 
       setTleInfo({
         source: tleResult.source,
-        text: describeFreshness(tleResult),
+        freshness: describeFreshness(tleResult),
         degraded: tleResult.source === 'seed' || tleResult.source === 'stale-cache',
       });
 
       if (tles.length === 0) {
-        setError('未获取到 TLE 数据');
+        setErrorCode('no_tle');
         loadingRef.current = false;
         setLoading(false);
         return;
@@ -135,12 +215,12 @@ export default function SatelliteRadar() {
       const plausiblePositions = visiblePositions.filter((pos) => pos.range <= MAX_PLAUSIBLE_RANGE_KM);
       if (plausiblePositions.length < visiblePositions.length) {
         console.log(
-          `[SatelliteRadar] 剔除 ${visiblePositions.length - plausiblePositions.length} 颗轨道距离异常的解轨残留`
+          `[SatelliteRadar] dropped ${visiblePositions.length - plausiblePositions.length} satellites with implausible orbital range`
         );
       }
 
       if (plausiblePositions.length === 0) {
-        setError('当前位置没有可见卫星');
+        setErrorCode('no_visible');
         loadingRef.current = false;
         setLoading(false);
         return;
@@ -156,7 +236,7 @@ export default function SatelliteRadar() {
       // 互相差不到 2°，第 3 名甚至可能在正南方，与波束毫无关系。
       let servingPosition: SatellitePosition | null = null;
       let estimate: ServingSatelliteEstimate | null = null;
-      let estimateNote: string | null = null;
+      let reasonCode: ServingReason | 'device_id' | null = null;
 
       // 优先用设备上报的 ID（协议目前没有，但留好口子）
       if (telemetry?.satelliteId) {
@@ -164,7 +244,7 @@ export default function SatelliteRadar() {
         const matchedPosition = plausiblePositions.find((pos) => pos.noradId === servingSatId);
         if (matchedPosition) {
           servingPosition = matchedPosition;
-          estimateNote = '设备上报的服务卫星 ID';
+          reasonCode = 'device_id';
         } else {
           console.warn(
             `Service satellite ${servingSatId} not found in visible positions, falling back to boresight estimate`
@@ -185,7 +265,7 @@ export default function SatelliteRadar() {
           servingSatRef.current?.norad
         );
         servingPosition = estimate.satellite;
-        estimateNote = estimate.reason;
+        reasonCode = estimate.reason;
       }
 
       // 上一帧的估算结果，用于时间连续性判断
@@ -194,7 +274,7 @@ export default function SatelliteRadar() {
         : null;
 
       setEstimate(estimate);
-      setEstimateNote(estimateNote);
+      setEstimateReason(reasonCode);
 
       // 转换数据格式
       const satelliteData = plausiblePositions.map((pos) =>
@@ -206,10 +286,11 @@ export default function SatelliteRadar() {
 
       // 更新缓存信息
       setCacheInfo(getCacheInfo());
-      
+
     } catch (err) {
       console.error('Error loading satellite data:', err);
-      setError(err instanceof Error ? err.message : '加载卫星数据失败');
+      // 错误详情（上游源、HTTP 状态）只进控制台；界面只显示一句可操作的提示
+      setErrorCode(err instanceof TLEFetchError ? 'tle_fetch_failed' : 'load_failed');
     } finally {
       loadingRef.current = false;
       setLoading(false);
@@ -243,20 +324,20 @@ export default function SatelliteRadar() {
   // 监听位置更新事件和页面可见性变化
   useEffect(() => {
     const handleLocationUpdate = () => {
-      console.log('收到位置更新事件，重新加载卫星数据');
+      console.log('Terminal location updated, reloading satellite data');
       loadSatelliteData();
     };
 
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        console.log('页面变为可见，重新加载卫星数据');
+        console.log('Page became visible, reloading satellite data');
         loadSatelliteData();
       }
     };
 
     window.addEventListener('terminal-location-updated', handleLocationUpdate);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     return () => {
       window.removeEventListener('terminal-location-updated', handleLocationUpdate);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -276,6 +357,9 @@ export default function SatelliteRadar() {
   };
 
   // 初始化雷达图
+  //
+  // 图例名与 series 的 name 必须完全一致（echarts 要求），所以统一在这里算一次。
+  // 文案随语言变化 —— 依赖 i18n.language 让切语言时重建图表。
   useEffect(() => {
     if (!radarRef.current || satellites.length === 0) return;
 
@@ -323,7 +407,12 @@ export default function SatelliteRadar() {
           : '#ef4444';
 
     // 图例与 series 必须同名 (echarts 要求), 所以只算一次
-    const servingSeriesName = estimate ? '当前服务(估算)' : '当前服务';
+    const servingSeriesName = estimate
+      ? t('satellite:legend.serving_estimated')
+      : t('satellite:legend.serving');
+    const runnersSeriesName = t('satellite:legend.runners');
+    const visibleSeriesName = t('satellite:legend.visible');
+    const boresightSeriesName = t('satellite:legend.boresight');
 
     // 设备波束指向 —— 估算的参照物，画成十字
     const boresightData =
@@ -331,7 +420,7 @@ export default function SatelliteRadar() {
         ? [
             {
               value: [bsAz, 90 - bsEl],
-              name: '设备波束',
+              name: boresightSeriesName,
               el: bsEl.toFixed(1),
               az: bsAz.toFixed(0),
             },
@@ -354,9 +443,9 @@ export default function SatelliteRadar() {
         // "series not exists"
         data: [
           servingSeriesName,
-          '候选卫星',
-          '可见卫星',
-          '设备波束',
+          runnersSeriesName,
+          visibleSeriesName,
+          boresightSeriesName,
         ],
       },
       angleAxis: {
@@ -391,12 +480,13 @@ export default function SatelliteRadar() {
         textStyle: { color: '#e2e8f0', fontSize: 11 },
         formatter: (params: any) => {
           const data = params.data;
-          return `<b>${data.name}</b><br/>仰角: ${data.el}° · 方位角: ${data.az}°`;
+          // ECharts 的 tooltip 不走 React，文案从字典取当前语言
+          return `<b>${data.name}</b><br/>${t('satellite:serving.elevation')}: ${data.el}° · ${t('satellite:serving.azimuth')}: ${data.az}°`;
         },
       },
       series: [
         {
-          name: '可见卫星',
+          name: visibleSeriesName,
           type: 'scatter',
           coordinateSystem: 'polar',
           data: visibleData,
@@ -405,7 +495,7 @@ export default function SatelliteRadar() {
           emphasis: { scale: 1.6 },
         },
         {
-          name: '候选卫星',
+          name: runnersSeriesName,
           type: 'scatter',
           coordinateSystem: 'polar',
           data: runnersData,
@@ -435,7 +525,7 @@ export default function SatelliteRadar() {
         ...(boresightData.length > 0
           ? [
               {
-                name: '设备波束',
+                name: boresightSeriesName,
                 type: 'scatter' as const,
                 coordinateSystem: 'polar' as const,
                 data: boresightData,
@@ -457,29 +547,31 @@ export default function SatelliteRadar() {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [satellites, estimate, bsAz, bsEl]);
+  }, [satellites, estimate, bsAz, bsEl, t, i18n.language]);
 
   // 统计数据
   const stats = {
     visible: satellites.length,
     distinct: satellites.filter((s) => !s.serving && parseFloat(s.separation) < 25).length + 1,
-    avgElevation: satellites.length > 0 
-      ? (satellites.reduce((sum, s) => sum + s.elevation, 0) / satellites.length).toFixed(1) 
+    avgElevation: satellites.length > 0
+      ? (satellites.reduce((sum, s) => sum + s.elevation, 0) / satellites.length).toFixed(1)
       : '0',
   };
 
   const runners = satellites.filter((s) => !s.serving && parseFloat(s.separation) < 25).slice(0, 4);
 
+  const observer = getObserverLocation();
+
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">卫星雷达</h1>
+          <h1 className="text-3xl font-bold">{t('satellite:page.title')}</h1>
           <p className="text-muted-foreground mt-1">
-            基于 SGP4 轨道模型和 TLE 数据实时计算卫星位置
+            {t('satellite:page.subtitle')}
             {cacheInfo.hasCached && cacheInfo.age && (
               <span className="ml-2 text-xs">
-                · TLE 更新于 {Math.round(cacheInfo.age / 60000)} 分钟前
+                {t('satellite:radar.tle_updated_minutes', { count: Math.round(cacheInfo.age / 60000) })}
               </span>
             )}
           </p>
@@ -496,7 +588,7 @@ export default function SatelliteRadar() {
             ) : (
               <RefreshCw className="w-4 h-4 mr-2" />
             )}
-            刷新 TLE
+            {t('satellite:radar.refresh_tle')}
           </Button>
           {cacheInfo.hasCached && (
             <Button
@@ -505,21 +597,21 @@ export default function SatelliteRadar() {
               onClick={handleClearCache}
               disabled={loading}
             >
-              清除缓存
+              {t('satellite:radar.clear_cache')}
             </Button>
           )}
         </div>
       </div>
 
       {/* 错误提示 */}
-      {error && (
+      {errorCode && (
         <Alert className={locationError ? 'border-orange-500 bg-orange-500/10' : 'border-red-500 bg-red-500/10'}>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="ml-7">
-            {error}
+            {t(ERROR_KEYS[errorCode])}
             {locationError && (
               <a href="/settings" className="ml-2 underline text-accent">
-                前往设置
+                {t('satellite:radar.link_settings')}
               </a>
             )}
           </AlertDescription>
@@ -527,13 +619,20 @@ export default function SatelliteRadar() {
       )}
 
       {/* 位置提示 */}
-      {!locationError && getObserverLocation() && (
+      {!locationError && observer && (
         <Alert className="border-blue-500/50 bg-blue-500/10">
           <MapPin className="h-4 w-4 text-blue-500" />
           <AlertDescription className="ml-7 text-sm">
-            观测位置: {getObserverLocation()?.latitude.toFixed(6)}°N, {getObserverLocation()?.longitude.toFixed(6)}°E
-            {cacheInfo.count && ` · 已加载 ${cacheInfo.count} 颗卫星星历`}
-            {telemetry?.satelliteId && ` · 当前服务卫星: ${telemetry.satelliteId}`}
+            {t('satellite:location.prefix', {
+              lat: observer.latitude.toFixed(6),
+              lon: observer.longitude.toFixed(6),
+            })}
+            {cacheInfo.count
+              ? t('satellite:location.loaded_satellites', { count: cacheInfo.count })
+              : ''}
+            {telemetry?.satelliteId
+              ? t('satellite:location.serving_id', { id: telemetry.satelliteId })
+              : ''}
           </AlertDescription>
         </Alert>
       )}
@@ -547,10 +646,10 @@ export default function SatelliteRadar() {
             <MapPin className="h-4 w-4 text-blue-500" />
           )}
           <AlertDescription className="ml-7 text-sm">
-            {tleInfo.text}
+            {freshnessText(tleInfo.freshness)}
             {tleInfo.degraded && (
               <span className="block mt-1 text-xs text-muted-foreground">
-                轨道参数存在漂移，仰角可能有偏差；恢复网络后会自动刷新。
+                {t('satellite:tle.degraded_warning')}
               </span>
             )}
           </AlertDescription>
@@ -562,31 +661,31 @@ export default function SatelliteRadar() {
           <CardContent className="pt-6 flex items-center justify-center h-96">
             <div className="text-center">
               <Loader2 className="w-12 h-12 animate-spin text-accent mx-auto" />
-              <p className="mt-4 text-muted-foreground">正在计算卫星位置...</p>
+              <p className="mt-4 text-muted-foreground">{t('satellite:loading.calculating')}</p>
               <p className="text-xs text-muted-foreground mt-2">
                 {tleInfo
-                  ? `正在用 ${tleInfo.text} 计算`
-                  : '正在加载星历数据 (TLE) 并运行 SGP4 轨道计算'}
+                  ? t('satellite:loading.with_source', { source: freshnessText(tleInfo.freshness) })
+                  : t('satellite:loading.tle')}
               </p>
             </div>
           </CardContent>
         </Card>
-      ) : error && satellites.length === 0 ? (
+      ) : errorCode && satellites.length === 0 ? (
         // 加载失败且没有任何数据 —— 给出可操作的提示, 不能只转圈
         <Card>
           <CardContent className="pt-6 flex flex-col items-center justify-center h-96 text-center">
             <AlertCircle className="w-12 h-12 text-red-500/70" />
-            <p className="mt-4 text-foreground">{error}</p>
+            <p className="mt-4 text-foreground">{t(ERROR_KEYS[errorCode])}</p>
             <p className="text-xs text-muted-foreground mt-2 max-w-md">
               {locationError
-                ? '在「设置」页填写终端经纬度后即可计算卫星仰角。'
-                : '星历数据是计算卫星位置的必要输入。请检查网络连接后重试。'}
+                ? t('satellite:error.hint_location')
+                : t('satellite:error.hint_tle')}
             </p>
             {!locationError && (
               <div className="mt-4 flex gap-2">
-                <Button onClick={() => loadSatelliteData(true)}>重试</Button>
+                <Button onClick={() => loadSatelliteData(true)}>{t('satellite:radar.retry')}</Button>
                 <Button variant="outline" onClick={() => { clearTLECache(); loadSatelliteData(true); }}>
-                  清除缓存后重试
+                  {t('satellite:radar.retry_after_clear')}
                 </Button>
               </div>
             )}
@@ -600,15 +699,17 @@ export default function SatelliteRadar() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <i className="fa-solid fa-satellite-dish text-accent"></i>
-                  天空视图
+                  {t('satellite:sky.title')}
                 </CardTitle>
-                <CardDescription>极坐标雷达 · 中心为天顶(90°)</CardDescription>
+                <CardDescription>{t('satellite:sky.desc')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div ref={radarRef} style={{ height: '380px', width: '100%' }}></div>
                 <p className="text-xs text-muted-foreground text-center mt-2">
-                  圆心 = 天顶 | 边缘 = 地平线 | 紫色十字 = 设备波束指向
-                  {estimate ? ' | 脉冲标记为估算的服务卫星' : ' | 绿色脉冲 = 当前服务卫星'}
+                  {t('satellite:sky.note_base')}
+                  {estimate
+                    ? t('satellite:sky.note_estimated_suffix')
+                    : t('satellite:sky.note_serving_suffix')}
                 </p>
               </CardContent>
             </Card>
@@ -621,7 +722,7 @@ export default function SatelliteRadar() {
             <Card className="border-accent/40 shadow-lg shadow-accent/20">
               <CardContent className="pt-6">
                 <div className="text-xs text-muted-foreground">
-                  {estimate ? '当前服务卫星 (估算)' : '当前服务卫星 (Active)'}
+                  {estimate ? t('satellite:serving.estimated') : t('satellite:serving.active')}
                 </div>
                 <div className="font-mono text-2xl font-bold text-accent mt-1">
                   {servingSat.name}
@@ -630,7 +731,7 @@ export default function SatelliteRadar() {
                   NORAD ID: {servingSat.norad}
                   {telemetry?.satelliteId && telemetry.satelliteId === parseInt(servingSat.norad) && (
                     <span className="ml-2 px-2 py-0.5 rounded bg-accent/20 text-accent text-[10px]">
-                      已验证
+                      {t('satellite:serving.verified')}
                     </span>
                   )}
                 </div>
@@ -647,41 +748,42 @@ export default function SatelliteRadar() {
                             : 'bg-danger-red/20 text-danger-red'
                       }`}
                     >
-                      置信度:{' '}
-                      {estimate.confidence === 'high'
-                        ? '高'
-                        : estimate.confidence === 'medium'
-                          ? '中'
-                          : '低'}
+                      {t('satellite:serving.confidence', {
+                        level: t(CONFIDENCE_LABEL_KEYS[estimate.confidence]),
+                      })}
                     </span>
                     {estimate.separationDeg !== undefined && !Number.isNaN(estimate.separationDeg) && (
                       <span className="ml-2 text-muted-foreground">
-                        与波束相差 {estimate.separationDeg.toFixed(2)}°
+                        {t('satellite:serving.separation_from_boresight', {
+                          deg: estimate.separationDeg.toFixed(2),
+                        })}
                       </span>
                     )}
-                    {estimateNote && (
+                    {estimateReason && (
                       <div className="text-muted-foreground mt-1 leading-relaxed">
-                        {estimateNote}
+                        {estimateReasonText(estimateReason, estimate)}
                       </div>
                     )}
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
                   <div>
-                    <div className="text-muted-foreground">方位角</div>
+                    <div className="text-muted-foreground">{t('satellite:serving.azimuth')}</div>
                     <div className="font-mono font-semibold">{servingSat.azimuth.toFixed(1)}°</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">仰角</div>
+                    <div className="text-muted-foreground">{t('satellite:serving.elevation')}</div>
                     <div className="font-mono font-semibold">{servingSat.elevation.toFixed(1)}°</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">距离</div>
+                    <div className="text-muted-foreground">{t('satellite:serving.distance')}</div>
                     <div className="font-mono font-semibold">{servingSat.range}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">跟踪时长</div>
-                    <div className="font-mono font-semibold">{servingSat.minutes.toFixed(1)} 分钟</div>
+                    <div className="text-muted-foreground">{t('satellite:serving.track_duration')}</div>
+                    <div className="font-mono font-semibold">
+                      {t('satellite:serving.track_duration_value', { count: servingSat.minutes })}
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -692,43 +794,43 @@ export default function SatelliteRadar() {
           <div className="grid grid-cols-2 gap-3">
             <Card>
               <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground">角距离 / 仰角</div>
+                <div className="text-xs text-muted-foreground">{t('satellite:stats.separation_elevation')}</div>
                 <div className="font-mono text-2xl font-bold text-foreground mt-1">
                   {servingSat?.separation || '—'} / {servingSat?.elevation.toFixed(1)}°
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">与服务卫星 / 仰角</div>
+                <div className="text-xs text-muted-foreground mt-1">{t('satellite:stats.separation_elevation_sub')}</div>
               </CardContent>
             </Card>
 
             <Card>
               <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground">可见卫星数量</div>
+                <div className="text-xs text-muted-foreground">{t('satellite:stats.visible_count')}</div>
                 <div className="font-mono text-2xl font-bold text-foreground mt-1">
-                  {stats.visible} <span className="text-sm text-muted-foreground">颗</span>
+                  {stats.visible} <span className="text-sm text-muted-foreground">{t('satellite:stats.unit_satellites')}</span>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  平均仰角 {stats.avgElevation}°
+                  {t('satellite:stats.avg_elevation', { deg: stats.avgElevation })}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground">候选卫星</div>
+                <div className="text-xs text-muted-foreground">{t('satellite:stats.runners')}</div>
                 <div className="font-mono text-2xl font-bold text-sky-400 mt-1">
-                  {runners.length} <span className="text-sm text-muted-foreground">颗</span>
+                  {runners.length} <span className="text-sm text-muted-foreground">{t('satellite:stats.unit_satellites')}</span>
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">角距离 &lt; 25°</div>
+                <div className="text-xs text-muted-foreground mt-1">{t('satellite:stats.runners_sub')}</div>
               </CardContent>
             </Card>
 
             <Card>
               <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground">不同轨道</div>
+                <div className="text-xs text-muted-foreground">{t('satellite:stats.distinct_orbits')}</div>
                 <div className="font-mono text-2xl font-bold text-sky-400 mt-1">
-                  {stats.distinct} <span className="text-sm text-muted-foreground">颗</span>
+                  {stats.distinct} <span className="text-sm text-muted-foreground">{t('satellite:stats.unit_satellites')}</span>
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">候选 + 服务</div>
+                <div className="text-xs text-muted-foreground mt-1">{t('satellite:stats.distinct_sub')}</div>
               </CardContent>
             </Card>
           </div>
@@ -737,8 +839,8 @@ export default function SatelliteRadar() {
           {runners.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">候选卫星</CardTitle>
-                <CardDescription>距离当前服务卫星最近的卫星</CardDescription>
+                <CardTitle className="text-sm">{t('satellite:runners.title')}</CardTitle>
+                <CardDescription>{t('satellite:runners.desc')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
@@ -762,10 +864,10 @@ export default function SatelliteRadar() {
               <CardTitle className="flex items-center justify-between text-sm">
                 <span>
                   <i className="fa-solid fa-table mr-2 text-accent"></i>
-                  卫星详情列表
+                  {t('satellite:list.title')}
                 </span>
                 <span className="text-xs text-muted-foreground font-mono">
-                  按角距离排序
+                  {t('satellite:list.sorted_by')}
                 </span>
               </CardTitle>
             </CardHeader>
@@ -774,13 +876,13 @@ export default function SatelliteRadar() {
                 <table className="w-full text-xs">
                   <thead className="text-muted-foreground border-b border-border sticky top-0 bg-card">
                     <tr className="text-left">
-                      <th className="py-2 font-medium">卫星名称 / NORAD</th>
-                      <th className="font-medium">持续(分)</th>
-                      <th className="font-medium">角距离</th>
-                      <th className="font-medium">仰角</th>
-                      <th className="font-medium">距离</th>
-                      <th className="font-medium">首次观测</th>
-                      <th className="font-medium">最近观测</th>
+                      <th className="py-2 font-medium">{t('satellite:list.th_name_norad')}</th>
+                      <th className="font-medium">{t('satellite:list.th_duration_min')}</th>
+                      <th className="font-medium">{t('satellite:list.th_separation')}</th>
+                      <th className="font-medium">{t('satellite:list.th_elevation')}</th>
+                      <th className="font-medium">{t('satellite:list.th_distance')}</th>
+                      <th className="font-medium">{t('satellite:list.th_first_seen')}</th>
+                      <th className="font-medium">{t('satellite:list.th_last_seen')}</th>
                     </tr>
                   </thead>
                   <tbody className="font-mono">
@@ -799,7 +901,7 @@ export default function SatelliteRadar() {
                             </span>
                             {s.serving && (
                               <span className="ml-2 px-1 py-0.5 rounded bg-accent/20 text-accent text-[9px]">
-                                服务中
+                                {t('satellite:serving.badge')}
                               </span>
                             )}
                             <br />

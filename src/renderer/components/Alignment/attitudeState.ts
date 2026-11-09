@@ -1,5 +1,5 @@
 /**
- * 姿态估计状态 —— 底层枚举到「人话」的唯一翻译层。
+ * 姿态估计状态 —— 底层枚举到「语义码」的唯一翻译层。
  *
  * ## 为什么必须集中在一处
  *
@@ -12,45 +12,55 @@
  * 协议里根本不存在**。真实设备返回 FILTER_CONVERGED，于是恒等于「未对齐」，
  * 而且页面直接把这个字符串抛给用户看（`姿态估计: FILTER_CONVERGED`）。
  *
- * ## 约束
+ * ## 为什么这里不返回文案
  *
- * 这里是纯函数、无 React 依赖：页面、仪表盘卡片、将来的告警文案都能复用，
+ * 本模块是纯函数、无 React 依赖：页面、仪表盘卡片、将来的告警文案都能复用，
  * 保证同一台设备在三个地方不会被说成三种状态。
+ * 但「说成哪句话」属于视图层 —— 这里只给**语义码**（state / tone）与原始数值，
+ * 视图层用 `t()` 取当前语言。这样单元测试断言的是语义，不会被语言绑架。
  */
 
-import { formatDeg } from './format';
+export type AttitudeTone = 'ok' | 'warn' | 'bad' | 'unknown';
 
-export type AttitudeTone = 'ok' | 'warn' | 'bad' | 'neutral';
+/**
+ * 姿态状态语义码。
+ *
+ * - unreported：设备压根没上报（undefined / 空串）
+ * - unknown：上报了，但本软件不认识这个枚举值（固件差异，原文保留在 rawState）
+ */
+export type AttitudeStateCode =
+  | 'converged'
+  | 'convergence_warning'
+  | 'initializing'
+  | 'reset'
+  | 'invalid'
+  | 'unreported'
+  | 'unknown';
 
 export interface AttitudeStateView {
-  /** 配色分级，UI 据此选颜色，不要自己再判一遍字符串 */
+  /** 配色分级，UI 据此选颜色，不要自己再判一遍语义码 */
   tone: AttitudeTone;
-  /** 图标字符，直接渲染 */
+  /** 图标字符，直接渲染（与语言无关） */
   icon: string;
-  /** 主文案：「姿态传感器已就绪 (精度 ±0.4°)」 */
-  label: string;
-  /** 补充说明，用于 tooltip / 状态行副文案 */
-  detail: string;
+  /** 语义码，视图层据此取 label / detail 文案 */
+  state: AttitudeStateCode;
+  /** 精度不确定度（度）；设备没给时为 undefined，视图层据此决定要不要加括号 */
+  uncertaintyDeg?: number;
+  /** state === 'unknown' 时的原始枚举值，仅用于展示以便现场排查固件差异 */
+  rawState?: string;
   /** 滤波器是否已收敛 —— 判断「是否需要对用户喊话」的唯一依据 */
   converged: boolean;
 }
 
-/** 精度括号：`(精度 ±0.4°)`；拿不到精度时为空串 */
-function precisionNote(uncertaintyDeg: number | undefined): string {
-  if (uncertaintyDeg === undefined || !Number.isFinite(uncertaintyDeg)) return '';
-  return ` (精度 ±${formatDeg(uncertaintyDeg)})`;
-}
-
-const UNKNOWN_STATE: AttitudeStateView = {
-  tone: 'neutral',
+const UNREPORTED_STATE: AttitudeStateView = {
+  tone: 'unknown',
   icon: '⚪',
-  label: '暂未收到姿态状态',
-  detail: '设备尚未上报姿态估计结果，请确认已连接到天线',
+  state: 'unreported',
   converged: false,
 };
 
 /**
- * 枚举 → 人话。
+ * 枚举 → 语义码。
  *
  * `rawState` 大小写不敏感：主进程在不同固件上拿到的可能是
  * `FILTER_CONVERGED`，也可能是小写形式，不该因此在 UI 上分成两种状态。
@@ -60,61 +70,67 @@ export function describeAttitudeState(
   uncertaintyDeg: number | undefined
 ): AttitudeStateView {
   const key = (rawState ?? '').trim().toUpperCase();
-  if (!key) return UNKNOWN_STATE;
+  if (!key) return UNREPORTED_STATE;
+
+  // 精度只在设备真给了有效数字时才带出去，视图层据此渲染「(精度 ±x°)」
+  const precision =
+    uncertaintyDeg !== undefined && Number.isFinite(uncertaintyDeg)
+      ? { uncertaintyDeg }
+      : {};
 
   switch (key) {
     case 'FILTER_CONVERGED':
       return {
         tone: 'ok',
         icon: '🟢',
-        label: `姿态传感器已就绪${precisionNote(uncertaintyDeg)}`,
-        detail: '姿态滤波器已收敛，读数可用于判断天线朝向',
+        state: 'converged',
         converged: true,
+        ...precision,
       };
 
     case 'FILTER_CONVERGENCE_WARNING':
       return {
         tone: 'warn',
         icon: '🟡',
-        label: `姿态传感器正在收敛${precisionNote(uncertaintyDeg)}`,
-        detail: '滤波器还没稳定，读数会持续漂移，请稍等十几秒',
+        state: 'convergence_warning',
         converged: false,
+        ...precision,
       };
 
     case 'FILTER_INITIALIZING':
       return {
         tone: 'warn',
         icon: '🟡',
-        label: `姿态传感器初始化中${precisionNote(uncertaintyDeg)}`,
-        detail: '天线刚上电，正在建立姿态基准',
+        state: 'initializing',
         converged: false,
+        ...precision,
       };
 
     case 'FILTER_RESET':
       return {
         tone: 'warn',
         icon: '🟡',
-        label: `姿态传感器已重置${precisionNote(uncertaintyDeg)}`,
-        detail: '设备检测到移动或重启，正在重新校准',
+        state: 'reset',
         converged: false,
+        ...precision,
       };
 
     case 'INVALID_STATE':
       return {
         tone: 'bad',
         icon: '🔴',
-        label: `姿态数据异常${precisionNote(uncertaintyDeg)}`,
-        detail: '设备自检未通过，建议断电重启天线',
+        state: 'invalid',
         converged: false,
+        ...precision,
       };
 
     default:
       // 未知枚举不做猜测，把原始值露出来，方便现场排查固件差异
       return {
-        tone: 'neutral',
+        tone: 'unknown',
         icon: '⚪',
-        label: `姿态状态未知（${rawState}）`,
-        detail: '当前固件上报了本软件未识别的状态值',
+        state: 'unknown',
+        rawState: rawState?.trim() || key,
         converged: false,
       };
   }

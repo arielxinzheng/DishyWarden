@@ -1,0 +1,114 @@
+{
+  "page": {
+    "title": "卫星雷达",
+    "subtitle": "基于 SGP4 轨道模型和 TLE 数据实时计算卫星位置"
+  },
+  "radar": {
+    "tle_updated_minutes": "· TLE 更新于 {{count}} 分钟前",
+    "refresh_tle": "刷新 TLE",
+    "clear_cache": "清除缓存",
+    "retry": "重试",
+    "retry_after_clear": "清除缓存后重试",
+    "link_settings": "前往设置"
+  },
+  "error": {
+    "no_location": "未设置终端位置，请前往设置页面配置经纬度",
+    "no_tle": "未获取到 TLE 数据",
+    "no_visible": "当前位置没有可见卫星",
+    "tle_fetch": "无法获取星历数据，请检查网络连接后重试",
+    "load_failed": "加载卫星数据失败",
+    "hint_location": "在「设置」页填写终端经纬度后即可计算卫星仰角。",
+    "hint_tle": "星历数据是计算卫星位置的必要输入。请检查网络连接后重试。"
+  },
+  "location": {
+    "prefix": "观测位置: {{lat}}°N, {{lon}}°E",
+    "loaded_satellites": " · 已加载 {{count}} 颗卫星星历",
+    "serving_id": " · 当前服务卫星: {{id}}"
+  },
+  "tle": {
+    "degraded_warning": "轨道参数存在漂移，仰角可能有偏差；恢复网络后会自动刷新。",
+    "freshness_network": "已从网络获取最新星历",
+    "freshness_cache_under_hour": "星历数据不到 1 小时前更新",
+    "freshness_cache_hours": "星历数据 {{count}} 小时前更新",
+    "freshness_stale_cache_hours": "离线模式: 使用 {{count}} 小时前的缓存星历",
+    "freshness_stale_cache_days": "离线模式: 使用 {{count}} 天前的缓存星历",
+    "freshness_seed_hours": "离线模式: 使用内置星历 ({{count}} 小时前)",
+    "freshness_seed_days": "离线模式: 使用内置星历 ({{count}} 天前)"
+  },
+  "loading": {
+    "calculating": "正在计算卫星位置…",
+    "with_source": "正在用 {{source}} 计算",
+    "tle": "正在加载星历数据 (TLE) 并运行 SGP4 轨道计算"
+  },
+  "sky": {
+    "title": "天空视图",
+    "desc": "极坐标雷达 · 中心为天顶(90°)",
+    "note_base": "圆心 = 天顶 | 边缘 = 地平线 | 紫色十字 = 设备波束指向",
+    "note_estimated_suffix": " | 脉冲标记为估算的服务卫星",
+    "note_serving_suffix": " | 绿色脉冲 = 当前服务卫星"
+  },
+  "serving": {
+    "estimated": "当前服务卫星 (估算)",
+    "active": "当前服务卫星 (Active)",
+    "verified": "已验证",
+    "confidence": "置信度: {{level}}",
+    "confidence_high": "高",
+    "confidence_medium": "中",
+    "confidence_low": "低",
+    "separation_from_boresight": "与波束相差 {{deg}}°",
+    "azimuth": "方位角",
+    "elevation": "仰角",
+    "distance": "距离",
+    "track_duration": "跟踪时长",
+    "track_duration_value": "{{count}} 分钟",
+    "badge": "服务中"
+  },
+  "stats": {
+    "separation_elevation": "角距离 / 仰角",
+    "separation_elevation_sub": "与服务卫星 / 仰角",
+    "visible_count": "可见卫星数量",
+    "avg_elevation": "平均仰角 {{deg}}°",
+    "runners": "候选卫星",
+    "runners_sub": "角距离 < 25°",
+    "distinct_orbits": "不同轨道",
+    "distinct_sub": "候选 + 服务",
+    "unit_satellites": "颗"
+  },
+  "runners": {
+    "title": "候选卫星",
+    "desc": "距离当前服务卫星最近的卫星"
+  },
+  "list": {
+    "title": "卫星详情列表",
+    "sorted_by": "按角距离排序",
+    "th_name_norad": "卫星名称 / NORAD",
+    "th_duration_min": "持续(分)",
+    "th_separation": "角距离",
+    "th_elevation": "仰角",
+    "th_distance": "距离",
+    "th_first_seen": "首次观测",
+    "th_last_seen": "最近观测"
+  },
+  "legend": {
+    "visible": "可见卫星",
+    "runners": "候选卫星",
+    "serving": "当前服务",
+    "serving_estimated": "当前服务(估算)",
+    "boresight": "设备波束"
+  },
+  "est": {
+    "no_boresight": "设备未上报波束指向，无法估算服务卫星",
+    "no_visible": "当前视野内没有可见卫星",
+    "abnormal_orbits": "所有候选卫星的轨道距离异常，可能是星历数据有问题",
+    "tight_unique": "波束指向与该候选相差 {{sep}}°，且无其他竞争者",
+    "tight_unique_margin": "波束指向与该候选相差 {{sep}}°，次优落后 {{margin}}°",
+    "tight_continuous": "波束指向与该候选相差 {{sep}}°，虽有相邻候选（差 {{margin}}°），但与上一帧一致",
+    "tight_ambiguous": "波束指向与该候选相差 {{sep}}°，但相邻候选仅差 {{margin}}°，单帧无法区分",
+    "margin_high_offset": "最优候选领先次优 {{margin}}°，但与波束相差 {{sep}}°，疑似星历陈旧",
+    "margin_low_offset": "最优候选领先次优 {{margin}}°，但与波束相差 {{sep}}°，存在偏差",
+    "continuous_ambiguous": "相邻候选间隔小（{{margin}}°），且与波束相差 {{sep}}°，无法可靠区分",
+    "margin_ambiguous": "相邻候选间隔仅 {{margin}}°，无法可靠区分",
+    "outside_window": "最近的候选在 {{sep}}° 外（超出 3° 匹配窗口），可能是星历陈旧或位置设置有误",
+    "device_id": "设备上报的服务卫星 ID"
+  }
+}

@@ -1,5 +1,6 @@
 import { useDish } from '../hooks/useDish';
 import { useMemo, useState, useEffect } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { ObstructionHemisphere } from '../components/Dashboard/ObstructionHemisphere';
 import type { ObstructionEvent } from '../../storage/types';
 import {
@@ -9,7 +10,20 @@ import {
   classifyObstruction,
   assessObstructionImpact,
   describeObstructionAge,
+  type CompassDirection,
 } from '../lib/obstructionAnalysis';
+
+/** 8 方位码 → 字典键（方位文案随语言变化，箭头符号本身与语言无关） */
+const DIRECTION_LABEL_KEYS: Record<CompassDirection, string> = {
+  N: 'obstruction:dir.n',
+  NE: 'obstruction:dir.ne',
+  E: 'obstruction:dir.e',
+  SE: 'obstruction:dir.se',
+  S: 'obstruction:dir.s',
+  SW: 'obstruction:dir.sw',
+  W: 'obstruction:dir.w',
+  NW: 'obstruction:dir.nw',
+};
 
 /**
  * 障碍图页面
@@ -17,6 +31,7 @@ import {
  * 123x123 网格，使用 Canvas 渲染热力图
  */
 export default function ObstructionMap() {
+  const { t } = useTranslation('obstruction');
   const { telemetry, isLoading, error, obstruction } = useDish();
   const [obstructionEvents, setObstructionEvents] = useState<ObstructionEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -58,14 +73,20 @@ export default function ObstructionMap() {
   }, [mapData]);
 
   const impact = stats ? assessObstructionImpact(stats.obstructionPercentage) : null;
-  const ageText = obstruction ? describeObstructionAge(obstruction.timestamp) : null;
+  // 检出时间语义码 → 当前语言文案（分钟/小时/天带数量，unknown/just_now 不带）
+  const age = obstruction ? describeObstructionAge(obstruction.timestamp) : null;
+  const ageText = age ? t(age.labelKey, { count: age.count }) : null;
+  const dominantDirection = stats?.dominantDirection ?? null;
+  const dominantDirectionText = dominantDirection
+    ? t(DIRECTION_LABEL_KEYS[dominantDirection])
+    : null;
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-400">加载障碍图数据...</p>
+          <p className="text-gray-400">{t('obstruction:page.loading')}</p>
         </div>
       </div>
     );
@@ -75,7 +96,7 @@ export default function ObstructionMap() {
     return (
       <div className="p-8">
         <div className="bg-red-900/20 border border-red-500 rounded-lg p-4">
-          <p className="text-red-400">加载失败: {error}</p>
+          <p className="text-red-400">{t('obstruction:page.load_failed', { error })}</p>
         </div>
       </div>
     );
@@ -85,10 +106,8 @@ export default function ObstructionMap() {
     return (
       <div className="p-8">
         <div className="bg-yellow-900/20 border border-yellow-500 rounded-lg p-4">
-          <p className="text-yellow-400">暂无障碍图数据</p>
-          <p className="text-gray-400 text-sm mt-2">
-            设备尚未返回视野遮挡图。恢复连接后会自动显示。
-          </p>
+          <p className="text-yellow-400">{t('obstruction:page.no_data_title')}</p>
+          <p className="text-gray-400 text-sm mt-2">{t('obstruction:page.no_data_desc')}</p>
         </div>
       </div>
     );
@@ -98,7 +117,7 @@ export default function ObstructionMap() {
     <div className="p-8 space-y-6">
       {/* 页面标题 —— 投影方式说明在图表下方的「数据说明」里，这里不再重复 */}
       <div>
-        <h1 className="text-3xl font-bold text-white">Obstructions / 障碍图</h1>
+        <h1 className="text-3xl font-bold text-white">{t('obstruction:page.title')}</h1>
       </div>
 
       {/* 数据来源与新鲜度 —— 模拟图和实测图视觉几乎一样, 必须标出来 */}
@@ -108,9 +127,12 @@ export default function ObstructionMap() {
           : 'border-yellow-500/40 bg-yellow-900/20 text-yellow-300'
       }`}>
         {source === 'real' ? (
-          <>设备实测遮挡图{ageText ? ` · ${ageText}` : ''}</>
+          <>
+            {t('obstruction:source.real')}
+            {ageText ? t('obstruction:source.age_suffix', { age: ageText }) : ''}
+          </>
         ) : (
-          <>当前显示模拟数据（非设备实测）。设备返回遮挡图后会自动切换。</>
+          <>{t('obstruction:source.mock')}</>
         )}
       </div>
 
@@ -118,22 +140,22 @@ export default function ObstructionMap() {
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <StatCard
-            label="总像素数"
+            label={t('obstruction:stat.total_pixels')}
             value={stats.totalPixels.toLocaleString()}
             color="blue"
           />
           <StatCard
-            label="障碍像素"
+            label={t('obstruction:stat.obstructed_pixels')}
             value={stats.obstructedPixels.toLocaleString()}
             color="orange"
           />
           <StatCard
-            label="视野遮挡占比"
+            label={t('obstruction:stat.obstruction_pct')}
             value={`${(stats.obstructionPercentage * 100).toFixed(2)}%`}
             color={stats.obstructionPercentage > 0.10 ? 'red' : 'green'}
           />
           <StatCard
-            label="最大遮挡度"
+            label={t('obstruction:stat.max_obstruction')}
             value={stats.maxObstruction.toFixed(2)}
             // 颜色跟 3D 图的四色分级同源：灰/绿 = 未达遮挡线，橙 = 部分，红 = 挡死。
             // 不再固定用紫色 —— 数值本身就该传达严重程度。
@@ -146,15 +168,24 @@ export default function ObstructionMap() {
             }
             tooltip={
               <>
-                <p>取值范围 0 ~ 1，表示<strong className="text-gray-100">视野内最严重那一点</strong>的信号衰减程度。</p>
-                <p className="mt-1">0 = 该区域天空完全干净；1 = 物理障碍物已将信号完全挡死。</p>
+                <p>
+                  <Trans
+                    i18nKey="obstruction:tip.scale"
+                    components={{ strong: <strong className="text-gray-100" /> }}
+                  />
+                </p>
+                <p className="mt-1">{t('obstruction:tip.extremes')}</p>
                 <p className="mt-1.5 text-gray-400">
-                  与「视野遮挡占比」的区别：这个看<strong className="text-gray-200">单点有多严重</strong>，
-                  占比看<strong className="text-gray-200">被挡住的范围有多大</strong>。
+                  <Trans
+                    i18nKey="obstruction:tip.compare"
+                    components={{ strong: <strong className="text-gray-200" /> }}
+                  />
                 </p>
                 <p className="mt-1.5 text-gray-500">
-                  卡片颜色与 3D 图同源阈值：≤ {OBSTRUCTION_LEVELS.clearMax.toFixed(2)} 无遮挡 ·
-                  ≤ {OBSTRUCTION_LEVELS.partialMax.toFixed(2)} 部分 · &gt; {OBSTRUCTION_LEVELS.partialMax.toFixed(2)} 完全
+                  {t('obstruction:tip.threshold', {
+                    clearMax: OBSTRUCTION_LEVELS.clearMax.toFixed(2),
+                    partialMax: OBSTRUCTION_LEVELS.partialMax.toFixed(2),
+                  })}
                 </p>
               </>
             }
@@ -166,22 +197,22 @@ export default function ObstructionMap() {
       {stats && source === 'real' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <StatCard
-            label="主遮挡方向"
+            label={t('obstruction:stat.direction')}
             value={
-              stats.dominantDirection && stats.dominantAzimuth !== null
-                ? `${azimuthArrow(stats.dominantAzimuth)} ${stats.dominantDirection}`
-                : '无明显遮挡'
+              dominantDirection && stats.dominantAzimuth !== null
+                ? `${azimuthArrow(stats.dominantAzimuth)} ${dominantDirectionText ?? ''}`
+                : t('obstruction:direction.none')
             }
             color="blue"
             hint={
-              stats.dominantDirection
-                ? `方位角约 ${stats.dominantAzimuth?.toFixed(0)}°（相对天线朝向）`
-                : '遮挡在视野内分布均匀，没有占主导的方位'
+              dominantDirection
+                ? t('obstruction:direction.hint', { deg: stats.dominantAzimuth?.toFixed(0) })
+                : t('obstruction:direction.hint_uniform')
             }
           />
           <StatCard
-            label="影响评估"
-            value={impact?.label ?? '—'}
+            label={t('obstruction:stat.impact')}
+            value={impact ? t(impact.labelKey) : '—'}
             color={impact?.color === 'text-danger-red' ? 'red' : impact?.color === 'text-warning-orange' ? 'orange' : 'green'}
           />
         </div>
@@ -193,10 +224,11 @@ export default function ObstructionMap() {
           data={mapData}
           width={700}
           height={550}
-          showLegend={true}
+          // 页面下方自带图例（与本页四色分级同源），半球组件不再重复画一条
+          showLegend={false}
           highlight={
             stats?.dominantAzimuth !== null && stats?.dominantAzimuth !== undefined
-              ? { azimuth: stats.dominantAzimuth, text: stats.dominantDirection ?? '' }
+              ? { azimuth: stats.dominantAzimuth, text: dominantDirectionText ?? '' }
               : null
           }
         />
@@ -204,18 +236,18 @@ export default function ObstructionMap() {
 
       {/* 图例 */}
       <div className="bg-gray-800 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">数据说明</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('obstruction:data_notes.title')}</h3>
         <p className="text-gray-400 text-sm">
-          此视图使用 3D 半球形透视投影显示天线视野。中心代表天顶（正上方），边缘代表地平线。
-          颜色分级与上方「视野遮挡占比」使用同一套判据（归一化遮挡度 ≤ {OBSTRUCTION_LEVELS.clearMax.toFixed(2)} 记作无遮挡，
-          超过 {OBSTRUCTION_LEVELS.partialMax.toFixed(2)} 记作完全遮挡），所以红/橙面积与占比数字一定对得上。
+          {t('obstruction:data_notes.body', {
+            clearMax: OBSTRUCTION_LEVELS.clearMax.toFixed(2),
+            partialMax: OBSTRUCTION_LEVELS.partialMax.toFixed(2),
+          })}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
           {(['unmapped', 'clear', 'partial', 'blocked'] as const).map((level) => (
             <span key={level} className="flex items-center gap-2 text-gray-400">
               <span className={`w-3 h-3 rounded-full ${OBSTRUCTION_LEVEL_COLORS[level].dot}`} />
-              {OBSTRUCTION_LEVEL_COLORS[level].zh}
-              <span className="text-gray-600">· {OBSTRUCTION_LEVEL_COLORS[level].label}</span>
+              {t(OBSTRUCTION_LEVEL_COLORS[level].labelKey)}
             </span>
           ))}
         </div>
@@ -224,14 +256,14 @@ export default function ObstructionMap() {
       {/* 遮挡历史时间轴 */}
       {window.electronAPI && (
         <div className="bg-gray-800 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-white mb-4">遮挡事件历史（最近 7 天）</h3>
-          
+          <h3 className="text-lg font-semibold text-white mb-4">{t('obstruction:events.title')}</h3>
+
           {eventsLoading ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
             </div>
           ) : obstructionEvents.length === 0 ? (
-            <p className="text-gray-400 text-sm">过去 7 天无遮挡事件记录</p>
+            <p className="text-gray-400 text-sm">{t('obstruction:events.empty')}</p>
           ) : (
             <div className="space-y-3">
               {obstructionEvents.map((event, idx) => (
@@ -341,9 +373,12 @@ interface ObstructionEventCardProps {
 }
 
 function ObstructionEventCard({ event }: ObstructionEventCardProps) {
+  const { t, i18n } = useTranslation('obstruction');
+
+  // 日期跟随当前语言（原来固定 zh-CN，切到英文时会出现中文日期顺序）
   const formatDate = (ts: number) => {
     const date = new Date(ts);
-    return date.toLocaleString('zh-CN', {
+    return date.toLocaleString(i18n.language, {
       month: 'numeric',
       day: 'numeric',
       hour: '2-digit',
@@ -352,11 +387,15 @@ function ObstructionEventCard({ event }: ObstructionEventCardProps) {
   };
 
   const formatDuration = (seconds: number) => {
-    if (seconds < 60) return `${seconds}秒`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
+    if (seconds < 60) return t('obstruction:duration.seconds', { count: seconds });
+    if (seconds < 3600) {
+      return t('obstruction:duration.minutes', { count: Math.floor(seconds / 60) });
+    }
     const hours = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
-    return mins > 0 ? `${hours}小时${mins}分钟` : `${hours}小时`;
+    return mins > 0
+      ? t('obstruction:duration.hours_minutes', { count: hours, mins })
+      : t('obstruction:duration.hours', { count: hours });
   };
 
   /**
@@ -377,19 +416,19 @@ function ObstructionEventCard({ event }: ObstructionEventCardProps) {
     low: {
       card: 'border-gray-700/60 bg-gray-900/30',
       bar: 'bg-gray-600',
-      label: '轻微',
+      label: t('obstruction:event.severity_low'),
       labelColor: 'text-gray-400',
     },
     medium: {
       card: 'border-warning-orange/40 bg-warning-orange/5',
       bar: 'bg-warning-orange',
-      label: '中等',
+      label: t('obstruction:event.severity_medium'),
       labelColor: 'text-warning-orange',
     },
     high: {
       card: 'border-danger-red/50 bg-danger-red/10',
       bar: 'bg-danger-red',
-      label: '严重',
+      label: t('obstruction:event.severity_high'),
       labelColor: 'text-danger-red',
     },
   }[severity];
@@ -408,15 +447,17 @@ function ObstructionEventCard({ event }: ObstructionEventCardProps) {
               {formatDate(event.startTs)} - {formatDate(event.endTs)}
             </span>
             <span className="text-sm text-gray-400">
-              持续 {formatDuration(event.durationSec)}
+              {t('obstruction:event.duration', { duration: formatDuration(event.durationSec) })}
             </span>
           </div>
           <div className="flex items-center gap-4 text-sm">
             <span className="text-gray-400">
-              平均遮挡率: <span className="text-white font-medium">{(event.avgFractionObstructed * 100).toFixed(1)}%</span>
+              {t('obstruction:event.avg_obstruction', {
+                value: (event.avgFractionObstructed * 100).toFixed(1),
+              })}
             </span>
             <span className="text-gray-400">
-              峰值: <span className="text-white font-medium">{(peak * 100).toFixed(1)}%</span>
+              {t('obstruction:event.peak', { value: (peak * 100).toFixed(1) })}
             </span>
           </div>
         </div>
@@ -424,4 +465,3 @@ function ObstructionEventCard({ event }: ObstructionEventCardProps) {
     </div>
   );
 }
-
