@@ -105,3 +105,70 @@ describe('parseStatus —— 期望朝向的映射', () => {
     expect(t.alignmentStats?.desiredBoresightAzimuthDeg).not.toBe(0);
   });
 });
+
+/**
+ * ===== 回归：proto3「值为 0 的字段不出现在响应里」=====
+ *
+ * 现象：DishyMock 恢复全部告警后，SLMonitor 里的 high_packet_loss /
+ * severe_weather 一直不消失（occurrence_count 涨到 68，last_seen 持续刷新）。
+ *
+ * 根因：dishGrpc 用 `defaults: false` 加载 proto，proto3 里等于默认值的字段
+ * **根本不会出现在响应里**。旧代码把「丢包率回到 0 ⇒ 字段消失」当成
+ * 「设备没上报 ⇒ 沿用上一帧」，于是丢包率被永久冻结在 0.6，告警永远成立。
+ *
+ * 修法：所有物理量走 `gauge()` —— 缺失即 0。
+ */
+describe('parseStatus —— 物理量缺失必须归零，不能沿用上一帧', () => {
+  it('丢包率从 0.6 恢复为「字段消失」⇒ 必须回到 0（告警要能自愈）', () => {
+    const { parse, setPrev } = mapper();
+    // 第一帧：场景激活，丢包 60%
+    const sick = parse({
+      popPingDropRate: 0.6,
+      downlinkThroughputBps: 120e6,
+      snr: 6,
+      obstructionStats: { fractionObstructed: 0.3 },
+    });
+    expect(sick.popPingDropRate).toBeCloseTo(0.6, 6);
+    setPrev(sick as TelemetryData);
+
+    // 第二帧：场景恢复 —— 0 值的字段在 proto3 里直接消失
+    const healthy = parse({
+      downlinkThroughputBps: 140e6,
+      isSnrAboveNoiseFloor: true,
+    });
+
+    expect(healthy.popPingDropRate).toBe(0);        // ← 修复前是 0.6
+    expect(healthy.snr).toBe(0);                    // ← 修复前是 6
+    expect(healthy.fractionObstructed).toBe(0);     // ← 修复前是 0.3
+    expect(healthy.secondsObstructed).toBe(0);
+  });
+
+  it('恢复后 high_packet_loss 判据不再成立', () => {
+    const { parse, setPrev } = mapper();
+    const sick = parse({ popPingDropRate: 0.6 });
+    setPrev(sick as TelemetryData);
+    const healthy = parse({ popPingLatencyMs: 30 });
+    // 规则判据: (data.popPingDropRate || 0) > 0.1
+    expect((healthy.popPingDropRate || 0) > 0.1).toBe(false);
+  });
+
+  it('真实非零量照常透传', () => {
+    const { parse } = mapper();
+    const t = parse({
+      popPingDropRate: 0.12, popPingLatencyMs: 88, snr: 4,
+      downlinkThroughputBps: 5e6,
+      deviceInfo: { dishTemperature: 61 },
+    });
+    expect(t.popPingDropRate).toBeCloseTo(0.12, 6);
+    expect(t.popPingLatencyMs).toBe(88);
+    expect(t.snr).toBe(4);
+    expect(t.dishTemperature).toBe(61);
+  });
+
+  it('设备重启（uptime 归零）不再被旧值掩盖', () => {
+    const { parse, setPrev } = mapper();
+    setPrev(parse({ deviceState: { uptimeS: 86400 } }) as TelemetryData);
+    const rebooted = parse({ deviceState: {} }); // uptime=0 ⇒ 字段消失
+    expect(rebooted.uptime).toBe(0);
+  });
+});

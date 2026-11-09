@@ -300,6 +300,23 @@ export class DishClient {
       return fallback;
     };
 
+    /**
+     * 读**物理量**（丢包率 / SNR / 吞吐 / 温度 …）。
+     *
+     * ⚠️ 绝对不能沿用上一帧！proto loader 用的是 `defaults: false`
+     * （见 dishGrpc.ts），**proto3 里等于默认值的字段根本不会出现在响应里** ——
+     * 也就是说「丢包率 = 0」和「设备没上报这个字段」在线上是同一个样子。
+     *
+     * 曾经这里写的是 `num(status.popPingDropRate, prev?.popPingDropRate ?? 0)`：
+     * 设备恢复健康、丢包率回到 0 之后，字段消失 ⇒ 沿用上一帧的 0.6
+     * ⇒ `high_packet_loss` / `severe_weather` 永远成立 ⇒ **告警永远不消失**。
+     * 实测就是这样：DishyMock 恢复全部告警后，SLMonitor 里两条告警
+     * 的 occurrence_count 一路涨到 68，last_seen 一直刷新。
+     *
+     * 量值缺失即 0，这才是 proto3 的语义。
+     */
+    const gauge = (v: unknown): number => num(v, 0);
+
     const deviceInfo = (status.deviceInfo ?? {}) as Record<string, unknown>;
     const deviceState = (status.deviceState ?? {}) as Record<string, unknown>;
     const obstructionStats = (status.obstructionStats ?? {}) as Record<string, unknown>;
@@ -307,11 +324,11 @@ export class DishClient {
 
     // dishGetStatus 不带 snr 数值, 只给 isSnrAboveNoiseFloor;
     // SNR 真实值在遮挡图的 snr 数组里 (见 getObstructionMap 的 avgSnr)
-    const snr = num(status.snr, prev?.snr ?? 0);
+    const snr = gauge(status.snr);
 
     // 遮挡统计
     const currentlyObstructed = obstructionStats.currentlyObstructed === true;
-    const fractionObstructed = num(obstructionStats.fractionObstructed, 0);
+    const fractionObstructed = gauge(obstructionStats.fractionObstructed);
 
     // 告警列表: dish 用 alerts 结构体, 保留原始对象结构
     const alertObj = (status.alerts ?? {}) as Record<string, unknown>;
@@ -342,7 +359,7 @@ export class DishClient {
       : prev?.dishIssues;
 
     // 原始值
-    const rawDropRate = num(status.popPingDropRate, prev?.popPingDropRate ?? 0);
+    const rawDropRate = gauge(status.popPingDropRate);
     const downlinkBps = num(status.downlinkThroughputBps, 0);
 
     // 数据合理性检查：吞吐量高但丢包率 100% 是数据源异常
@@ -356,7 +373,7 @@ export class DishClient {
       // 协议里没有 state 枚举 (DishyMock proto 明确注明"被测方全程不读"),
       // 所以连接状态只能从实际链路指标推导 —— 见 deriveState()
       state: 'SEARCHING',
-      uptime: num(deviceState.uptimeS, prev?.uptime ?? 0),
+      uptime: gauge(deviceState.uptimeS),
 
       popPingLatencyMs: num(status.popPingLatencyMs, 0),
       popPingDropRate: sanitizedDropRate,
@@ -364,32 +381,29 @@ export class DishClient {
       uplinkThroughputBps: num(status.uplinkThroughputBps, 0),
 
       snr,
-      secondsObstructed: num(obstructionStats.secondsObstructed, prev?.secondsObstructed ?? 0),
+      secondsObstructed: gauge(obstructionStats.secondsObstructed),
       fractionObstructed,
       currentlyObstructed,
 
-      satelliteId: num(status.satelliteId, prev?.satelliteId ?? 0),
+      satelliteId: gauge(status.satelliteId),
       secondsToFirstNonemptySlot: num(status.secondsToFirstNonemptySlot, 0),
 
       obstructionMap: prev?.obstructionMap,
       obstructionMapSource: prev?.obstructionMapSource,
       obstructionMapTimestamp: prev?.obstructionMapTimestamp,
 
-      boresightAzimuthDeg: num(status.boresightAzimuthDeg, prev?.boresightAzimuthDeg ?? 0),
-      boresightElevationDeg: num(status.boresightElevationDeg, prev?.boresightElevationDeg ?? 0),
+      boresightAzimuthDeg: status.boresightAzimuthDeg === undefined ? prev?.boresightAzimuthDeg : gauge(status.boresightAzimuthDeg),
+      boresightElevationDeg: status.boresightElevationDeg === undefined ? prev?.boresightElevationDeg : gauge(status.boresightElevationDeg),
       attitudeEstimationState:
         typeof alignment.attitudeEstimationState === 'string'
           ? alignment.attitudeEstimationState
           : prev?.attitudeEstimationState,
-      tiltAngleDeg: num(alignment.tiltAngleDeg, prev?.tiltAngleDeg ?? 0),
+      tiltAngleDeg: gauge(alignment.tiltAngleDeg),
       alignmentStats: {
         validS: alignment.hasActuators !== undefined
           ? alignment.hasActuators === 'HAS_ACTUATORS_YES'
           : prev?.alignmentStats?.validS,
-        attitudeUncertaintyDeg: num(
-          alignment.attitudeUncertaintyDeg,
-          prev?.alignmentStats?.attitudeUncertaintyDeg ?? 0
-        ),
+        attitudeUncertaintyDeg: gauge(alignment.attitudeUncertaintyDeg),
         desiredBoresightAzimuthDeg:
           parseFiniteNumber(alignment.desiredBoresightAzimuthDeg) ??
           prev?.alignmentStats?.desiredBoresightAzimuthDeg,
@@ -398,8 +412,8 @@ export class DishClient {
           prev?.alignmentStats?.desiredBoresightElevationDeg,
       },
 
-      dishTemperature: num(deviceInfo.dishTemperature, prev?.dishTemperature ?? 0),
-      powerSupplyTemperature: num(deviceInfo.powerSupplyTemperature, prev?.powerSupplyTemperature ?? 0),
+      dishTemperature: gauge(deviceInfo.dishTemperature),
+      powerSupplyTemperature: gauge(deviceInfo.powerSupplyTemperature),
       hardwareVersion:
         typeof deviceInfo.hardwareVersion === 'string'
           ? deviceInfo.hardwareVersion
@@ -411,14 +425,14 @@ export class DishClient {
       
       // GPS/GNSS 定位状态
       gpsValid: (status.gpsStats as Record<string, unknown> | undefined)?.gpsValid === true,
-      gpsSats: num((status.gpsStats as Record<string, unknown> | undefined)?.gpsSats, prev?.gpsSats ?? 0),
+      gpsSats: gauge((status.gpsStats as Record<string, unknown> | undefined)?.gpsSats),
       gpsConvergenceState:
         typeof (status.gpsStats as Record<string, unknown> | undefined)?.pntFilterConvergenceState === 'string'
           ? String((status.gpsStats as Record<string, unknown> | undefined)?.pntFilterConvergenceState)
           : prev?.gpsConvergenceState,
       
       // 以太网状态
-      ethSpeedMbps: num(status.ethSpeedMbps, prev?.ethSpeedMbps ?? 0),
+      ethSpeedMbps: gauge(status.ethSpeedMbps),
       ethDuplex:
         typeof status.ethDuplex === 'string'
           ? status.ethDuplex
