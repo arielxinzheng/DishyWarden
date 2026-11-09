@@ -90,28 +90,34 @@ describe('alertFormat.ts - JSON 容错解析', () => {
   });
 
   describe('formatAlertDuration', () => {
-    it('29秒显示为"不到 1 分钟"', () => {
+    // 返回值是语义结构而不是成句文案：同一个时长在中英文里语序不同，
+    // 拼字符串只能满足一种语言。文案渲染在 AlertCard 里用 i18n 完成。
+    it('29秒返回「不到 1 分钟」语义', () => {
       const start = '2024-01-15T10:00:00Z';
       const end = '2024-01-15T10:00:29Z';
-      expect(formatAlertDuration(start, end)).toBe('不到 1 分钟');
+      expect(formatAlertDuration(start, end)).toEqual({ kind: 'under_minute' });
     });
 
-    it('小于 1 小时显示分钟', () => {
+    it('小于 1 小时返回分钟数', () => {
       const start = '2024-01-15T10:00:00Z';
       const end = '2024-01-15T10:25:00Z';
-      expect(formatAlertDuration(start, end)).toBe('25 分钟');
+      expect(formatAlertDuration(start, end)).toEqual({ kind: 'minutes', minutes: 25 });
     });
 
-    it('小于 24 小时显示小时+分钟', () => {
+    it('小于 24 小时返回小时+分钟', () => {
       const start = '2024-01-15T10:00:00Z';
       const end = '2024-01-15T12:35:00Z';
-      expect(formatAlertDuration(start, end)).toBe('2 小时 35 分钟');
+      expect(formatAlertDuration(start, end)).toEqual({
+        kind: 'hours_minutes',
+        hours: 2,
+        minutes: 35,
+      });
     });
 
-    it('大于 24 小时显示天数', () => {
+    it('大于 24 小时返回天数', () => {
       const start = '2024-01-15T10:00:00Z';
       const end = '2024-01-17T14:00:00Z';
-      expect(formatAlertDuration(start, end)).toBe('2 天');
+      expect(formatAlertDuration(start, end)).toEqual({ kind: 'days', days: 2 });
     });
 
     it('无效时间戳返回 null', () => {
@@ -125,9 +131,9 @@ describe('alertFormat.ts - JSON 容错解析', () => {
       expect(formatAlertDuration(start, end)).toBeNull();
     });
 
-    it('开始和结束相同返回"不到 1 分钟"', () => {
+    it('开始和结束相同返回「不到 1 分钟」语义', () => {
       const time = '2024-01-15T10:00:00Z';
-      expect(formatAlertDuration(time, time)).toBe('不到 1 分钟');
+      expect(formatAlertDuration(time, time)).toEqual({ kind: 'under_minute' });
     });
   });
 });

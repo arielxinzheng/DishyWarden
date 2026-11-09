@@ -43,20 +43,33 @@ export function parseEvidence(
   }
 }
 
+/**
+ * 告警持续时长的**语义描述**。
+ *
+ * 这里刻意不返回任何成句的字符串：同一个时长在中/英文里的语序、单位、
+ * 复数形态都不同（`2 小时 35 分钟` / `2 h 35 min`），拼在一层逻辑里必然
+ * 出现某一语言硬编码。只给出"多长"的结构，具体文案由视图层用 i18n 渲染。
+ */
+export type AlertDuration =
+  | { kind: 'under_minute' }
+  | { kind: 'minutes'; minutes: number }
+  | { kind: 'hours_minutes'; hours: number; minutes: number }
+  | { kind: 'days'; days: number };
+
 /** 计算告警持续时长, 无法解析返回 null */
 export function formatAlertDuration(
   firstSeen: string,
   lastSeen: string
-): string | null {
+): AlertDuration | null {
   const start = new Date(firstSeen).getTime();
   const end = new Date(lastSeen).getTime();
   if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
 
   const mins = Math.round((end - start) / 60000);
-  if (mins < 1) return '不到 1 分钟';
-  if (mins < 60) return `${mins} 分钟`;
+  if (mins < 1) return { kind: 'under_minute' };
+  if (mins < 60) return { kind: 'minutes', minutes: mins };
 
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} 小时 ${mins % 60} 分钟`;
-  return `${Math.floor(hours / 24)} 天`;
+  if (hours < 24) return { kind: 'hours_minutes', hours, minutes: mins % 60 };
+  return { kind: 'days', days: Math.floor(hours / 24) };
 }

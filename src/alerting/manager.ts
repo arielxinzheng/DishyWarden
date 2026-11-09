@@ -481,6 +481,8 @@ export class AlertManager extends EventEmitter {
           '已连接路由器数量反复变化，说明有路由器或下游设备在反复断开重连，通常指向网线 / PoE / 供电不稳',
         evidence: (data) => ({
           connected_router_count: data.connectedRouterCount,
+          // 变化次数要进 evidence —— 渲染层要用它做插值（"变化 {{count}} 次"）
+          change_count: this.recentRouterCountChanges().length,
           state: data.state,
           uptime_s: data.uptime,
         }),
@@ -755,6 +757,8 @@ export class AlertManager extends EventEmitter {
           satellite_id: data.satelliteId,
           obstructed: data.currentlyObstructed,
           fraction_obstructed: data.fractionObstructed,
+          // 翻转次数同理，供前端插值
+          flip_count: this.recentLinkFlips(),
         }),
         recommendations: [
           '检查天线视野是否被严重遮挡',
