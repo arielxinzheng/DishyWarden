@@ -261,6 +261,17 @@ export class DishClient {
         telemetry.obstructionMapTimestamp = undefined;
       }
 
+      // ⚠️ 必须在这里**复核**一次状态。
+      //
+      // `parseStatus` 判状态时 `status.snr` 还不存在 —— `current` 固件根本没有
+      // 这个字段（只给 `isSnrAboveNoiseFloor` 布尔量），真实 SNR 在上一步的
+      // 遮挡图里。若不复核，`isSnrAboveNoiseFloor=false` 的场合（典型: 恶劣天气
+      // 导致 SNR 低于噪声底）会被判成 SEARCHING，进而误报：
+      //   dish_offline（critical, "天线未连接"）—— 实际下行仍有 140 Mbps
+      //   frequent_searching（warning, "持续搜星"）—— 实际链路是通的
+      // 而真正应该触发的 severe_weather 因为要求 state === 'ONLINE' 反而漏报。
+      telemetry.state = this.deriveState(status, telemetry);
+
       this.lastTelemetry = telemetry;
       return telemetry;
     } catch (error) {
@@ -475,6 +486,8 @@ export class DishClient {
       dishIssues,
     };
 
+    // 帧内初判。⚠️ 这一步跑的时候还拿不到真实 SNR —— 它在遮挡图里，
+    // 由 `getTelemetry` 随后拉取。所以 getTelemetry 拿到遮挡图 SNR 后会**复核**一次。
     telemetry.state = this.deriveState(status, telemetry);
     return telemetry;
   }
