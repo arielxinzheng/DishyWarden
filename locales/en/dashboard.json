@@ -288,7 +288,8 @@
     "retry": "Retry connection",
     "refresh_now": "Refresh now",
     "manual": "Manual",
-    "official_site": "Official site"
+    "official_site": "Official site",
+    "official_site_hint": "Opens the Starlink website in a new tab"
   },
   "route": {
     "title": "Traceroute",

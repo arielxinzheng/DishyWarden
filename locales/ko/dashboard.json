@@ -288,7 +288,8 @@
     "retry": "연결 다시 시도",
     "refresh_now": "즉시 새로고침",
     "manual": "수동",
-    "official_site": "공식 사이트"
+    "official_site": "공식 사이트",
+    "official_site_hint": "새 탭에서 스타링크 공식 사이트를 엽니다"
   },
   "route": {
     "title": "경로 추적",

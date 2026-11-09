@@ -288,7 +288,8 @@
     "retry": "Thử kết nối lại",
     "refresh_now": "Làm mới ngay",
     "manual": "Thủ công",
-    "official_site": "Trang web chính thức"
+    "official_site": "Trang web chính thức",
+    "official_site_hint": "Mở trang web chính thức của Starlink trong tab mới"
   },
   "route": {
     "title": "Truy vết tuyến",

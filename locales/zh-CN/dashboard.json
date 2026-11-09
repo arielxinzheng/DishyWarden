@@ -288,7 +288,8 @@
     "retry": "重试连接",
     "refresh_now": "立即刷新",
     "manual": "手动",
-    "official_site": "官网"
+    "official_site": "官网",
+    "official_site_hint": "在新标签页打开星链官网"
   },
   "route": {
     "title": "路由跟踪",

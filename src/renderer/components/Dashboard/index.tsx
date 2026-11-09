@@ -11,7 +11,7 @@ import {
   WifiOff,
   RefreshCw,
   Clock,
-  Globe,
+  ExternalLink,
   ChevronDown,
 } from 'lucide-react';
 import { useDish, useDishHistory, useHistorySummary, type ObstructionData } from '../../hooks/useDish';
@@ -490,8 +490,10 @@ export default function Dashboard() {
             target="_blank"
             rel="noopener noreferrer"
             className="hidden lg:flex items-center gap-2 px-3 py-2 rounded-md border border-sky-blue/40 bg-sky-blue/10 text-sky-blue hover:bg-sky-blue/20 transition-colors text-sm"
+            title={t('dashboard:app.official_site_hint')}
           >
-            <Globe className="w-4 h-4" />
+            {/* 🌐 是语言切换器的图标，这里用"外链"语义 —— 点它会离开仪表盘、在新标签页打开官网 */}
+            <ExternalLink className="w-4 h-4" />
             <span className="font-medium">{t('dashboard:app.official_site')}</span>
           </a>
 
