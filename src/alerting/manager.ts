@@ -67,6 +67,16 @@ const LINK_FLIP_WINDOW_MS = 10 * 60_000;
 const LINK_FLIP_THRESHOLD = 3;
 /** 连续卡在 SEARCHING 超过该时长 ⇒ 同样判为「持续搜星连不上」 */
 const SEARCHING_STUCK_MS = 10 * 60_000;
+/**
+ * 静默期：最后一次翻转之后稳定该时长，就认为「不再频繁重连」，告警应当恢复。
+ *
+ * 为什么不能只靠 10 分钟计数窗口：窗口内的翻转会一直留在数组里，
+ * 于是链路稳定之后告警还要**挂满 10 分钟**才消失。用户看到的画面是
+ * 「顶部状态已是 ONLINE、图表也平稳，但告警还在」—— 这和之前那个
+ * 「设备恢复了告警不消失」的观感是同一类问题。
+ * 所以判定 = 窗口内有足够翻转 **且** 最近一次翻转足够新。
+ */
+const LINK_FLIP_QUIET_MS = 5 * 60_000;
 
 export class AlertManager extends EventEmitter {
   private db: AlertDatabase;
@@ -638,7 +648,21 @@ export class AlertManager extends EventEmitter {
         // 而且只看单帧，真正的频繁重连（帧与帧之间反复横跳）根本抓不到。
         condition: () => {
           const now = Date.now();
-          if (this.recentLinkFlips(now) >= LINK_FLIP_THRESHOLD) return true;
+
+          // 判据一：窗口内翻转够多，且最近还在翻（稳定 LINK_FLIP_QUIET_MS 就撤）
+          const flips = this.recentLinkFlips(now);
+          const lastFlip = this.linkFlips.length > 0
+            ? this.linkFlips[this.linkFlips.length - 1]
+            : null;
+          if (
+            flips >= LINK_FLIP_THRESHOLD &&
+            lastFlip !== null &&
+            now - lastFlip <= LINK_FLIP_QUIET_MS
+          ) {
+            return true;
+          }
+
+          // 判据二：一直卡在搜星
           return this.searchingSince !== null && now - this.searchingSince >= SEARCHING_STUCK_MS;
         },
         summary: () => {

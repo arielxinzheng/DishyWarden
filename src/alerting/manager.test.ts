@@ -453,6 +453,31 @@ describe('alerting 集成测试 - AlertManager', () => {
       expect(active.some((a) => a.alert_type === 'frequent_searching')).toBe(true);
     });
 
+    it('停止抖动满 5 分钟静默期后告警自动恢复', async () => {
+      for (let i = 0; i < 6; i++) {
+        await manager.checkTelemetry(
+          createMockTelemetry({ state: i % 2 === 0 ? 'ONLINE' : 'SEARCHING' })
+        );
+      }
+      expect(
+        manager.getActiveAlerts().some((a) => a.alert_type === 'frequent_searching')
+      ).toBe(true);
+
+      // 把翻转时刻整体推到 6 分钟前：仍在 10 分钟计数窗口内（计数≥3），
+      // 但已超过 5 分钟静默期 ⇒ 视为「已经稳定下来」，应当恢复
+      (manager as any).linkFlips = (manager as any).linkFlips.map(
+        (t: number) => t - 6 * 60_000
+      );
+      // 上一帧停在 SEARCHING；若直接喂 ONLINE，这一帧本身又会被记成一笔新翻转，
+      // 所以先把"上一次状态"也置为 ONLINE，模拟链路其实早就稳住了。
+      (manager as any).lastLinkState = 'ONLINE';
+
+      await manager.checkTelemetry(createMockTelemetry({ state: 'ONLINE' }));
+      expect(
+        manager.getActiveAlerts().some((a) => a.alert_type === 'frequent_searching')
+      ).toBe(false);
+    });
+
     it('状态稳定 ONLINE 时不报 frequent_searching', async () => {
       for (let i = 0; i < 10; i++) {
         await manager.checkTelemetry(createMockTelemetry({ state: 'ONLINE' }));
