@@ -1,0 +1,9 @@
+{
+  "nav_dashboard": "Dashboard",
+  "nav_obstruction": "Obstruction Map",
+  "nav_alignment": "Alignment",
+  "nav_satellites": "Satellite Radar",
+  "nav_alerts": "Alerts",
+  "nav_settings": "Settings",
+  "subtitle": "Starlink Monitor"
+}

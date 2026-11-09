@@ -1,0 +1,326 @@
+{
+  "severity": {
+    "critical": "严重",
+    "warning": "警告",
+    "info": "提示"
+  },
+  "status": {
+    "new": "新增",
+    "ongoing": "持续中",
+    "resolved": "已恢复",
+    "acknowledged": "已确认",
+    "snoozed": "已静默"
+  },
+  "types": {
+    "dish_offline": {
+      "title": "天线设备离线",
+      "summary": "天线状态：{{state}}，无法连接到卫星网络",
+      "recommendations": [
+        "检查电源适配器与 PoE 线缆",
+        "重启天线设备"
+      ]
+    },
+    "high_latency": {
+      "title": "网络延迟过高",
+      "summary": "延迟高达 {{latency}} ms",
+      "recommendations": [
+        "检查是否处于网络拥塞时段",
+        "尝试重启路由器"
+      ]
+    },
+    "high_packet_loss": {
+      "title": "严重丢包",
+      "summary": "丢包率 {{rate}}%",
+      "recommendations": [
+        "检查 PoE 线缆与接头",
+        "确认卫星链路是否受天气影响"
+      ]
+    },
+    "obstruction_detected": {
+      "title": "检测到遮挡",
+      "summary": "视野遮挡占比 {{frac}}%",
+      "recommendations": [
+        "查看障碍图定位遮挡方向",
+        "移除或调整遮挡物"
+      ]
+    },
+    "thermal_throttle": {
+      "title": "天线限速（过热）",
+      "summary": "天线温度 {{temp}}°，已触发降频保护",
+      "recommendations": [
+        "确保天线通风散热",
+        "避免阳光直射天线外壳"
+      ]
+    },
+    "alignment_issue": {
+      "title": "天线对准异常",
+      "summary": "姿态不确定度 {{err}}°，指向偏差超出容差",
+      "recommendations": [
+        "在“校准”页按提示微调朝向",
+        "确认天线安装牢固无晃动"
+      ]
+    },
+    "motors_stowed": {
+      "title": "天线处于收纳状态",
+      "summary": "电机已收起天线，无法指向卫星",
+      "recommendations": [
+        "在设置中取消收纳 / 恢复工作状态",
+        "检查是否触发了自动收纳策略"
+      ]
+    },
+    "gnss_positioning": {
+      "title": "GNSS 定位异常",
+      "summary": "可见卫星 {{sats}} 颗，定位尚未收敛",
+      "recommendations": [
+        "等待 5-10 分钟让定位收敛",
+        "确认天线视野上方开阔"
+      ]
+    },
+    "dish_heating": {
+      "title": "天线正在除冰加热",
+      "summary": "低温环境下开启加热，天线温度 {{temp}}°",
+      "recommendations": [
+        "属正常除冰行为，通常会自动结束",
+        "若长期不结束请检查环境温度传感器"
+      ]
+    },
+    "slow_ethernet": {
+      "title": "以太网速率降级",
+      "summary": "协商速率仅 {{speed}} Mbps",
+      "recommendations": [
+        "更换损坏或劣质的网线",
+        "确认网口接触良好"
+      ]
+    },
+    "cable_connectivity": {
+      "title": "线缆连接异常",
+      "summary": "天线到路由器的链路间歇中断",
+      "recommendations": [
+        "检查 PoE 线缆是否松动",
+        "确认线缆无物理损坏"
+      ]
+    },
+    "dns_resolution": {
+      "title": "DNS 解析异常",
+      "summary": "设备报告 DNS 异常（状态 {{state}}）",
+      "recommendations": [
+        "检查路由器与系统的 DNS 设置",
+        "尝试改用 1.1.1.1 或 8.8.8.8"
+      ]
+    },
+    "router_flapping": {
+      "title": "路由器反复掉线",
+      "summary": "近 10 分钟已连接路由器数量变化 {{count}} 次",
+      "recommendations": [
+        "检查天线到路由器的 PoE 网线",
+        "确认路由器供电稳定"
+      ]
+    },
+    "low_throughput": {
+      "title": "网络速率过低",
+      "summary": "下行仅 {{down}} Mbps",
+      "recommendations": [
+        "确认没有大流量占用",
+        "检查是否存在遮挡或信号衰减"
+      ]
+    },
+    "low_snr": {
+      "title": "信号质量差",
+      "summary": "SNR 仅 {{snr}} dB",
+      "recommendations": [
+        "检查天线视野是否被遮挡",
+        "确认天线仰角与朝向"
+      ]
+    },
+    "severe_weather": {
+      "title": "恶劣天气影响信号",
+      "summary": "丢包 {{rate}}%，SNR {{snr}} dB",
+      "recommendations": [
+        "天气好转后通常自动恢复",
+        "持续异常时检查天线是否有积水积雪"
+      ]
+    },
+    "high_temperature": {
+      "title": "设备温度过高",
+      "summary": "天线 {{temp}}°，电源 {{temp2}}°",
+      "recommendations": [
+        "改善设备散热环境",
+        "避免长时间阳光直射"
+      ]
+    },
+    "poe_power": {
+      "title": "PoE / 电源异常",
+      "summary": "设备频繁重启（已运行 {{minutes}} 分钟）",
+      "recommendations": [
+        "检查电源适配器与 PoE 供电",
+        "更换供电设备测试"
+      ]
+    },
+    "router_offline": {
+      "title": "路由器离线",
+      "summary": "未检测到已连接路由器（当前 {{count}} 台）",
+      "recommendations": [
+        "检查路由器电源与指示灯",
+        "确认路由器 LAN 口正常"
+      ]
+    },
+    "frequent_searching": {
+      "title": "频繁断线重连",
+      "summary": "近 10 分钟连接状态切换 {{count}} 次",
+      "recommendations": [
+        "检查天线视野遮挡与朝向",
+        "确认供电与线缆连接稳定"
+      ]
+    },
+    "wifi_signal": {
+      "title": "WiFi 信号问题",
+      "summary": "RSSI {{rssi}} dBm",
+      "recommendations": [
+        "靠近路由器或增加 Mesh 节点",
+        "切换到干扰更少的信道"
+      ]
+    },
+    "collector_heartbeat_lost": {
+      "title": "采集器心跳丢失",
+      "summary": "后台采集服务已停止响应，数据可能中断",
+      "recommendations": [
+        "重启应用以恢复采集",
+        "检查是否被防火墙拦截"
+      ]
+    },
+    "service_restricted": {
+      "title": "服务受限",
+      "summary": "当前服务等级受限（{{service}}）",
+      "recommendations": [
+        "检查账户状态与套餐余量",
+        "联系服务商确认限制原因"
+      ]
+    },
+    "service_not_activated": {
+      "title": "服务未激活",
+      "summary": "设备尚未激活订阅",
+      "recommendations": [
+        "完成设备激活流程",
+        "确认账户已绑定该终端"
+      ]
+    },
+    "location_policy_violation": {
+      "title": "位置策略异常",
+      "summary": "当前位置与服务授权区域不符",
+      "recommendations": [
+        "确认终端未被移动到其他区域",
+        "检查账户的服务地址设置"
+      ]
+    },
+    "account_suspended": {
+      "title": "账户已暂停",
+      "summary": "账户因欠费或策略被暂停服务",
+      "recommendations": [
+        "补缴费用或更新支付方式",
+        "联系服务商恢复账户"
+      ]
+    },
+    "roaming": {
+      "title": "漫游状态",
+      "summary": "当前处于漫游网络（{{service}}）",
+      "recommendations": [
+        "漫游期间速率可能受限属正常",
+        "确认所在区域是否支持漫游服务"
+      ]
+    },
+    "no_satellite_schedule": {
+      "title": "无卫星调度",
+      "summary": "卫星调度不可用，可能为区域容量不足",
+      "recommendations": [
+        "稍后重试，调度会周期性下发",
+        "确认所在区域是否有覆盖"
+      ]
+    },
+    "dns_failure": {
+      "title": "域名解析失败",
+      "summary": "{{detail}}",
+      "recommendations": [
+        "检查本地 DNS 配置",
+        "尝试改用公共 DNS"
+      ],
+      "case_user_only": "基础网络畅通，但当前域名服务器无响应",
+      "case_both": "用户态与基准态解析均失败：网络层故障或域名不存在",
+      "case_slow": "本地 DNS 延迟明显高于基准，解析偏慢",
+      "case_generic": "域名解析失败，网页可能无法打开"
+    }
+  },
+  "page": {
+    "title": "告警",
+    "subtitle": "天线异常与网络质量告警",
+    "view_active": "活跃告警",
+    "view_history": "历史记录",
+    "refresh": "刷新",
+    "filter_all_count": "全部 {{count}}",
+    "filter_critical_count": "严重 {{count}}",
+    "filter_warning_count": "警告 {{count}}",
+    "filter_info_count": "提示 {{count}}",
+    "error_electron_only": "告警数据由主进程采集，需要在 Electron 环境中查看",
+    "error_load_failed": "加载告警失败：{{detail}}",
+    "empty_no_active": "无活跃告警",
+    "empty_filtered": "该分类下没有告警",
+    "empty_history": "该时间范围内没有告警记录",
+    "pagination": "第 {{page}} / {{pages}} 页，共 {{total}} 条",
+    "prev_page": "上一页",
+    "next_page": "下一页",
+    "default_window_hint": "默认仅显示最近 {{days}} 天的记录，可选择日期范围查看更早历史",
+    "day_count": "{{count}} 条",
+    "false_positive_ack": "感谢反馈，已为您清除该提示，我们将持续优化检测算法。"
+  },
+  "card": {
+    "status_false_positive": "🚫 已标记误报",
+    "duration_under_minute": "不到 1 分钟",
+    "duration_hours_minutes": "{{hours}} 小时 {{minutes}} 分钟",
+    "duration_days": "{{count}} 天",
+    "snooze_until_resolved": "本次已忽略",
+    "snooze_remaining_minutes": "剩余 {{count}} 分钟",
+    "snooze_remaining_hours": "剩余 {{count}} 小时",
+    "snooze_remaining_hours_minutes": "剩余 {{hours}} 小时 {{minutes}} 分钟",
+    "first_seen": "首次 {{time}}",
+    "last_seen": "最近 {{time}}",
+    "occurrences": "触发 {{count}} 次",
+    "duration": "持续 {{duration}}",
+    "evidence": "证据数据",
+    "recommendations": "建议处理",
+    "unsnooze_tooltip": "恢复提醒",
+    "snooze_menu_tooltip": "忽略选项",
+    "undo_false_positive_tooltip": "撤销误报标记，退回活跃告警",
+    "undo": "撤销"
+  },
+  "filter": {
+    "date_range": "日期范围",
+    "range_value": "{{from}} - {{to}}",
+    "start_date": "起始日期",
+    "end_date": "结束日期",
+    "range_invalid": "起始日期不能晚于结束日期",
+    "range_overrides_default": "选定后覆盖默认的最近 {{days}} 天",
+    "clear_range": "清除范围",
+    "apply": "应用",
+    "status_all": "全部状态",
+    "status_resolved": "已恢复",
+    "status_false_positive": "误报",
+    "search_placeholder": "搜索摘要 / 描述 / 类型",
+    "clear_keyword": "清空关键词",
+    "day_today": "今日 ({{date}})",
+    "day_yesterday": "昨日 ({{date}})",
+    "day_unknown": "日期未知"
+  },
+  "shell": {
+    "area_app": "应用",
+    "area_layout": "界面布局",
+    "error_electron_only": "需要在 Electron 环境中运行",
+    "error_connect_timeout": "连接超时：无法访问 Starlink 设备",
+    "error_no_telemetry": "无法获取遥测数据，请检查 Starlink 设备是否已连接",
+    "error_fetch_failed": "获取数据失败",
+    "error_provider_missing": "useDish 必须在 DishProvider 内使用"
+  },
+  "error_boundary": {
+    "title_with_area": "{{area}} 渲染出错",
+    "title": "页面渲染出错",
+    "stack_toggle": "调用栈"
+  }
+}

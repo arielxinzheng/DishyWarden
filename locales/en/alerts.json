@@ -1,0 +1,326 @@
+{
+  "severity": {
+    "critical": "Critical",
+    "warning": "Warning",
+    "info": "Info"
+  },
+  "status": {
+    "new": "New",
+    "ongoing": "Ongoing",
+    "resolved": "Resolved",
+    "acknowledged": "Acknowledged",
+    "snoozed": "Snoozed"
+  },
+  "types": {
+    "dish_offline": {
+      "title": "Dish offline",
+      "summary": "Dish state: {{state}} — cannot reach the satellite network",
+      "recommendations": [
+        "Check the power adapter and PoE cable",
+        "Restart the dish"
+      ]
+    },
+    "high_latency": {
+      "title": "High latency",
+      "summary": "Latency is {{latency}} ms",
+      "recommendations": [
+        "Check for network congestion",
+        "Try restarting the router"
+      ]
+    },
+    "high_packet_loss": {
+      "title": "Severe packet loss",
+      "summary": "Packet loss is {{rate}}%",
+      "recommendations": [
+        "Check the PoE cable and connectors",
+        "Check whether weather is affecting the link"
+      ]
+    },
+    "obstruction_detected": {
+      "title": "Obstruction detected",
+      "summary": "Obstructed field of view: {{frac}}%",
+      "recommendations": [
+        "Open the obstruction map to locate the blockage",
+        "Move or remove the obstruction"
+      ]
+    },
+    "thermal_throttle": {
+      "title": "Dish thermal throttling",
+      "summary": "Dish temperature {{temp}}° — throttling active",
+      "recommendations": [
+        "Ensure the dish has airflow",
+        "Avoid direct sunlight on the dish"
+      ]
+    },
+    "alignment_issue": {
+      "title": "Alignment issue",
+      "summary": "Attitude uncertainty {{err}}° — pointing is out of tolerance",
+      "recommendations": [
+        "Use the Alignment page to fine-tune the heading",
+        "Make sure the mount is tight"
+      ]
+    },
+    "motors_stowed": {
+      "title": "Dish stowed",
+      "summary": "Motors stowed the dish — it cannot aim at satellites",
+      "recommendations": [
+        "Un-stow the dish in settings",
+        "Check whether an auto-stow policy triggered"
+      ]
+    },
+    "gnss_positioning": {
+      "title": "GNSS positioning abnormal",
+      "summary": "{{sats}} satellites visible — position has not converged",
+      "recommendations": [
+        "Wait 5–10 minutes for convergence",
+        "Make sure the sky above the dish is open"
+      ]
+    },
+    "dish_heating": {
+      "title": "Dish heating",
+      "summary": "Heating is on at low temperature — dish at {{temp}}°",
+      "recommendations": [
+        "Normal de-icing — it usually stops automatically",
+        "If it never stops, check the temperature sensor"
+      ]
+    },
+    "slow_ethernet": {
+      "title": "Ethernet speed degraded",
+      "summary": "Negotiated link speed is only {{speed}} Mbps",
+      "recommendations": [
+        "Replace a damaged or low-quality cable",
+        "Check that the connector seats properly"
+      ]
+    },
+    "cable_connectivity": {
+      "title": "Cable connectivity issue",
+      "summary": "The dish-to-router link keeps dropping",
+      "recommendations": [
+        "Check the PoE cable for looseness",
+        "Make sure the cable is not physically damaged"
+      ]
+    },
+    "dns_resolution": {
+      "title": "DNS resolution abnormal",
+      "summary": "The dish reports a DNS issue (state {{state}})",
+      "recommendations": [
+        "Check the router and system DNS settings",
+        "Try 1.1.1.1 or 8.8.8.8"
+      ]
+    },
+    "router_flapping": {
+      "title": "Router flapping",
+      "summary": "Connected router count changed {{count}} times in the last 10 minutes",
+      "recommendations": [
+        "Check the PoE cable between dish and router",
+        "Verify the router's power supply is stable"
+      ]
+    },
+    "low_throughput": {
+      "title": "Low throughput",
+      "summary": "Downlink is only {{down}} Mbps",
+      "recommendations": [
+        "Rule out heavy bandwidth usage",
+        "Check for obstructions or signal degradation"
+      ]
+    },
+    "low_snr": {
+      "title": "Low SNR",
+      "summary": "SNR is only {{snr}} dB",
+      "recommendations": [
+        "Check the dish's field of view",
+        "Verify elevation and heading"
+      ]
+    },
+    "severe_weather": {
+      "title": "Severe weather impact",
+      "summary": "Packet loss {{rate}}%, SNR {{snr}} dB",
+      "recommendations": [
+        "It usually clears when the weather improves",
+        "If it persists, check for water or snow on the dish"
+      ]
+    },
+    "high_temperature": {
+      "title": "Device overheating",
+      "summary": "Dish {{temp}}°, power supply {{temp2}}°",
+      "recommendations": [
+        "Improve cooling around the device",
+        "Avoid prolonged direct sunlight"
+      ]
+    },
+    "poe_power": {
+      "title": "PoE / power issue",
+      "summary": "The device keeps restarting (uptime {{minutes}} min)",
+      "recommendations": [
+        "Check the power adapter and PoE supply",
+        "Swap the power supply to isolate it"
+      ]
+    },
+    "router_offline": {
+      "title": "Router offline",
+      "summary": "No connected router detected (currently {{count}})",
+      "recommendations": [
+        "Check the router's power and LEDs",
+        "Confirm the router's LAN port works"
+      ]
+    },
+    "frequent_searching": {
+      "title": "Frequent reconnects",
+      "summary": "Connection state flipped {{count}} times in the last 10 minutes",
+      "recommendations": [
+        "Check obstruction and heading",
+        "Verify stable power and cabling"
+      ]
+    },
+    "wifi_signal": {
+      "title": "Wi-Fi signal issue",
+      "summary": "RSSI {{rssi}} dBm",
+      "recommendations": [
+        "Move closer to the router or add a mesh node",
+        "Switch to a less congested channel"
+      ]
+    },
+    "collector_heartbeat_lost": {
+      "title": "Collector heartbeat lost",
+      "summary": "The background collector stopped responding — data may be missing",
+      "recommendations": [
+        "Restart the app to resume collection",
+        "Check whether a firewall is blocking it"
+      ]
+    },
+    "service_restricted": {
+      "title": "Service restricted",
+      "summary": "Service class is limited ({{service}})",
+      "recommendations": [
+        "Check account status and plan quota",
+        "Contact your provider for the reason"
+      ]
+    },
+    "service_not_activated": {
+      "title": "Service not activated",
+      "summary": "The device has not activated a subscription",
+      "recommendations": [
+        "Complete the activation flow",
+        "Make sure the account is bound to this terminal"
+      ]
+    },
+    "location_policy_violation": {
+      "title": "Location policy violation",
+      "summary": "Current location does not match the authorized service area",
+      "recommendations": [
+        "Confirm the terminal was not relocated",
+        "Check the service address on your account"
+      ]
+    },
+    "account_suspended": {
+      "title": "Account suspended",
+      "summary": "Service is suspended due to billing or policy",
+      "recommendations": [
+        "Pay the balance or update payment method",
+        "Contact your provider to restore the account"
+      ]
+    },
+    "roaming": {
+      "title": "Roaming",
+      "summary": "Currently roaming ({{service}})",
+      "recommendations": [
+        "Lower speeds while roaming are expected",
+        "Confirm roaming is supported in this area"
+      ]
+    },
+    "no_satellite_schedule": {
+      "title": "No satellite schedule",
+      "summary": "Satellite scheduling unavailable — possibly regional capacity",
+      "recommendations": [
+        "Retry later — schedules are issued periodically",
+        "Check whether this area is covered"
+      ]
+    },
+    "dns_failure": {
+      "title": "DNS resolution failure",
+      "summary": "{{detail}}",
+      "recommendations": [
+        "Check your local DNS configuration",
+        "Try a public DNS provider"
+      ],
+      "case_user_only": "Base network is fine, but your current DNS server is not responding",
+      "case_both": "Both user and baseline DNS failed — network-layer fault or the domain does not exist",
+      "case_slow": "Local DNS latency is clearly higher than the baseline",
+      "case_generic": "DNS resolution failed — web pages may not load"
+    }
+  },
+  "page": {
+    "title": "Alerts",
+    "subtitle": "Dish faults and network quality alerts",
+    "view_active": "Active alerts",
+    "view_history": "History",
+    "refresh": "Refresh",
+    "filter_all_count": "All {{count}}",
+    "filter_critical_count": "Critical {{count}}",
+    "filter_warning_count": "Warning {{count}}",
+    "filter_info_count": "Info {{count}}",
+    "error_electron_only": "Alerts are collected by the main process — open the app in Electron to view them",
+    "error_load_failed": "Failed to load alerts: {{detail}}",
+    "empty_no_active": "No active alerts",
+    "empty_filtered": "No alerts in this category",
+    "empty_history": "No alert records in this time range",
+    "pagination": "Page {{page}} of {{pages}} — {{total}} total",
+    "prev_page": "Previous",
+    "next_page": "Next",
+    "default_window_hint": "Showing the last {{days}} days by default — pick a date range to see older history",
+    "day_count": "{{count}} record(s)",
+    "false_positive_ack": "Thanks for the feedback — this alert has been cleared and we'll keep improving detection."
+  },
+  "card": {
+    "status_false_positive": "🚫 Marked false positive",
+    "duration_under_minute": "Less than 1 minute",
+    "duration_hours_minutes": "{{hours}} h {{minutes}} min",
+    "duration_days": "{{count}} d",
+    "snooze_until_resolved": "Ignored until resolved",
+    "snooze_remaining_minutes": "{{count}} min remaining",
+    "snooze_remaining_hours": "{{count}} h remaining",
+    "snooze_remaining_hours_minutes": "{{hours}} h {{minutes}} min remaining",
+    "first_seen": "First seen {{time}}",
+    "last_seen": "Last seen {{time}}",
+    "occurrences": "Triggered {{count}} time(s)",
+    "duration": "Duration {{duration}}",
+    "evidence": "Evidence",
+    "recommendations": "Recommended actions",
+    "unsnooze_tooltip": "Restore notifications",
+    "snooze_menu_tooltip": "Mute options",
+    "undo_false_positive_tooltip": "Undo the false-positive mark and restore this alert",
+    "undo": "Undo"
+  },
+  "filter": {
+    "date_range": "Date range",
+    "range_value": "{{from}} – {{to}}",
+    "start_date": "Start date",
+    "end_date": "End date",
+    "range_invalid": "The start date must not be later than the end date",
+    "range_overrides_default": "Overrides the default last {{days}} days",
+    "clear_range": "Clear range",
+    "apply": "Apply",
+    "status_all": "All statuses",
+    "status_resolved": "Resolved",
+    "status_false_positive": "False positive",
+    "search_placeholder": "Search summary / description / type",
+    "clear_keyword": "Clear keyword",
+    "day_today": "Today ({{date}})",
+    "day_yesterday": "Yesterday ({{date}})",
+    "day_unknown": "Unknown date"
+  },
+  "shell": {
+    "area_app": "App",
+    "area_layout": "App layout",
+    "error_electron_only": "This app must run inside Electron",
+    "error_connect_timeout": "Connection timed out — the Starlink dish is unreachable",
+    "error_no_telemetry": "Telemetry unavailable — check that the Starlink dish is connected",
+    "error_fetch_failed": "Failed to fetch data",
+    "error_provider_missing": "useDish must be used within DishProvider"
+  },
+  "error_boundary": {
+    "title_with_area": "{{area}} failed to render",
+    "title": "Page failed to render",
+    "stack_toggle": "Stack trace"
+  }
+}
