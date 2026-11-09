@@ -5,9 +5,18 @@
  * 再塞三百行卡片渲染就彻底没法读了。
  *
  * 这里只管「一条告警长什么样」和它自己的降噪操作，不拉数据、不关心列表。
+ *
+ * ## 文案来源
+ *
+ * 标题 / 摘要 / 建议一律来自 `localizeAlert(alert, t)`：
+ * 主进程写进数据库的 `summary` / `description` / `recommendations` 是中文原文，
+ * 直接展示会让切到英文的界面里混进中文，所以按 `alert_type` 重新组句。
+ * 只有字典里没有的旧类型才退回数据库原文（那是 `localizeAlert` 内部的兜底）。
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   AlertTriangle,
   Info,
@@ -20,34 +29,40 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Badge } from '../ui/badge';
 import { cn } from '../../lib/utils';
-import { parseEvidence, parseRecommendations, formatAlertDuration } from '../../lib/alertFormat';
+import {
+  parseEvidence,
+  formatAlertDuration,
+  type AlertDuration,
+} from '../../lib/alertFormat';
+import { localizeAlert } from '../../lib/alertMessage';
+import { formatLocaleOf } from './historyWindow';
 import type { AlertRecord } from '../../../alerting/database';
 import { AlertSnoozeMenu } from '../Dashboard/AlertSnoozeMenu';
 
 export type Severity = AlertRecord['severity'];
 export type Status = AlertRecord['status'];
 
-const SEVERITY_META: Record<Severity, { label: string; icon: typeof AlertTriangle; className: string }> = {
-  critical: { label: '严重', icon: AlertTriangle, className: 'text-red-500' },
-  warning: { label: '警告', icon: AlertTriangle, className: 'text-yellow-500' },
-  info: { label: '提示', icon: Info, className: 'text-blue-500' },
+/**
+ * 严重度只留图标与配色：文案统一由 `alerts:severity.*` 提供
+ * （`localizeAlert` 已经按当前语言解析好，避免出现第二份文案表）。
+ */
+const SEVERITY_META: Record<Severity, { icon: typeof AlertTriangle; className: string }> = {
+  critical: { icon: AlertTriangle, className: 'text-red-500' },
+  warning: { icon: AlertTriangle, className: 'text-yellow-500' },
+  info: { icon: Info, className: 'text-blue-500' },
 };
 
 /**
- * 状态文案 / 配色按 `AlertStatus` **全集**维护。
+ * 状态配色按 `AlertStatus` **全集**维护。
  *
  * 历史页实际只会拿到终态（resolved / false_positive），
  * `new` / `ongoing` 目前是兜底项 —— 保留它们是因为这两张表的类型就是
  * `Record<Status, …>`，删掉会连带丢失 `Status` 的类型完整性；
  * 而且一旦数据源变化，缺项会渲染成空白标签，比多一行文案难查得多。
+ *
+ * 文案不在这里：`new` / `ongoing` / `resolved` 走 `alerts:status.*`，
+ * `false_positive` 是告警状态枚举之外的用户操作（标记误报），单独一条 `card.*`。
  */
-const STATUS_LABEL: Record<Status, string> = {
-  new: '新建',
-  ongoing: '持续中',
-  resolved: '已恢复',
-  false_positive: '🚫 已标记误报',
-};
-
 const STATUS_CLASS: Record<Status, string> = {
   new: 'text-red-400',
   ongoing: 'text-orange-400',
@@ -55,6 +70,51 @@ const STATUS_CLASS: Record<Status, string> = {
   // 误报用中性灰：这是"作废"，不是"出过故障"，不该用告警色
   false_positive: 'text-slate-400',
 };
+
+/** 忽略剩余时长的语义描述，成句文案在渲染时按当前语言拼 */
+type SnoozeRemaining =
+  | { kind: 'until_resolved' }
+  | { kind: 'remaining'; hours: number; minutes: number };
+
+/** 剩余忽略时长 → 当前语言文案 */
+function snoozeText(remaining: SnoozeRemaining, t: TFunction): string {
+  if (remaining.kind === 'until_resolved') return t('alerts:card.snooze_until_resolved');
+  if (remaining.hours > 0) {
+    return remaining.minutes > 0
+      ? t('alerts:card.snooze_remaining_hours_minutes', {
+          hours: remaining.hours,
+          minutes: remaining.minutes,
+        })
+      : t('alerts:card.snooze_remaining_hours', { count: remaining.hours });
+  }
+  return t('alerts:card.snooze_remaining_minutes', { count: remaining.minutes });
+}
+
+/** 告警持续时长 → 当前语言文案（分钟 / 小时复用 common 里的单位键） */
+function durationText(duration: AlertDuration, t: TFunction): string {
+  switch (duration.kind) {
+    case 'under_minute':
+      return t('alerts:card.duration_under_minute');
+    case 'minutes':
+      return t('common:min', { count: duration.minutes });
+    case 'hours_minutes':
+      return duration.minutes === 0
+        ? t('common:hour', { count: duration.hours })
+        : t('alerts:card.duration_hours_minutes', {
+            hours: duration.hours,
+            minutes: duration.minutes,
+          });
+    case 'days':
+      return t('alerts:card.duration_days', { count: duration.days });
+  }
+}
+
+/** ISO 时间戳 → 当前语言的本地时间；脏数据不显示 "Invalid Date" */
+function timestampText(iso: string, locale: string, t: TFunction): string {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return t('common:unknown');
+  return new Date(ms).toLocaleString(locale);
+}
 
 export interface AlertCardProps {
   alert: AlertRecord;
@@ -71,19 +131,19 @@ export function AlertCard({
   onMarkFalsePositive,
   onUnmarkFalsePositive,
 }: AlertCardProps) {
+  // 默认命名空间 common；所有文案都显式带命名空间前缀，避免 t 的类型被收窄
+  const { t, i18n } = useTranslation();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const meta = SEVERITY_META[alert.severity] ?? SEVERITY_META.info;
   const Icon = meta.icon;
 
+  // 标题 / 摘要 / 建议 / 严重度标签 / 状态标签：全部来自告警字典
+  const localized = useMemo(() => localizeAlert(alert, t), [alert, t]);
+
   // 误报终态：整卡作废化。它不再是"故障"，而是一条被用户否定的记录，
   // 因此不参与忽略/恢复等任何生命周期语义。
   const isVoided = alert.status === 'false_positive';
-
-  const recommendations = useMemo(
-    () => parseRecommendations(alert.recommendations),
-    [alert.recommendations]
-  );
 
   const evidence = useMemo(() => parseEvidence(alert.evidence), [alert.evidence]);
 
@@ -102,21 +162,19 @@ export function AlertCard({
     return false;
   }, [alert]);
 
-  // 计算剩余忽略时间
-  const snoozeRemaining = useMemo(() => {
-    if (alert.snooze_type === 'until_resolved') return '本次已忽略';
+  // 计算剩余忽略时间（语义结构，渲染时才翻译）
+  const snoozeRemaining = useMemo<SnoozeRemaining | null>(() => {
+    if (alert.snooze_type === 'until_resolved') return { kind: 'until_resolved' };
     if (!alert.snooze_until) return null;
 
     const snoozeUntil = new Date(alert.snooze_until).getTime();
     const now = Date.now();
-    if (now >= snoozeUntil) return null;
+    if (!Number.isFinite(snoozeUntil) || now >= snoozeUntil) return null;
 
     const remainingMs = snoozeUntil - now;
     const hours = Math.floor(remainingMs / (60 * 60 * 1000));
     const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
-
-    if (hours > 0) return `剩余 ${hours} 小时 ${minutes} 分钟`;
-    return `剩余 ${minutes} 分钟`;
+    return { kind: 'remaining', hours, minutes };
   }, [alert]);
 
   // 点击外部关闭菜单
@@ -127,6 +185,12 @@ export function AlertCard({
       return () => document.removeEventListener('click', handleClick);
     }
   }, [openMenuId]);
+
+  // 误报没有物理故障的时间线：状态文案来自字典，false_positive 单独一条
+  const statusLabel =
+    alert.status === 'false_positive'
+      ? t('alerts:card.status_false_positive')
+      : localized.statusLabel;
 
   return (
     <Alert
@@ -159,14 +223,14 @@ export function AlertCard({
                 isVoided && 'line-through text-muted-foreground'
               )}
             >
-              {alert.summary}
+              {localized.title}
             </AlertTitle>
             <div className="flex items-center gap-1.5">
               <Badge variant={alert.severity === 'critical' ? 'destructive' : 'secondary'}>
-                {SEVERITY_META[alert.severity]?.label ?? alert.severity}
+                {localized.severityLabel}
               </Badge>
               <span className={cn('text-xs font-medium', STATUS_CLASS[alert.status])}>
-                {STATUS_LABEL[alert.status] ?? alert.status}
+                {statusLabel}
               </span>
 
               {/* 操作按钮：终态（已恢复 / 已标记误报）不参与降噪操作 */}
@@ -176,7 +240,7 @@ export function AlertCard({
                     <button
                       onClick={() => onUnsnooze(alert.alert_key)}
                       className="p-1.5 rounded hover:bg-accent-green/10 text-accent-green transition-colors"
-                      title="恢复提醒"
+                      title={t('alerts:card.unsnooze_tooltip')}
                     >
                       <Bell className="w-4 h-4" />
                     </button>
@@ -187,7 +251,7 @@ export function AlertCard({
                         setOpenMenuId(openMenuId === alert.alert_key ? null : alert.alert_key);
                       }}
                       className="p-1.5 rounded hover:bg-muted transition-colors"
-                      title="忽略选项"
+                      title={t('alerts:card.snooze_menu_tooltip')}
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
@@ -208,10 +272,10 @@ export function AlertCard({
                 <button
                   onClick={() => onUnmarkFalsePositive(alert.alert_key)}
                   className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  title="撤销误报标记，退回活跃告警"
+                  title={t('alerts:card.undo_false_positive_tooltip')}
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  撤销
+                  {t('alerts:card.undo')}
                 </button>
               )}
             </div>
@@ -221,27 +285,43 @@ export function AlertCard({
           {isSnoozed && snoozeRemaining && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 border border-border/50 rounded px-3 py-1.5">
               <BellOff className="w-4 h-4 shrink-0" />
-              <span>{snoozeRemaining}</span>
+              <span>{snoozeText(snoozeRemaining, t)}</span>
             </div>
           )}
 
-          {alert.description && !isSnoozed && (
-            <AlertDescription>{alert.description}</AlertDescription>
+          {localized.summary && !isSnoozed && (
+            <AlertDescription>{localized.summary}</AlertDescription>
           )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground">
-            <span>首次 {new Date(alert.first_seen).toLocaleString('zh-CN')}</span>
+            <span>
+              {t('alerts:card.first_seen', {
+                time: timestampText(alert.first_seen, formatLocaleOf(i18n.language), t),
+              })}
+            </span>
             {/* 误报没有物理故障的时间线：恢复时刻与持续时长都无意义，显示占位符 */}
-            <span>最近 {isVoided ? '-' : new Date(alert.last_seen).toLocaleString('zh-CN')}</span>
-            <span>触发 {alert.occurrence_count} 次</span>
-            {isVoided ? <span>持续 -</span> : duration && <span>持续 {duration}</span>}
+            <span>
+              {t('alerts:card.last_seen', {
+                time: isVoided
+                  ? t('common:na')
+                  : timestampText(alert.last_seen, formatLocaleOf(i18n.language), t),
+              })}
+            </span>
+            <span>{t('alerts:card.occurrences', { count: alert.occurrence_count })}</span>
+            {isVoided ? (
+              <span>{t('alerts:card.duration', { duration: t('common:na') })}</span>
+            ) : (
+              duration && (
+                <span>{t('alerts:card.duration', { duration: durationText(duration, t) })}</span>
+              )
+            )}
             <span className="font-mono">{alert.alert_type}</span>
           </div>
 
           {!isSnoozed && evidence && Object.keys(evidence).length > 0 && (
             <details className="text-xs">
               <summary className="cursor-pointer select-none text-muted-foreground">
-                证据数据
+                {t('alerts:card.evidence')}
               </summary>
               <dl className="mt-1.5 space-y-1 rounded bg-black/25 p-2 font-mono">
                 {Object.entries(evidence).map(([k, v]) => (
@@ -254,11 +334,13 @@ export function AlertCard({
             </details>
           )}
 
-          {!isSnoozed && recommendations.length > 0 && (
+          {!isSnoozed && localized.recommendations.length > 0 && (
             <div className="mt-2 border-t border-border/40 pt-2">
-              <div className="mb-1 text-xs font-medium">建议处理</div>
+              <div className="mb-1 text-xs font-medium">
+                {t('alerts:card.recommendations')}
+              </div>
               <ul className="list-inside list-disc space-y-0.5 text-xs text-muted-foreground">
-                {recommendations.map((rec, i) => (
+                {localized.recommendations.map((rec, i) => (
                   <li key={i}>{rec}</li>
                 ))}
               </ul>

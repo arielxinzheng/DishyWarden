@@ -10,9 +10,15 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Calendar, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { monthDayOf, type YmdRange } from './historyWindow';
+import {
+  DEFAULT_WINDOW_DAYS,
+  formatLocaleOf,
+  formatMonthDay,
+  type YmdRange,
+} from './historyWindow';
 
 interface DateRangeFilterProps {
   open: boolean;
@@ -21,15 +27,17 @@ interface DateRangeFilterProps {
   onChange: (value: YmdRange | null) => void;
 }
 
-/** `2026-10-01 ~ 2026-10-03` → `10月1日 - 10月3日` */
-const describeRange = (range: YmdRange): string => {
-  const fmt = (ymd: string) => (ymd ? monthDayOf(ymd) : '');
-  return `${fmt(range.from)} - ${fmt(range.to)}`;
-};
-
 export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRangeFilterProps) {
+  const { t, i18n } = useTranslation();
   const [draftFrom, setDraftFrom] = useState('');
   const [draftTo, setDraftTo] = useState('');
+
+  // `2026-10-01 ~ 2026-10-03` → 当前语言的「10月1日 - 10月3日」/「Oct 1 – Oct 3」
+  const describeRange = (range: YmdRange): string =>
+    t('alerts:filter.range_value', {
+      from: formatMonthDay(range.from, formatLocaleOf(i18n.language)),
+      to: formatMonthDay(range.to, formatLocaleOf(i18n.language)),
+    });
   const rootRef = useRef<HTMLDivElement>(null);
 
   // 回调用 ref 转一层：父组件传内联函数也不会让下面的 document 监听反复重绑
@@ -85,7 +93,7 @@ export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRan
         )}
       >
         <Calendar className="h-3 w-3 shrink-0" />
-        {value ? describeRange(value) : '日期范围'}
+        {value ? describeRange(value) : t('alerts:filter.date_range')}
         {value && <X className="h-3 w-3 shrink-0 opacity-60" />}
       </button>
 
@@ -95,7 +103,9 @@ export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRan
         <div className="absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border border-slate-700 bg-ink-900 p-3 shadow-xl">
           <div className="space-y-2">
             <label className="block">
-              <span className="mb-1 block text-xs text-slate-400">起始日期</span>
+              <span className="mb-1 block text-xs text-slate-400">
+                {t('alerts:filter.start_date')}
+              </span>
               <input
                 type="date"
                 value={draftFrom}
@@ -105,7 +115,9 @@ export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRan
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-slate-400">结束日期</span>
+              <span className="mb-1 block text-xs text-slate-400">
+                {t('alerts:filter.end_date')}
+              </span>
               <input
                 type="date"
                 value={draftTo}
@@ -118,8 +130,8 @@ export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRan
 
           <p className="mt-2 text-xs text-slate-500">
             {draftFrom && draftTo && draftFrom > draftTo
-              ? '起始日期不能晚于结束日期'
-              : '选定后覆盖默认的最近 7 天'}
+              ? t('alerts:filter.range_invalid')
+              : t('alerts:filter.range_overrides_default', { days: DEFAULT_WINDOW_DAYS })}
           </p>
 
           <div className="mt-3 flex items-center justify-between gap-2">
@@ -129,7 +141,7 @@ export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRan
               disabled={!active && !draftFrom && !draftTo}
               className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             >
-              清除范围
+              {t('alerts:filter.clear_range')}
             </button>
             <button
               type="button"
@@ -137,7 +149,7 @@ export function DateRangeFilter({ open, onOpenChange, value, onChange }: DateRan
               disabled={!draftValid}
               className="rounded-md border border-accent-green/50 bg-accent-green/10 px-3 py-1 text-xs text-accent-green transition-colors hover:bg-accent-green/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              应用
+              {t('alerts:filter.apply')}
             </button>
           </div>
         </div>

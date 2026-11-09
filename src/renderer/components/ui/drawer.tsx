@@ -4,6 +4,7 @@
  */
 
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
 interface DrawerProps {
@@ -21,6 +22,8 @@ const widthClasses = {
 };
 
 export function Drawer({ open, onClose, children, title, width = 'md' }: DrawerProps) {
+  // 关闭按钮的无障碍标签走 common 命名空间，切语言时不会残留中文
+  const { t } = useTranslation();
   // ESC 键关闭
   useEffect(() => {
     if (!open) return;
@@ -70,7 +73,7 @@ export function Drawer({ open, onClose, children, title, width = 'md' }: DrawerP
           <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted transition-colors"
-            aria-label="关闭"
+            aria-label={t('common:close')}
           >
             <X className="w-5 h-5" />
           </button>

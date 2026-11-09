@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DateRangeFilter } from './DateRangeFilter';
@@ -29,10 +30,10 @@ interface HistoryFilterBarProps {
  * 后端会把这两类排除，因此这里列出「持续中」不仅多余，还会让用户选了之后
  * 永远得到空列表，误以为筛选坏了。
  */
-const STATUS_OPTIONS: Array<{ key: StatusFilter; label: string }> = [
-  { key: 'all', label: '全部状态' },
-  { key: 'resolved', label: '已恢复' },
-  { key: 'false_positive', label: '误报' },
+const STATUS_OPTIONS: Array<{ key: StatusFilter; labelKey: string }> = [
+  { key: 'all', labelKey: 'alerts:filter.status_all' },
+  { key: 'resolved', labelKey: 'alerts:filter.status_resolved' },
+  { key: 'false_positive', labelKey: 'alerts:filter.status_false_positive' },
 ];
 
 /** 输入停顿多久才发起查询。太短会每敲一个字打一次 IPC + 全表 LIKE */
@@ -44,6 +45,7 @@ export function HistoryFilterBar({
   rangeOpen,
   onRangeOpenChange,
 }: HistoryFilterBarProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(filters.keyword);
 
   // 回调和 ref 转一层：父组件传内联函数也不会让下面的定时器反复重建
@@ -76,7 +78,7 @@ export function HistoryFilterBar({
               : 'border-border text-muted-foreground hover:bg-ink-800'
           )}
         >
-          {o.label}
+          {t(o.labelKey)}
         </button>
       ))}
 
@@ -93,7 +95,7 @@ export function HistoryFilterBar({
           type="search"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="搜索摘要 / 描述 / 类型"
+          placeholder={t('alerts:filter.search_placeholder')}
           className="w-56 rounded-full border border-slate-700 bg-ink-900 py-1 pl-8 pr-8 text-xs outline-none transition-colors placeholder:text-slate-500 focus:border-accent-green/60"
         />
         {draft !== '' && (
@@ -101,7 +103,7 @@ export function HistoryFilterBar({
             type="button"
             onClick={() => setDraft('')}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-            title="清空关键词"
+            title={t('alerts:filter.clear_keyword')}
           >
             <X className="h-3 w-3" />
           </button>

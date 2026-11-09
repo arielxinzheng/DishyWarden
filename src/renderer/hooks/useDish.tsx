@@ -10,6 +10,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import type { TelemetryData } from '@/core/dishClient';
 import { calculateSummary, type NetworkAnomaly } from '@/core/telemetry';
 import type { HistorySample, HistorySummary } from '@/storage/types';
+import i18n from '../i18n';
 
 /**
  * 遮挡图数据 + 它的来源与新鲜度
@@ -161,7 +162,7 @@ export function DishProvider({ children }: DishProviderProps) {
     
     if (!isElectron) {
       console.log('[useDish] Not in Electron, showing error');
-      setError('需要在 Electron 环境中运行');
+      setError(i18n.t('alerts:shell.error_electron_only'));
       setIsLoading(false);
       return;
     }
@@ -172,7 +173,7 @@ export function DishProvider({ children }: DishProviderProps) {
 
       // 从主进程获取数据，添加超时保护 (15秒)
       const timeoutPromise = new Promise<null>((_, reject) => 
-        setTimeout(() => reject(new Error('连接超时：无法访问 Starlink 设备')), 15000)
+        setTimeout(() => reject(new Error(i18n.t('alerts:shell.error_connect_timeout'))), 15000)
       );
       
       const dataPromise = window.electronAPI.getLatestTelemetry();
@@ -182,7 +183,7 @@ export function DishProvider({ children }: DishProviderProps) {
         setTelemetry(data);
         setIsConnected(true);
       } else {
-        setError('无法获取遥测数据，请检查 Starlink 设备是否已连接');
+        setError(i18n.t('alerts:shell.error_no_telemetry'));
         setIsConnected(false);
       }
 
@@ -198,11 +199,11 @@ export function DishProvider({ children }: DishProviderProps) {
           });
         }
       } catch (err) {
-        console.warn('[useDish] 获取遮挡图失败:', err);
+        console.warn('[useDish] failed to fetch obstruction map:', err);
       }
     } catch (err) {
       console.error('Failed to fetch telemetry:', err);
-      const errorMessage = err instanceof Error ? err.message : '获取数据失败';
+      const errorMessage = err instanceof Error ? err.message : i18n.t('alerts:shell.error_fetch_failed');
       setError(errorMessage);
       setIsConnected(false);
     } finally {
@@ -226,7 +227,7 @@ export function DishProvider({ children }: DishProviderProps) {
     }
     
     if (!isElectron) {
-      setError('需要在 Electron 环境中运行');
+      setError(i18n.t('alerts:shell.error_electron_only'));
       setIsLoading(false);
       return;
     }
@@ -269,7 +270,7 @@ export function DishProvider({ children }: DishProviderProps) {
 export function useDish() {
   const context = useContext(DishContext);
   if (!context) {
-    throw new Error('useDish must be used within DishProvider');
+    throw new Error(i18n.t('alerts:shell.error_provider_missing'));
   }
   return context;
 }
@@ -386,7 +387,7 @@ export function useHistorySummary(seconds: number = 86400) {
         const data = await window.electronAPI.getHistorySummary(seconds);
         if (!cancelled) setSummary(data);
       } catch (error) {
-        console.error('[useHistorySummary] 获取统计摘要失败:', error);
+        console.error('[useHistorySummary] failed to fetch summary:', error);
       }
     };
 

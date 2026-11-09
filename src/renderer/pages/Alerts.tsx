@@ -13,6 +13,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   CheckCircle,
   RefreshCw,
@@ -32,19 +34,35 @@ import {
   toHistoryQuery,
   type HistoryFilters,
 } from '../components/Alerts/historyFilters';
-import { groupByDay } from '../components/Alerts/historyWindow';
+import {
+  groupByDay,
+  DEFAULT_WINDOW_DAYS,
+  formatMonthDay,
+  formatLocaleOf,
+  type DayLabel,
+} from '../components/Alerts/historyWindow';
 
 type Filter = 'all' | Severity;
 type ViewMode = 'active' | 'history';
 
+/**
+ * 页面错误用语义码而不是成句文案：
+ * 错误在事件回调里产生、在渲染里展示，只有渲染时才知道当前语言。
+ */
+type PageError =
+  | { code: 'electron_only' }
+  | { code: 'load_failed'; detail: string };
+
 const PAGE_SIZE = 50;
 
 export default function AlertsPage() {
+  // 默认命名空间 common；告警/通用文案都显式带上命名空间前缀，避免 t 的类型被命名空间参数收窄
+  const { t } = useTranslation();
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('active');
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PageError | null>(null);
 
   // 历史视图分页 + 条件
   const [page, setPage] = useState(0);
@@ -62,7 +80,7 @@ export default function AlertsPage() {
 
   const load = useCallback(async () => {
     if (!isElectron) {
-      setError('告警数据由主进程采集，需要在 Electron 环境中查看');
+      setError({ code: 'electron_only' });
       setIsLoading(false);
       return;
     }
@@ -82,7 +100,8 @@ export default function AlertsPage() {
         setTotal(result.total ?? 0);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载告警失败');
+      // 只保留原始错误详情，成句文案在渲染时按当前语言拼
+      setError({ code: 'load_failed', detail: e instanceof Error ? e.message : String(e) });
     } finally {
       setIsLoading(false);
     }
@@ -169,8 +188,8 @@ export default function AlertsPage() {
     // 该告警会从活跃列表消失，出现在历史记录的「已标记误报」里
     const result = await window.electronAPI.markFalsePositive({ alertKey });
     if (result.success) {
-      // TODO: 显示 Toast 提示
-      console.log('感谢反馈，已为您清除该提示，我们将持续优化检测算法。');
+      // TODO: 显示 Toast 提示（文案已进字典，等接入 Toast 后直接调用）
+      console.log(t('alerts:page.false_positive_ack'));
     }
   };
 
@@ -194,16 +213,16 @@ export default function AlertsPage() {
   const FILTERS: { key: Filter; label: string }[] =
     viewMode === 'active'
       ? [
-          { key: 'all', label: `全部 ${counts.all}` },
-          { key: 'critical', label: `严重 ${counts.critical}` },
-          { key: 'warning', label: `警告 ${counts.warning}` },
-          { key: 'info', label: `提示 ${counts.info}` },
+          { key: 'all', label: t('alerts:page.filter_all_count', { count: counts.all }) },
+          { key: 'critical', label: t('alerts:page.filter_critical_count', { count: counts.critical }) },
+          { key: 'warning', label: t('alerts:page.filter_warning_count', { count: counts.warning }) },
+          { key: 'info', label: t('alerts:page.filter_info_count', { count: counts.info }) },
         ]
       : [
-          { key: 'all', label: `全部 ${counts.all}` },
-          { key: 'critical', label: '严重' },
-          { key: 'warning', label: '警告' },
-          { key: 'info', label: '提示' },
+          { key: 'all', label: t('alerts:page.filter_all_count', { count: counts.all }) },
+          { key: 'critical', label: t('alerts:severity.critical') },
+          { key: 'warning', label: t('alerts:severity.warning') },
+          { key: 'info', label: t('alerts:severity.info') },
         ];
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -214,9 +233,9 @@ export default function AlertsPage() {
     <div className="p-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">告警</h1>
+          <h1 className="text-2xl font-bold">{t('alerts:page.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            天线异常与网络质量告警
+            {t('alerts:page.subtitle')}
           </p>
         </div>
 
@@ -233,7 +252,7 @@ export default function AlertsPage() {
                   : 'text-muted-foreground hover:bg-ink-800'
               )}
             >
-              活跃告警
+              {t('alerts:page.view_active')}
             </button>
             <button
               type="button"
@@ -245,7 +264,7 @@ export default function AlertsPage() {
                   : 'text-muted-foreground hover:bg-ink-800'
               )}
             >
-              历史记录
+              {t('alerts:page.view_history')}
             </button>
           </div>
 
@@ -256,7 +275,7 @@ export default function AlertsPage() {
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-            刷新
+            {t('alerts:page.refresh')}
           </button>
         </div>
       </div>
@@ -292,7 +311,13 @@ export default function AlertsPage() {
         <Alert className="border-yellow-500/50 bg-yellow-500/10">
           <div className="flex items-start gap-3 pl-7">
             <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-yellow-500" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              {error.code === 'electron_only'
+                ? t('alerts:page.error_electron_only')
+                : t('alerts:page.error_load_failed', {
+                    detail: error.detail || t('common:unknown'),
+                  })}
+            </AlertDescription>
           </div>
         </Alert>
       )}
@@ -300,7 +325,7 @@ export default function AlertsPage() {
       {!error && isLoading && alerts.length === 0 && (
         <Card className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
           <RefreshCw className="h-4 w-4 animate-spin" />
-          加载中…
+          {t('common:loading')}
         </Card>
       )}
 
@@ -308,8 +333,10 @@ export default function AlertsPage() {
         <Card className="flex items-center justify-center gap-2 p-8 text-sm text-green-500">
           <CheckCircle className="h-5 w-5" />
           {viewMode === 'active'
-            ? (alerts.length === 0 ? '无活跃告警' : '该分类下没有告警')
-            : '该时间范围内没有告警记录'}
+            ? alerts.length === 0
+              ? t('alerts:page.empty_no_active')
+              : t('alerts:page.empty_filtered')
+            : t('alerts:page.empty_history')}
         </Card>
       )}
 
@@ -354,7 +381,7 @@ export default function AlertsPage() {
       {viewMode === 'history' && totalPages > 1 && (
         <div className="flex items-center justify-between border-t border-border pt-4">
           <div className="text-sm text-muted-foreground">
-            第 {page + 1} / {totalPages} 页，共 {total} 条
+            {t('alerts:page.pagination', { page: page + 1, pages: totalPages, total })}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -364,7 +391,7 @@ export default function AlertsPage() {
               className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronLeft className="h-4 w-4" />
-              上一页
+              {t('alerts:page.prev_page')}
             </button>
             <button
               type="button"
@@ -372,7 +399,7 @@ export default function AlertsPage() {
               disabled={!hasNextPage}
               className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-ink-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              下一页
+              {t('alerts:page.next_page')}
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
@@ -382,11 +409,26 @@ export default function AlertsPage() {
       {/* 用户没选范围时说清楚"看不到更早"不是数据丢了 */}
       {viewMode === 'history' && isDefaultWindow(filters) && total > 0 && (
         <p className="text-center text-xs text-muted-foreground">
-          默认仅显示最近 7 天的记录，可选择日期范围查看更早历史
+          {t('alerts:page.default_window_hint', { days: DEFAULT_WINDOW_DAYS })}
         </p>
       )}
     </div>
   );
+}
+
+/**
+ * 日期分割线语义 → 当前语言文案。
+ *
+ * `label` 由 historyWindow 产出语义码，这里只做「选键 + 传值」，
+ * 逻辑层不会出现任何语言的成句字符串。
+ */
+function describeDayLabel(label: DayLabel, t: TFunction, locale: string): string {
+  if (label.kind === 'unknown') return t('alerts:filter.day_unknown');
+  if (label.kind === 'date') return label.dayKey;
+  const date = formatMonthDay(label.dayKey, formatLocaleOf(locale));
+  return label.kind === 'today'
+    ? t('alerts:filter.day_today', { date })
+    : t('alerts:filter.day_yesterday', { date });
 }
 
 /**
@@ -398,11 +440,16 @@ export default function AlertsPage() {
  * `bg-border/70` 的实际计算值是 rgba(0,0,0,0)：线是透明的，分割线根本看不见。
  * `text-muted-foreground` 同理会退回继承色 rgb(248,250,252)，日期标题与正文同色。
  */
-function DayHeader({ label, count }: { label: string; count: number }) {
+function DayHeader({ label, count }: { label: DayLabel; count: number }) {
+  const { t, i18n } = useTranslation();
   return (
     <div className="flex items-center gap-3 pt-1">
-      <span className="text-xs font-medium text-slate-400">{label}</span>
-      <span className="text-xs text-slate-500">{count} 条</span>
+      <span className="text-xs font-medium text-slate-400">
+        {describeDayLabel(label, t, i18n.language)}
+      </span>
+      <span className="text-xs text-slate-500">
+        {t('alerts:page.day_count', { count })}
+      </span>
       <div className="h-px flex-1 bg-slate-700/60" />
     </div>
   );

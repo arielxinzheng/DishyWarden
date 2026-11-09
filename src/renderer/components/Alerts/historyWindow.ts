@@ -27,9 +27,21 @@ export interface IsoRange {
 export interface HistoryGroup<T> {
   /** 本地 `YYYY-MM-DD`，同一段内唯一 */
   dayKey: string;
-  /** `今日 (11月5日)` / `昨日 (11月4日)` / `2026-11-03` */
-  label: string;
+  /** 语义标签（今日 / 昨日 / 具体日期），文案由视图层按当前语言渲染 */
+  label: DayLabel;
   items: T[];
+}
+
+/**
+ * 日期分割线标题的语义形态。
+ *
+ * 这里不返回成句文案（`今日 (11月5日)` / `Yesterday (Nov 4)` 是两种语序），
+ * 只给出「属于哪一类日期 + 哪个日期」，翻译与日期格式化都交给视图层。
+ */
+export interface DayLabel {
+  kind: 'today' | 'yesterday' | 'date' | 'unknown';
+  /** 本地 `YYYY-MM-DD`；`unknown` 时为空串 */
+  dayKey: string;
 }
 
 /** ms → 本地 `YYYY-MM-DD` */
@@ -56,22 +68,41 @@ export function dayKeyOf(iso: string): string {
   return Number.isFinite(ms) ? ymdOf(ms) : '';
 }
 
-/** `2026-11-05` → `11月5日`（去掉前导零，符合中文习惯） */
-export function monthDayOf(dayKey: string): string {
-  const parts = dayKey.split('-');
-  return `${Number(parts[1])}月${Number(parts[2])}日`;
+/**
+ * 日期格式化用的 locale。
+ *
+ * 只有 zh-CN / en 有完整字典：浏览器语言可能是 ja / ko / vi，那种情况下
+ * 界面文案会 fallback 到英文，日期也应跟着用英文格式，而不是格式化成
+ * 日文/韩文的日期 —— 否则半中半英的界面更不可读。
+ */
+export function formatLocaleOf(language: string): string {
+  return language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
 
 /**
- * 分组键 → 分割线标题。
+ * `2026-11-05` → 当前语言的「月日」，例如 zh-CN `11月5日`、en `Nov 5`。
+ *
+ * 只做**格式化**不做拼句：月份写法由 `Intl.DateTimeFormat` 按 locale 给出，
+ * 不再是写死的「月 / 日」汉字，切到英文时不会残留中文。
+ */
+export function formatMonthDay(dayKey: string, locale: string): string {
+  const parts = dayKey.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return '';
+  // 用本地年月日构造，避免 `new Date('2026-11-05')` 被当成 UTC 日期而偏一天
+  const date = new Date(parts[0], parts[1] - 1, parts[2]);
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
+}
+
+/**
+ * 分组键 → 分割线标签语义。
  * 跨年的日期只写 `2026-11-03` 而不写「11月3日」，否则今年和去年的同一天
  * 看起来一模一样。
  */
-export function dayLabelOf(dayKey: string, now: number): string {
-  if (!dayKey) return '日期未知';
-  if (dayKey === ymdOf(now)) return `今日 (${monthDayOf(dayKey)})`;
-  if (dayKey === ymdOf(shiftDays(now, -1))) return `昨日 (${monthDayOf(dayKey)})`;
-  return dayKey;
+export function dayLabelOf(dayKey: string, now: number): DayLabel {
+  if (!dayKey) return { kind: 'unknown', dayKey: '' };
+  if (dayKey === ymdOf(now)) return { kind: 'today', dayKey };
+  if (dayKey === ymdOf(shiftDays(now, -1))) return { kind: 'yesterday', dayKey };
+  return { kind: 'date', dayKey };
 }
 
 /**
