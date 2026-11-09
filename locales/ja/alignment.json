@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "調整",
+    "loading": "調整データを読み込んでいます…",
+    "load_failed": "読み込みに失敗しました: {{error}}",
+    "no_data": "調整データがまだありません",
+    "aria_rotation_dial": "方位角調整ダイヤル",
+    "aria_tilt_dial": "仰角調整ダイヤル",
+    "subtitle_rotation": "方位角",
+    "subtitle_tilt": "仰角"
+  },
+  "att": {
+    "converged_label": "姿勢センサー準備完了",
+    "converged_detail": "姿勢フィルターが収束し、読み値をアンテナの向きの判定に使用できます",
+    "convergence_warning_label": "姿勢センサーが収束中",
+    "convergence_warning_detail": "フィルターがまだ安定しておらず、読み値がドリフトし続けます。10 秒ほどお待ちください",
+    "initializing_label": "姿勢センサーを初期化中",
+    "initializing_detail": "アンテナの電源が入ったばかりで、姿勢の基準を確立しています",
+    "reset_label": "姿勢センサーをリセットしました",
+    "reset_detail": "デバイスが移動または再起動を検出し、再調整を行っています",
+    "invalid_label": "姿勢データ異常",
+    "invalid_detail": "デバイスの自己診断に失敗しました。アンテナの電源を切り、再起動してください",
+    "unreported_label": "姿勢状態をまだ受信していません",
+    "unreported_detail": "デバイスがまだ姿勢推定結果を報告していません。アンテナへの接続を確認してください",
+    "unknown_label": "姿勢状態が不明（{{state}}）",
+    "unknown_detail": "現在のファームウェアが、本ソフトウェアでは認識できない状態値を報告しました",
+    "precision_note": " (精度 ±{{deg}})"
+  },
+  "verdict": {
+    "calibrating": "調整中",
+    "calibrating_detail": "姿勢センサーがまだ準備できていないため、ポインターがドリフトします。状態が「準備完了」になるまでお待ちください",
+    "missing_expected": "期待値の一部が欠けています",
+    "missing_expected_detail": "デバイスが推奨の向きまたは仰角を報告していないため、調整済みかどうかを自動判定できません",
+    "aligned": "✅ 調整完了",
+    "aligned_detail": "向きと仰角がともに推奨範囲内にあるため、固定設置できます",
+    "almost": "あと少しです"
+  },
+  "guidance": {
+    "aligned": "調整完了",
+    "no_expected": "期待値なし",
+    "no_expected_band": "デバイスが推奨の向きを報告していません",
+    "no_expected_band_tilt": "デバイスが推奨の仰角を報告していません",
+    "rotate_east": "東へ {{deg}} 回転",
+    "rotate_west": "西へ {{deg}} 回転",
+    "raise": "{{deg}} 上げる必要があります",
+    "lower": "{{deg}} 下げる必要があります",
+    "recommended": "推奨 {{low}}–{{high}}"
+  },
+  "dial": {
+    "aria": "{{name}}：{{main}}、{{sub}}"
+  },
+  "flash": {
+    "aligned": "調整完了",
+    "detail": "向きと仰角はともに推奨範囲内です"
+  },
+  "param": {
+    "current_azimuth": "現在の方位角",
+    "desired_azimuth": "目標方位角",
+    "deviation": "偏差",
+    "recommended_range": "推奨範囲",
+    "current_elevation": "現在の仰角",
+    "desired_elevation": "目標仰角",
+    "physical_tilt": "端末の物理的な傾き角"
+  },
+  "usage": {
+    "title": "このグラフの読み方",
+    "band_desc": "<arc>外側の明るい弧</arc>が推奨範囲の位置を示します（推奨 = 期待値 ± {{tol}}、合計 {{total}} の幅）。<band>内側の帯</band>が推奨範囲そのものです: ",
+    "band_in_band": "グレーは帯に入っていない状態、緑は帯に入った状態を表します。",
+    "band_no_band": "デバイスが期待値を報告していないため、このページでは推奨範囲を描画しません。",
+    "pointer": "<strong>オレンジ色のポインター</strong>はデバイスが現在実際に指している方向です。帯に入るとポインターが緑になり、ダイヤル中央に「東へあと何度回転させるか」「あと何度上げるか」が直接表示されます。リング外側の小さな三角形が回転方向を示します。",
+    "tilt": "<strong>TILT ダイヤルのポインターはビーム仰角を表します</strong>。これはデバイスが示す期待仰角と同じ座標系です。下部の「端末の物理的な傾き角」は別の量であり、両者は固定の設置オフセット分だけ異なります。参考値としてのみご利用ください。"
+  },
+  "legend": {
+    "out_of_band": "帯に入っていない",
+    "in_band": "帯に入った",
+    "pointer": "オレンジのポインター = 現在の実際の向き"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "page": {
+    "title": "衛星レーダー",
+    "subtitle": "SGP4 軌道モデルと TLE データに基づいて衛星位置をリアルタイムに計算します"
+  },
+  "radar": {
+    "tle_updated_minutes": "· TLE は {{count}} 分前に更新",
+    "refresh_tle": "TLE を更新",
+    "clear_cache": "キャッシュを削除",
+    "retry": "再試行",
+    "retry_after_clear": "キャッシュ削除後に再試行",
+    "link_settings": "設定へ移動"
+  },
+  "error": {
+    "no_location": "端末の位置が設定されていません。設定ページで緯度・経度を設定してください",
+    "no_tle": "TLE データを取得できませんでした",
+    "no_visible": "現在の位置に可視衛星はありません",
+    "tle_fetch": "軌道暦データを取得できません。ネットワーク接続を確認して再試行してください",
+    "load_failed": "衛星データの読み込みに失敗しました",
+    "hint_location": "「設定」ページで端末の緯度・経度を入力すると、衛星の仰角を計算できます。",
+    "hint_tle": "軌道暦データは衛星位置の計算に必要な入力です。ネットワーク接続を確認して再試行してください。"
+  },
+  "location": {
+    "prefix": "観測位置: {{lat}}°N, {{lon}}°E",
+    "loaded_satellites": " · 衛星 {{count}} 基分の軌道暦を読み込み済み",
+    "serving_id": " · 現在のサービング衛星: {{id}}"
+  },
+  "tle": {
+    "degraded_warning": "軌道パラメータにドリフトがあり、仰角に誤差が生じる可能性があります。ネットワークが回復すると自動的に更新されます。",
+    "freshness_network": "ネットワークから最新の軌道暦を取得しました",
+    "freshness_cache_under_hour": "軌道暦データは 1 時間以内に更新されています",
+    "freshness_cache_hours": "軌道暦データは {{count}} 時間前に更新されました",
+    "freshness_stale_cache_hours": "オフラインモード: {{count}} 時間前のキャッシュ軌道暦を使用しています",
+    "freshness_stale_cache_days": "オフラインモード: {{count}} 日前のキャッシュ軌道暦を使用しています",
+    "freshness_seed_hours": "オフラインモード: 内蔵の軌道暦を使用しています ({{count}} 時間前)",
+    "freshness_seed_days": "オフラインモード: 内蔵の軌道暦を使用しています ({{count}} 日前)"
+  },
+  "loading": {
+    "calculating": "衛星位置を計算しています…",
+    "with_source": "{{source}} を使用して計算しています",
+    "tle": "軌道暦データ (TLE) を読み込み、SGP4 の軌道計算を実行しています"
+  },
+  "sky": {
+    "title": "スカイビュー",
+    "desc": "極座標レーダー · 中心は天頂 (90°)",
+    "note_base": "中心 = 天頂 | 外周 = 地平線 | 紫の十字 = デバイスのビーム方向",
+    "note_estimated_suffix": " | パルス表示は推定されたサービング衛星です",
+    "note_serving_suffix": " | 緑のパルス = 現在のサービング衛星"
+  },
+  "serving": {
+    "estimated": "現在のサービング衛星（推定）",
+    "active": "現在のサービング衛星（アクティブ）",
+    "verified": "検証済み",
+    "confidence": "信頼度: {{level}}",
+    "confidence_high": "高",
+    "confidence_medium": "中",
+    "confidence_low": "低",
+    "separation_from_boresight": "ビームとの差 {{deg}}°",
+    "azimuth": "方位角",
+    "elevation": "仰角",
+    "distance": "距離",
+    "track_duration": "追跡時間",
+    "track_duration_value": "{{count}} 分",
+    "badge": "サービス中"
+  },
+  "stats": {
+    "separation_elevation": "角距離 / 仰角",
+    "separation_elevation_sub": "サービング衛星との差 / 仰角",
+    "visible_count": "可視衛星数",
+    "avg_elevation": "平均仰角 {{deg}}°",
+    "runners": "候補衛星",
+    "runners_sub": "角距離 < 25°",
+    "distinct_orbits": "異なる軌道",
+    "distinct_sub": "候補 + サービング",
+    "unit_satellites": "機"
+  },
+  "runners": {
+    "title": "候補衛星",
+    "desc": "現在のサービング衛星に最も近い衛星"
+  },
+  "list": {
+    "title": "衛星詳細リスト",
+    "sorted_by": "角距離順",
+    "th_name_norad": "衛星名 / NORAD",
+    "th_duration_min": "継続（分）",
+    "th_separation": "角距離",
+    "th_elevation": "仰角",
+    "th_distance": "距離",
+    "th_first_seen": "初回観測",
+    "th_last_seen": "最新観測"
+  },
+  "legend": {
+    "visible": "可視衛星",
+    "runners": "候補衛星",
+    "serving": "現在のサービング",
+    "serving_estimated": "現在のサービング（推定）",
+    "boresight": "デバイスのビーム"
+  },
+  "est": {
+    "no_boresight": "デバイスがビーム方向を報告していないため、サービング衛星を推定できません",
+    "no_visible": "現在の視野内に可視衛星はありません",
+    "abnormal_orbits": "すべての候補衛星の軌道距離が異常です。軌道暦データに問題がある可能性があります",
+    "tight_unique": "ビーム方向はこの候補と {{sep}}° 異なり、他に競合する候補はありません",
+    "tight_unique_margin": "ビーム方向はこの候補と {{sep}}° 異なり、次点は {{margin}}° 遅れています",
+    "tight_continuous": "ビーム方向はこの候補と {{sep}}° 異なります。隣接候補も {{margin}}° の差で存在しますが、前フレームと一致しています",
+    "tight_ambiguous": "ビーム方向はこの候補と {{sep}}° 異なりますが、隣接候補とは {{margin}}° しか離れておらず、単一フレームでは区別できません",
+    "margin_high_offset": "最良の候補は次点を {{margin}}° リードしていますが、ビームとの差が {{sep}}° あり、軌道暦が古い可能性があります",
+    "margin_low_offset": "最良の候補は次点を {{margin}}° リードしていますが、ビームとの差が {{sep}}° あり、偏差があります",
+    "continuous_ambiguous": "隣接候補の間隔が小さく（{{margin}}°）、ビームとの差も {{sep}}° あるため、信頼できる区別ができません",
+    "margin_ambiguous": "隣接候補の間隔はわずか {{margin}}° で、信頼できる区別ができません",
+    "outside_window": "最も近い候補が {{sep}}° 離れています（3° の一致ウィンドウを超えています）。軌道暦が古いか、位置設定に誤りがある可能性があります",
+    "device_id": "デバイスが報告したサービング衛星 ID"
+  }
+}

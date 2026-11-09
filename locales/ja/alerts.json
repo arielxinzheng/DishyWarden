@@ -1,0 +1,326 @@
+{
+  "severity": {
+    "critical": "重大",
+    "warning": "警告",
+    "info": "情報"
+  },
+  "status": {
+    "new": "新規",
+    "ongoing": "継続中",
+    "resolved": "復旧済み",
+    "acknowledged": "確認済み",
+    "snoozed": "ミュート中"
+  },
+  "types": {
+    "dish_offline": {
+      "title": "アンテナのオフライン",
+      "summary": "アンテナの状態: {{state}}。衛星ネットワークに接続できません",
+      "recommendations": [
+        "電源アダプターと PoE ケーブルを確認してください",
+        "アンテナを再起動してください"
+      ]
+    },
+    "high_latency": {
+      "title": "ネットワーク遅延の増大",
+      "summary": "遅延が最大 {{latency}} ms に達しています",
+      "recommendations": [
+        "ネットワーク混雑の時間帯かどうかを確認してください",
+        "ルーターの再起動を試してください"
+      ]
+    },
+    "high_packet_loss": {
+      "title": "深刻なパケットロス",
+      "summary": "パケットロス率は {{rate}}% です",
+      "recommendations": [
+        "PoE ケーブルとコネクタを確認してください",
+        "気象が衛星リンクに影響していないか確認してください"
+      ]
+    },
+    "obstruction_detected": {
+      "title": "障害の検出",
+      "summary": "視野の障害率は {{frac}}% です",
+      "recommendations": [
+        "障害マップで障害の方向を特定してください",
+        "障害物を取り除くか、位置を調整してください"
+      ]
+    },
+    "thermal_throttle": {
+      "title": "アンテナのスロットリング（過熱）",
+      "summary": "アンテナ温度 {{temp}}° のため、スロットリング保護が作動しています",
+      "recommendations": [
+        "アンテナの通気と放熱を確保してください",
+        "アンテナ筐体への直射日光を避けてください"
+      ]
+    },
+    "alignment_issue": {
+      "title": "アンテナの調整異常",
+      "summary": "姿勢の不確かさ {{err}}° で、指向偏差が許容範囲を超えています",
+      "recommendations": [
+        "「調整」ページの案内に従って向きを微調整してください",
+        "アンテナの取り付けが強固で、ぐらつきがないことを確認してください"
+      ]
+    },
+    "motors_stowed": {
+      "title": "アンテナの収納状態",
+      "summary": "モーターがアンテナを収納したため、衛星を指向できません",
+      "recommendations": [
+        "設定で収納を解除し、動作状態に戻してください",
+        "自動収納ポリシーが作動していないか確認してください"
+      ]
+    },
+    "gnss_positioning": {
+      "title": "GNSS 測位異常",
+      "summary": "可視衛星は {{sats}} 機で、測位がまだ収束していません",
+      "recommendations": [
+        "測位が収束するまで 5〜10 分お待ちください",
+        "アンテナ上方の視界が開けていることを確認してください"
+      ]
+    },
+    "dish_heating": {
+      "title": "アンテナの融氷加熱中",
+      "summary": "低温環境のため加熱が作動しており、アンテナ温度は {{temp}}° です",
+      "recommendations": [
+        "通常の融氷動作であり、通常は自動的に終了します",
+        "長期間終了しない場合は、環境温度センサーを確認してください"
+      ]
+    },
+    "slow_ethernet": {
+      "title": "イーサネット速度の低下",
+      "summary": "ネゴシエート速度は {{speed}} Mbps のみです",
+      "recommendations": [
+        "破損または品質の悪い LAN ケーブルを交換してください",
+        "LAN ポートの接触が良好か確認してください"
+      ]
+    },
+    "cable_connectivity": {
+      "title": "ケーブル接続異常",
+      "summary": "アンテナとルーター間のリンクが断続的に切断されています",
+      "recommendations": [
+        "PoE ケーブルが緩んでいないか確認してください",
+        "ケーブルに物理的な損傷がないことを確認してください"
+      ]
+    },
+    "dns_resolution": {
+      "title": "DNS 解決異常",
+      "summary": "機器が DNS 異常を報告しています（状態 {{state}}）",
+      "recommendations": [
+        "ルーターとシステムの DNS 設定を確認してください",
+        "1.1.1.1 または 8.8.8.8 への切り替えを試してください"
+      ]
+    },
+    "router_flapping": {
+      "title": "ルーター接続断の頻発",
+      "summary": "直近 10 分間で接続ルーター数が {{count}} 回変化しました",
+      "recommendations": [
+        "アンテナとルーター間の PoE ケーブルを確認してください",
+        "ルーターの給電が安定していることを確認してください"
+      ]
+    },
+    "low_throughput": {
+      "title": "ネットワーク速度の低下",
+      "summary": "下り速度は {{down}} Mbps のみです",
+      "recommendations": [
+        "大容量の通信が帯域を占有していないか確認してください",
+        "障害や信号の減衰がないか確認してください"
+      ]
+    },
+    "low_snr": {
+      "title": "信号品質の低下",
+      "summary": "SNR は {{snr}} dB のみです",
+      "recommendations": [
+        "アンテナの視界が障害物で遮られていないか確認してください",
+        "アンテナの仰角と向きを確認してください"
+      ]
+    },
+    "severe_weather": {
+      "title": "悪天候による信号への影響",
+      "summary": "パケットロス {{rate}}%、SNR {{snr}} dB",
+      "recommendations": [
+        "天候が回復すれば通常は自動的に復旧します",
+        "異常が続く場合は、アンテナに水や雪がたまっていないか確認してください"
+      ]
+    },
+    "high_temperature": {
+      "title": "機器温度の過上昇",
+      "summary": "アンテナ {{temp}}°、電源 {{temp2}}°",
+      "recommendations": [
+        "機器の放熱環境を改善してください",
+        "長時間の直射日光を避けてください"
+      ]
+    },
+    "poe_power": {
+      "title": "PoE / 電源異常",
+      "summary": "機器が頻繁に再起動しています（稼働 {{minutes}} 分）",
+      "recommendations": [
+        "電源アダプターと PoE 給電を確認してください",
+        "給電機器を交換して切り分けてください"
+      ]
+    },
+    "router_offline": {
+      "title": "ルーターのオフライン",
+      "summary": "接続済みルーターが検出されません（現在 {{count}} 台）",
+      "recommendations": [
+        "ルーターの電源とインジケーターを確認してください",
+        "ルーターの LAN ポートが正常か確認してください"
+      ]
+    },
+    "frequent_searching": {
+      "title": "断続的な切断と再接続",
+      "summary": "直近 10 分間で接続状態が {{count}} 回切り替わりました",
+      "recommendations": [
+        "アンテナの視界障害と向きを確認してください",
+        "給電とケーブル接続が安定していることを確認してください"
+      ]
+    },
+    "wifi_signal": {
+      "title": "Wi-Fi 信号の問題",
+      "summary": "RSSI {{rssi}} dBm",
+      "recommendations": [
+        "ルーターに近づくか、メッシュノードを追加してください",
+        "干渉の少ないチャネルに切り替えてください"
+      ]
+    },
+    "collector_heartbeat_lost": {
+      "title": "コレクターのハートビート喪失",
+      "summary": "バックグラウンドの収集サービスが応答を停止しており、データが途切れている可能性があります",
+      "recommendations": [
+        "アプリを再起動して収集を再開してください",
+        "ファイアウォールに遮断されていないか確認してください"
+      ]
+    },
+    "service_restricted": {
+      "title": "サービス制限中",
+      "summary": "現在のサービス等級が制限されています（{{service}}）",
+      "recommendations": [
+        "アカウントの状態とプランの残量を確認してください",
+        "サービス提供者に制限の理由を確認してください"
+      ]
+    },
+    "service_not_activated": {
+      "title": "サービス未アクティベート",
+      "summary": "機器がサブスクリプションを有効化していません",
+      "recommendations": [
+        "機器のアクティベート手順を完了してください",
+        "アカウントが本端末に紐付いていることを確認してください"
+      ]
+    },
+    "location_policy_violation": {
+      "title": "位置ポリシーの違反",
+      "summary": "現在地がサービスの許可エリアと一致していません",
+      "recommendations": [
+        "端末が他の地域に移動されていないか確認してください",
+        "アカウントのサービス住所設定を確認してください"
+      ]
+    },
+    "account_suspended": {
+      "title": "アカウント停止中",
+      "summary": "未払いまたはポリシーにより、アカウントのサービスが停止されています",
+      "recommendations": [
+        "未払い金を支払うか、支払い方法を更新してください",
+        "サービス提供者に連絡してアカウントを復旧してください"
+      ]
+    },
+    "roaming": {
+      "title": "ローミング状態",
+      "summary": "現在ローミングネットワークに接続しています（{{service}}）",
+      "recommendations": [
+        "ローミング中は速度が制限される場合がありますが、正常な動作です",
+        "現在の地域でローミングサービスが利用できるか確認してください"
+      ]
+    },
+    "no_satellite_schedule": {
+      "title": "衛星スケジュールなし",
+      "summary": "衛星スケジュールを取得できません。地域の容量不足が考えられます",
+      "recommendations": [
+        "しばらくしてから再試行してください。スケジュールは定期的に配信されます",
+        "現在の地域がカバーエリア内か確認してください"
+      ]
+    },
+    "dns_failure": {
+      "title": "ドメイン解決の失敗",
+      "summary": "{{detail}}",
+      "recommendations": [
+        "ローカルの DNS 設定を確認してください",
+        "パブリック DNS への切り替えを試してください"
+      ],
+      "case_user_only": "基本ネットワークは正常ですが、現在の DNS サーバーが応答していません",
+      "case_both": "ユーザー側とベースライン側の両方で解決に失敗しました。ネットワーク層の障害、またはドメインが存在しません",
+      "case_slow": "ローカル DNS の遅延がベースラインより明確に高く、解決が遅くなっています",
+      "case_generic": "ドメイン解決に失敗しました。Web ページを開けない可能性があります"
+    }
+  },
+  "page": {
+    "title": "アラート",
+    "subtitle": "アンテナの異常とネットワーク品質に関するアラート",
+    "view_active": "有効なアラート",
+    "view_history": "履歴",
+    "refresh": "更新",
+    "filter_all_count": "すべて {{count}}",
+    "filter_critical_count": "重大 {{count}}",
+    "filter_warning_count": "警告 {{count}}",
+    "filter_info_count": "情報 {{count}}",
+    "error_electron_only": "アラートデータはメインプロセスが収集するため、Electron 環境で表示してください",
+    "error_load_failed": "アラートの読み込みに失敗しました: {{detail}}",
+    "empty_no_active": "有効なアラートはありません",
+    "empty_filtered": "この分類にはアラートがありません",
+    "empty_history": "この期間にはアラート履歴がありません",
+    "pagination": "{{page}} / {{pages}} ページ、全 {{total}} 件",
+    "prev_page": "前へ",
+    "next_page": "次へ",
+    "default_window_hint": "既定では直近 {{days}} 日分のみ表示します。より古い履歴は日付範囲を指定して確認できます",
+    "day_count": "{{count}} 件",
+    "false_positive_ack": "フィードバックに感謝します。このアラートを解除しました。検出アルゴリズムの改善を続けてまいります"
+  },
+  "card": {
+    "status_false_positive": "🚫 誤検出としてマーク済み",
+    "duration_under_minute": "1 分未満",
+    "duration_hours_minutes": "{{hours}} 時間 {{minutes}} 分",
+    "duration_days": "{{count}} 日",
+    "snooze_until_resolved": "今回のアラートは無視済み",
+    "snooze_remaining_minutes": "残り {{count}} 分",
+    "snooze_remaining_hours": "残り {{count}} 時間",
+    "snooze_remaining_hours_minutes": "残り {{hours}} 時間 {{minutes}} 分",
+    "first_seen": "初回 {{time}}",
+    "last_seen": "最終 {{time}}",
+    "occurrences": "{{count}} 回発生",
+    "duration": "継続 {{duration}}",
+    "evidence": "根拠データ",
+    "recommendations": "推奨アクション",
+    "unsnooze_tooltip": "通知を再開",
+    "snooze_menu_tooltip": "無視オプション",
+    "undo_false_positive_tooltip": "誤検出のマークを取り消し、有効なアラートに戻します",
+    "undo": "元に戻す"
+  },
+  "filter": {
+    "date_range": "日付範囲",
+    "range_value": "{{from}} 〜 {{to}}",
+    "start_date": "開始日",
+    "end_date": "終了日",
+    "range_invalid": "開始日を終了日より後に設定することはできません",
+    "range_overrides_default": "選択すると既定の直近 {{days}} 日分が上書きされます",
+    "clear_range": "範囲をクリア",
+    "apply": "適用",
+    "status_all": "すべての状態",
+    "status_resolved": "復旧済み",
+    "status_false_positive": "誤検出",
+    "search_placeholder": "概要 / 説明 / 種別を検索",
+    "clear_keyword": "キーワードをクリア",
+    "day_today": "今日 ({{date}})",
+    "day_yesterday": "昨日 ({{date}})",
+    "day_unknown": "日付不明"
+  },
+  "shell": {
+    "area_app": "アプリ",
+    "area_layout": "画面レイアウト",
+    "error_electron_only": "Electron 環境で実行する必要があります",
+    "error_connect_timeout": "接続タイムアウト: Starlink 機器にアクセスできません",
+    "error_no_telemetry": "テレメトリデータを取得できません。Starlink 機器が接続されているか確認してください",
+    "error_fetch_failed": "データの取得に失敗しました",
+    "error_provider_missing": "useDish は DishProvider 内で使用する必要があります"
+  },
+  "error_boundary": {
+    "title_with_area": "{{area}} の描画エラー",
+    "title": "ページの描画エラー",
+    "stack_toggle": "コールスタック"
+  }
+}

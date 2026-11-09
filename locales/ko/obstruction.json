@@ -1,0 +1,84 @@
+{
+  "page": {
+    "title": "장애물 지도",
+    "loading": "장애물 지도 데이터를 불러오는 중입니다…",
+    "load_failed": "불러오지 못했습니다: {{error}}",
+    "no_data_title": "아직 장애물 지도 데이터가 없습니다",
+    "no_data_desc": "장비가 아직 시야 장애물 지도를 반환하지 않았습니다. 연결이 복구되면 자동으로 표시됩니다."
+  },
+  "source": {
+    "real": "장비 실측 장애물 지도",
+    "mock": "현재 시뮬레이션 데이터를 표시하고 있습니다(장비 실측 아님). 장비가 장애물 지도를 반환하면 자동으로 전환됩니다.",
+    "age_suffix": " · {{age}}"
+  },
+  "stat": {
+    "total_pixels": "전체 픽셀 수",
+    "obstructed_pixels": "장애물 픽셀",
+    "obstruction_pct": "시야 장애물 비율",
+    "max_obstruction": "최대 장애물 정도",
+    "direction": "주 장애물 방향",
+    "impact": "영향 평가"
+  },
+  "tip": {
+    "scale": "0 ~ 1 범위로, <strong>시야 내에서 가장 심한 지점</strong>의 신호 감쇠 정도를 나타냅니다.",
+    "extremes": "0 = 해당 영역의 하늘이 완전히 깨끗함, 1 = 물리적 장애물이 신호를 완전히 차단한 상태입니다.",
+    "compare": "「시야 장애물 비율」과의 차이: 이 값은 <strong>한 지점이 얼마나 심한지</strong>를 보여 주고, 비율은 <strong>차단된 범위가 얼마나 넓은지</strong>를 보여 줍니다.",
+    "threshold": "카드 색상은 3D 뷰와 동일한 기준값을 사용합니다: ≤ {{clearMax}} 차단 없음 · ≤ {{partialMax}} 부분 차단 · > {{partialMax}} 완전 차단"
+  },
+  "direction": {
+    "none": "뚜렷한 장애물 없음",
+    "hint": "방위각 약 {{deg}}° (안테나 방향 기준)",
+    "hint_uniform": "장애물이 시야 내에 균등하게 분포되어 있으며 주된 방위가 없습니다"
+  },
+  "impact": {
+    "none": "영향 없음",
+    "low": "낮음",
+    "medium": "중간",
+    "high": "높음"
+  },
+  "data_notes": {
+    "title": "데이터 설명",
+    "body": "이 뷰는 3D 반구 원근 투영으로 안테나 시야를 표시합니다. 중앙은 천정(바로 위), 가장자리는 지평선을 나타냅니다. 색상 구분은 상단의 「시야 장애물 비율」과 동일한 판정 기준을 사용합니다(정규화된 장애물 정도가 {{clearMax}} 이하이면 차단 없음, {{partialMax}} 를 초과하면 완전 차단으로 간주). 따라서 빨강/주황 영역의 면적과 비율 수치는 반드시 일치합니다."
+  },
+  "legend": {
+    "unmapped": "미스캔",
+    "clear": "차단 없음",
+    "partial": "부분 차단",
+    "blocked": "완전 차단"
+  },
+  "events": {
+    "title": "장애물 이벤트 이력 (최근 7일)",
+    "empty": "지난 7일 동안 장애물 이벤트 기록이 없습니다"
+  },
+  "event": {
+    "severity_low": "경미",
+    "severity_medium": "중간",
+    "severity_high": "심각",
+    "duration": "지속 시간 {{duration}}",
+    "avg_obstruction": "평균 차단률: {{value}}%",
+    "peak": "최대값: {{value}}%"
+  },
+  "duration": {
+    "seconds": "{{count}}초",
+    "minutes": "{{count}}분",
+    "hours": "{{count}}시간",
+    "hours_minutes": "{{count}}시간 {{mins}}분"
+  },
+  "dir": {
+    "n": "북",
+    "ne": "북동",
+    "e": "동",
+    "se": "남동",
+    "s": "남",
+    "sw": "남서",
+    "w": "서",
+    "nw": "북서"
+  },
+  "age": {
+    "unknown": "시간 미확인",
+    "just_now": "방금 수집됨",
+    "minutes": "{{count}}분 전에 수집됨",
+    "hours": "{{count}}시간 전에 수집됨",
+    "days": "{{count}}일 전에 수집됨"
+  }
+}

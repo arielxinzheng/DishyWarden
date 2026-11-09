@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "정렬",
+    "loading": "정렬 데이터를 불러오는 중입니다…",
+    "load_failed": "불러오지 못했습니다: {{error}}",
+    "no_data": "아직 정렬 데이터가 없습니다",
+    "aria_rotation_dial": "방위각 정렬 다이얼",
+    "aria_tilt_dial": "앙각 정렬 다이얼",
+    "subtitle_rotation": "방위각",
+    "subtitle_tilt": "앙각"
+  },
+  "att": {
+    "converged_label": "자세 센서 준비 완료",
+    "converged_detail": "자세 필터가 수렴되어 판독값을 안테나 방향 판단에 사용할 수 있습니다",
+    "convergence_warning_label": "자세 센서가 수렴 중",
+    "convergence_warning_detail": "필터가 아직 안정되지 않아 판독값이 계속 흔들립니다. 10여 초만 기다려 주십시오",
+    "initializing_label": "자세 센서를 초기화 중",
+    "initializing_detail": "안테나 전원이 막 켜져 자세 기준을 수립하고 있습니다",
+    "reset_label": "자세 센서가 재설정되었습니다",
+    "reset_detail": "장비가 이동 또는 재시작을 감지하여 다시 보정하고 있습니다",
+    "invalid_label": "자세 데이터 이상",
+    "invalid_detail": "장비 자체 진단에 실패했습니다. 안테나 전원을 껐다가 다시 켜십시오",
+    "unreported_label": "아직 자세 상태를 받지 못했습니다",
+    "unreported_detail": "장비가 아직 자세 추정 결과를 보고하지 않았습니다. 안테나 연결을 확인하십시오",
+    "unknown_label": "자세 상태를 알 수 없음 ({{state}})",
+    "unknown_detail": "현재 펌웨어가 이 소프트웨어에서 인식하지 못하는 상태 값을 보고했습니다",
+    "precision_note": " (정밀도 ±{{deg}})"
+  },
+  "verdict": {
+    "calibrating": "정렬 중",
+    "calibrating_detail": "자세 센서가 아직 준비되지 않아 지침이 흔들립니다. 상태가 「준비 완료」가 될 때까지 기다려 주십시오",
+    "missing_expected": "일부 기대값이 없습니다",
+    "missing_expected_detail": "장비가 권장 방향 또는 앙각을 보고하지 않아 정렬 여부를 자동으로 판단할 수 없습니다",
+    "aligned": "✅ 정렬됨",
+    "aligned_detail": "방향과 앙각이 모두 권장 범위 안에 있어 고정 설치할 수 있습니다",
+    "almost": "거의 다 되었습니다"
+  },
+  "guidance": {
+    "aligned": "정렬됨",
+    "no_expected": "기대값 없음",
+    "no_expected_band": "장비가 권장 방향을 보고하지 않았습니다",
+    "no_expected_band_tilt": "장비가 권장 앙각을 보고하지 않았습니다",
+    "rotate_east": "동쪽으로 {{deg}} 회전",
+    "rotate_west": "서쪽으로 {{deg}} 회전",
+    "raise": "{{deg}} 올려야 합니다",
+    "lower": "{{deg}} 낮춰야 합니다",
+    "recommended": "권장 {{low}}–{{high}}"
+  },
+  "dial": {
+    "aria": "{{name}}: {{main}}, {{sub}}"
+  },
+  "flash": {
+    "aligned": "정렬됨",
+    "detail": "방향과 앙각이 모두 권장 범위 안에 있습니다"
+  },
+  "param": {
+    "current_azimuth": "현재 방위각",
+    "desired_azimuth": "목표 방위각",
+    "deviation": "편차",
+    "recommended_range": "권장 범위",
+    "current_elevation": "현재 앙각",
+    "desired_elevation": "목표 앙각",
+    "physical_tilt": "단말의 물리적 기울기 각도"
+  },
+  "usage": {
+    "title": "이 차트를 읽는 방법",
+    "band_desc": "<arc>외곽의 밝은 호</arc>가 권장 범위의 위치를 나타냅니다(권장 = 기대값 ± {{tol}}, 총 {{total}} 폭). <band>안쪽 부채꼴 띠</band>가 권장 범위 자체입니다: ",
+    "band_in_band": "회색은 아직 범위에 들어오지 않음, 녹색은 범위에 들어왔음을 나타냅니다.",
+    "band_no_band": "장비가 기대값을 보고하지 않아 이 페이지에서는 권장 범위를 표시하지 않습니다.",
+    "pointer": "<strong>주황색 지침</strong>은 장비가 현재 실제로 향하는 방향입니다. 범위에 들어오면 지침이 녹색으로 바뀌고, 다이얼 중앙에 「동쪽으로 몇 도 더 회전해야 하는지」「몇 도 더 올려야 하는지」가 바로 표시됩니다. 고리 밖의 작은 삼각형이 회전 방향을 나타냅니다.",
+    "tilt": "<strong>TILT 다이얼의 지침은 빔 앙각을 나타냅니다</strong>. 이는 장비가 제공하는 기대 앙각과 동일한 좌표계입니다. 하단의 「단말의 물리적 기울기 각도」는 다른 값이며, 두 값은 고정 설치 오프셋만큼 차이가 있습니다. 참고용으로만 활용하십시오."
+  },
+  "legend": {
+    "out_of_band": "범위 밖",
+    "in_band": "범위 안",
+    "pointer": "주황색 지침 = 현재 실제 방향"
+  }
+}

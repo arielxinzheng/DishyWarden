@@ -1,0 +1,114 @@
+{
+  "page": {
+    "title": "Radar vệ tinh",
+    "subtitle": "Tính toán vị trí vệ tinh theo thời gian thực dựa trên mô hình quỹ đạo SGP4 và dữ liệu TLE"
+  },
+  "radar": {
+    "tle_updated_minutes": "· TLE cập nhật {{count}} phút trước",
+    "refresh_tle": "Làm mới TLE",
+    "clear_cache": "Xóa bộ nhớ đệm",
+    "retry": "Thử lại",
+    "retry_after_clear": "Thử lại sau khi xóa bộ nhớ đệm",
+    "link_settings": "Đi đến Cài đặt"
+  },
+  "error": {
+    "no_location": "Chưa thiết lập vị trí thiết bị đầu cuối, vui lòng vào trang Cài đặt để cấu hình kinh độ/vĩ độ",
+    "no_tle": "Không lấy được dữ liệu TLE",
+    "no_visible": "Không có vệ tinh khả kiến tại vị trí hiện tại",
+    "tle_fetch": "Không thể lấy dữ liệu lịch thiên văn, vui lòng kiểm tra kết nối mạng rồi thử lại",
+    "load_failed": "Tải dữ liệu vệ tinh thất bại",
+    "hint_location": "Sau khi nhập kinh độ/vĩ độ của thiết bị đầu cuối trong trang 「Cài đặt」, có thể tính góc ngẩng của vệ tinh.",
+    "hint_tle": "Dữ liệu lịch thiên văn là đầu vào cần thiết để tính vị trí vệ tinh. Vui lòng kiểm tra kết nối mạng rồi thử lại."
+  },
+  "location": {
+    "prefix": "Vị trí quan sát: {{lat}}°N, {{lon}}°E",
+    "loaded_satellites": " · Đã tải lịch thiên văn của {{count}} vệ tinh",
+    "serving_id": " · Vệ tinh phục vụ hiện tại: {{id}}"
+  },
+  "tle": {
+    "degraded_warning": "Tham số quỹ đạo bị trôi nên góc ngẩng có thể sai lệch; dữ liệu sẽ tự động làm mới khi mạng được khôi phục.",
+    "freshness_network": "Đã lấy lịch thiên văn mới nhất từ mạng",
+    "freshness_cache_under_hour": "Dữ liệu lịch thiên văn được cập nhật chưa đầy 1 giờ",
+    "freshness_cache_hours": "Dữ liệu lịch thiên văn cập nhật {{count}} giờ trước",
+    "freshness_stale_cache_hours": "Chế độ ngoại tuyến: dùng lịch thiên văn trong bộ nhớ đệm từ {{count}} giờ trước",
+    "freshness_stale_cache_days": "Chế độ ngoại tuyến: dùng lịch thiên văn trong bộ nhớ đệm từ {{count}} ngày trước",
+    "freshness_seed_hours": "Chế độ ngoại tuyến: dùng lịch thiên văn tích hợp ({{count}} giờ trước)",
+    "freshness_seed_days": "Chế độ ngoại tuyến: dùng lịch thiên văn tích hợp ({{count}} ngày trước)"
+  },
+  "loading": {
+    "calculating": "Đang tính vị trí vệ tinh…",
+    "with_source": "Đang tính bằng {{source}}",
+    "tle": "Đang tải dữ liệu lịch thiên văn (TLE) và chạy tính toán quỹ đạo SGP4"
+  },
+  "sky": {
+    "title": "Chế độ xem bầu trời",
+    "desc": "Radar tọa độ cực · tâm là thiên đỉnh (90°)",
+    "note_base": "Tâm = thiên đỉnh | rìa = đường chân trời | dấu thập tím = hướng chùm tia của thiết bị",
+    "note_estimated_suffix": " | dấu nhấp nháy là vệ tinh phục vụ ước lượng",
+    "note_serving_suffix": " | xung xanh lá = vệ tinh phục vụ hiện tại"
+  },
+  "serving": {
+    "estimated": "Vệ tinh phục vụ hiện tại (ước lượng)",
+    "active": "Vệ tinh phục vụ hiện tại (đang hoạt động)",
+    "verified": "Đã xác minh",
+    "confidence": "Độ tin cậy: {{level}}",
+    "confidence_high": "Cao",
+    "confidence_medium": "Trung bình",
+    "confidence_low": "Thấp",
+    "separation_from_boresight": "Lệch {{deg}}° so với chùm tia",
+    "azimuth": "Góc phương vị",
+    "elevation": "Góc ngẩng",
+    "distance": "Khoảng cách",
+    "track_duration": "Thời gian theo dõi",
+    "track_duration_value": "{{count}} phút",
+    "badge": "Đang phục vụ"
+  },
+  "stats": {
+    "separation_elevation": "Khoảng cách góc / góc ngẩng",
+    "separation_elevation_sub": "So với vệ tinh phục vụ / góc ngẩng",
+    "visible_count": "Số vệ tinh khả kiến",
+    "avg_elevation": "Góc ngẩng trung bình {{deg}}°",
+    "runners": "Vệ tinh ứng viên",
+    "runners_sub": "Khoảng cách góc < 25°",
+    "distinct_orbits": "Quỹ đạo khác nhau",
+    "distinct_sub": "Ứng viên + phục vụ",
+    "unit_satellites": "vệ tinh"
+  },
+  "runners": {
+    "title": "Vệ tinh ứng viên",
+    "desc": "Các vệ tinh gần vệ tinh phục vụ hiện tại nhất"
+  },
+  "list": {
+    "title": "Danh sách chi tiết vệ tinh",
+    "sorted_by": "Sắp xếp theo khoảng cách góc",
+    "th_name_norad": "Tên vệ tinh / NORAD",
+    "th_duration_min": "Thời lượng (phút)",
+    "th_separation": "Khoảng cách góc",
+    "th_elevation": "Góc ngẩng",
+    "th_distance": "Khoảng cách",
+    "th_first_seen": "Lần quan sát đầu",
+    "th_last_seen": "Lần quan sát gần nhất"
+  },
+  "legend": {
+    "visible": "Vệ tinh khả kiến",
+    "runners": "Vệ tinh ứng viên",
+    "serving": "Đang phục vụ",
+    "serving_estimated": "Đang phục vụ (ước lượng)",
+    "boresight": "Chùm tia của thiết bị"
+  },
+  "est": {
+    "no_boresight": "Thiết bị chưa báo hướng chùm tia nên không thể ước lượng vệ tinh phục vụ",
+    "no_visible": "Không có vệ tinh khả kiến trong trường nhìn hiện tại",
+    "abnormal_orbits": "Khoảng cách quỹ đạo của mọi vệ tinh ứng viên đều bất thường, có thể dữ liệu lịch thiên văn có vấn đề",
+    "tight_unique": "Hướng chùm tia lệch {{sep}}° so với ứng viên này và không có đối thủ khác",
+    "tight_unique_margin": "Hướng chùm tia lệch {{sep}}° so với ứng viên này, ứng viên thứ hai kém {{margin}}°",
+    "tight_continuous": "Hướng chùm tia lệch {{sep}}° so với ứng viên này; có ứng viên lân cận chỉ lệch {{margin}}° nhưng khớp với khung trước",
+    "tight_ambiguous": "Hướng chùm tia lệch {{sep}}° so với ứng viên này, nhưng ứng viên lân cận chỉ lệch {{margin}}° nên một khung hình không thể phân biệt",
+    "margin_high_offset": "Ứng viên tốt nhất vượt ứng viên thứ hai {{margin}}° nhưng lệch {{sep}}° so với chùm tia, nghi ngờ lịch thiên văn đã cũ",
+    "margin_low_offset": "Ứng viên tốt nhất vượt ứng viên thứ hai {{margin}}° nhưng lệch {{sep}}° so với chùm tia, có sai lệch",
+    "continuous_ambiguous": "Khoảng cách giữa các ứng viên lân cận nhỏ ({{margin}}°) và lệch {{sep}}° so với chùm tia nên không thể phân biệt một cách đáng tin cậy",
+    "margin_ambiguous": "Các ứng viên lân cận chỉ cách nhau {{margin}}°, không thể phân biệt một cách đáng tin cậy",
+    "outside_window": "Ứng viên gần nhất cách {{sep}}° (vượt cửa sổ khớp 3°), có thể lịch thiên văn đã cũ hoặc vị trí được đặt sai",
+    "device_id": "ID vệ tinh phục vụ do thiết bị báo cáo"
+  }
+}

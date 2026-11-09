@@ -1,0 +1,114 @@
+{
+  "page": {
+    "title": "위성 레이더",
+    "subtitle": "SGP4 궤도 모델과 TLE 데이터를 기반으로 위성 위치를 실시간으로 계산합니다"
+  },
+  "radar": {
+    "tle_updated_minutes": "· TLE가 {{count}}분 전에 업데이트됨",
+    "refresh_tle": "TLE 새로 고침",
+    "clear_cache": "캐시 지우기",
+    "retry": "다시 시도",
+    "retry_after_clear": "캐시를 지운 뒤 다시 시도",
+    "link_settings": "설정으로 이동"
+  },
+  "error": {
+    "no_location": "단말 위치가 설정되지 않았습니다. 설정 페이지에서 위도/경도를 설정하십시오",
+    "no_tle": "TLE 데이터를 가져오지 못했습니다",
+    "no_visible": "현재 위치에 가시 위성이 없습니다",
+    "tle_fetch": "위성력 데이터를 가져올 수 없습니다. 네트워크 연결을 확인한 뒤 다시 시도하십시오",
+    "load_failed": "위성 데이터를 불러오지 못했습니다",
+    "hint_location": "「설정」 페이지에서 단말 위도/경도를 입력하면 위성 앙각을 계산할 수 있습니다.",
+    "hint_tle": "위성력 데이터는 위성 위치 계산에 필요한 입력입니다. 네트워크 연결을 확인한 뒤 다시 시도하십시오."
+  },
+  "location": {
+    "prefix": "관측 위치: {{lat}}°N, {{lon}}°E",
+    "loaded_satellites": " · 위성 {{count}}기의 위성력을 불러왔습니다",
+    "serving_id": " · 현재 서빙 위성: {{id}}"
+  },
+  "tle": {
+    "degraded_warning": "궤도 파라미터가 드리프트되어 앙각에 편차가 있을 수 있습니다. 네트워크가 복구되면 자동으로 새로 고칩니다.",
+    "freshness_network": "네트워크에서 최신 위성력을 가져왔습니다",
+    "freshness_cache_under_hour": "위성력 데이터가 1시간 이내에 업데이트되었습니다",
+    "freshness_cache_hours": "위성력 데이터가 {{count}}시간 전에 업데이트되었습니다",
+    "freshness_stale_cache_hours": "오프라인 모드: {{count}}시간 전 캐시 위성력을 사용합니다",
+    "freshness_stale_cache_days": "오프라인 모드: {{count}}일 전 캐시 위성력을 사용합니다",
+    "freshness_seed_hours": "오프라인 모드: 내장 위성력을 사용합니다 ({{count}}시간 전)",
+    "freshness_seed_days": "오프라인 모드: 내장 위성력을 사용합니다 ({{count}}일 전)"
+  },
+  "loading": {
+    "calculating": "위성 위치를 계산하는 중입니다…",
+    "with_source": "{{source}} 를 사용해 계산하는 중입니다",
+    "tle": "위성력 데이터(TLE)를 불러와 SGP4 궤도 계산을 실행하는 중입니다"
+  },
+  "sky": {
+    "title": "하늘 보기",
+    "desc": "극좌표 레이더 · 중앙은 천정(90°)",
+    "note_base": "중심 = 천정 | 가장자리 = 지평선 | 보라색 십자 = 장비 빔 방향",
+    "note_estimated_suffix": " | 펄스 표시는 추정된 서빙 위성입니다",
+    "note_serving_suffix": " | 녹색 펄스 = 현재 서빙 위성"
+  },
+  "serving": {
+    "estimated": "현재 서빙 위성 (추정)",
+    "active": "현재 서빙 위성 (활성)",
+    "verified": "검증됨",
+    "confidence": "신뢰도: {{level}}",
+    "confidence_high": "높음",
+    "confidence_medium": "중간",
+    "confidence_low": "낮음",
+    "separation_from_boresight": "빔과의 차이 {{deg}}°",
+    "azimuth": "방위각",
+    "elevation": "앙각",
+    "distance": "거리",
+    "track_duration": "추적 시간",
+    "track_duration_value": "{{count}}분",
+    "badge": "서비스 중"
+  },
+  "stats": {
+    "separation_elevation": "각거리 / 앙각",
+    "separation_elevation_sub": "서빙 위성과의 차이 / 앙각",
+    "visible_count": "가시 위성 수",
+    "avg_elevation": "평균 앙각 {{deg}}°",
+    "runners": "후보 위성",
+    "runners_sub": "각거리 < 25°",
+    "distinct_orbits": "서로 다른 궤도",
+    "distinct_sub": "후보 + 서빙",
+    "unit_satellites": "개"
+  },
+  "runners": {
+    "title": "후보 위성",
+    "desc": "현재 서빙 위성과 가장 가까운 위성"
+  },
+  "list": {
+    "title": "위성 상세 목록",
+    "sorted_by": "각거리 기준 정렬",
+    "th_name_norad": "위성 이름 / NORAD",
+    "th_duration_min": "지속(분)",
+    "th_separation": "각거리",
+    "th_elevation": "앙각",
+    "th_distance": "거리",
+    "th_first_seen": "최초 관측",
+    "th_last_seen": "최근 관측"
+  },
+  "legend": {
+    "visible": "가시 위성",
+    "runners": "후보 위성",
+    "serving": "현재 서빙",
+    "serving_estimated": "현재 서빙 (추정)",
+    "boresight": "장비 빔"
+  },
+  "est": {
+    "no_boresight": "장비가 빔 방향을 보고하지 않아 서빙 위성을 추정할 수 없습니다",
+    "no_visible": "현재 시야 내에 가시 위성이 없습니다",
+    "abnormal_orbits": "모든 후보 위성의 궤도 거리가 이상합니다. 위성력 데이터에 문제가 있을 수 있습니다",
+    "tight_unique": "빔 방향이 이 후보와 {{sep}}° 차이 나며 다른 경쟁 후보가 없습니다",
+    "tight_unique_margin": "빔 방향이 이 후보와 {{sep}}° 차이 나며, 2순위는 {{margin}}° 뒤처집니다",
+    "tight_continuous": "빔 방향이 이 후보와 {{sep}}° 차이 납니다. 인접 후보도 {{margin}}° 차이로 존재하지만 이전 프레임과 일치합니다",
+    "tight_ambiguous": "빔 방향이 이 후보와 {{sep}}° 차이 나지만 인접 후보와는 {{margin}}° 밖에 차이가 나지 않아 단일 프레임으로는 구분할 수 없습니다",
+    "margin_high_offset": "최적 후보가 2순위를 {{margin}}° 앞서지만 빔과는 {{sep}}° 차이가 나 위성력이 오래된 것으로 보입니다",
+    "margin_low_offset": "최적 후보가 2순위를 {{margin}}° 앞서지만 빔과 {{sep}}° 차이가 나 편차가 있습니다",
+    "continuous_ambiguous": "인접 후보 간격이 작고({{margin}}°), 빔과도 {{sep}}° 차이가 나 신뢰성 있게 구분할 수 없습니다",
+    "margin_ambiguous": "인접 후보 간격이 {{margin}}° 밖에 되지 않아 신뢰성 있게 구분할 수 없습니다",
+    "outside_window": "가장 가까운 후보가 {{sep}}° 떨어져 있습니다(3° 일치 창을 벗어남). 위성력이 오래되었거나 위치 설정이 잘못되었을 수 있습니다",
+    "device_id": "장비가 보고한 서빙 위성 ID"
+  }
+}

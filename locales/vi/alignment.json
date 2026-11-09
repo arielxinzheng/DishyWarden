@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "Căn chỉnh",
+    "loading": "Đang tải dữ liệu căn chỉnh…",
+    "load_failed": "Tải thất bại: {{error}}",
+    "no_data": "Chưa có dữ liệu căn chỉnh",
+    "aria_rotation_dial": "Bảng căn chỉnh góc phương vị",
+    "aria_tilt_dial": "Bảng căn chỉnh góc ngẩng",
+    "subtitle_rotation": "Góc phương vị",
+    "subtitle_tilt": "Góc ngẩng"
+  },
+  "att": {
+    "converged_label": "Cảm biến tư thế đã sẵn sàng",
+    "converged_detail": "Bộ lọc tư thế đã hội tụ, các giá trị đọc có thể dùng để xác định hướng của ăng-ten",
+    "convergence_warning_label": "Cảm biến tư thế đang hội tụ",
+    "convergence_warning_detail": "Bộ lọc chưa ổn định, giá trị đọc sẽ tiếp tục trôi; vui lòng chờ khoảng mười mấy giây",
+    "initializing_label": "Cảm biến tư thế đang khởi tạo",
+    "initializing_detail": "Ăng-ten vừa được cấp điện, đang thiết lập mốc tư thế",
+    "reset_label": "Cảm biến tư thế đã được đặt lại",
+    "reset_detail": "Thiết bị phát hiện di chuyển hoặc khởi động lại, đang căn chỉnh lại",
+    "invalid_label": "Dữ liệu tư thế bất thường",
+    "invalid_detail": "Thiết bị tự kiểm tra không đạt; nên ngắt điện và khởi động lại ăng-ten",
+    "unreported_label": "Chưa nhận được trạng thái tư thế",
+    "unreported_detail": "Thiết bị chưa báo cáo kết quả ước lượng tư thế; vui lòng xác nhận đã kết nối với ăng-ten",
+    "unknown_label": "Trạng thái tư thế không rõ ({{state}})",
+    "unknown_detail": "Firmware hiện tại đã báo cáo một giá trị trạng thái mà phần mềm này chưa nhận diện được",
+    "precision_note": " (độ chính xác ±{{deg}})"
+  },
+  "verdict": {
+    "calibrating": "Đang căn chỉnh",
+    "calibrating_detail": "Cảm biến tư thế chưa sẵn sàng nên kim sẽ trôi; vui lòng chờ đến khi trạng thái chuyển thành 「Sẵn sàng」",
+    "missing_expected": "Thiếu một số giá trị kỳ vọng",
+    "missing_expected_detail": "Thiết bị chưa báo hướng hoặc góc ngẩng khuyến nghị nên không thể tự động xác định đã căn chỉnh hay chưa",
+    "aligned": "✅ Đã căn chỉnh",
+    "aligned_detail": "Hướng và góc ngẩng đều nằm trong phạm vi khuyến nghị, có thể cố định lắp đặt",
+    "almost": "Sắp xong"
+  },
+  "guidance": {
+    "aligned": "Đã căn chỉnh",
+    "no_expected": "Không có giá trị kỳ vọng",
+    "no_expected_band": "Thiết bị chưa báo hướng khuyến nghị",
+    "no_expected_band_tilt": "Thiết bị chưa báo góc ngẩng khuyến nghị",
+    "rotate_east": "Xoay {{deg}} về phía đông",
+    "rotate_west": "Xoay {{deg}} về phía tây",
+    "raise": "Cần nâng {{deg}}",
+    "lower": "Cần hạ {{deg}}",
+    "recommended": "Khuyến nghị {{low}}–{{high}}"
+  },
+  "dial": {
+    "aria": "{{name}}: {{main}}, {{sub}}"
+  },
+  "flash": {
+    "aligned": "Đã căn chỉnh",
+    "detail": "Hướng và góc ngẩng đều nằm trong phạm vi khuyến nghị"
+  },
+  "param": {
+    "current_azimuth": "Góc phương vị hiện tại",
+    "desired_azimuth": "Góc phương vị mong muốn",
+    "deviation": "Độ lệch",
+    "recommended_range": "Phạm vi khuyến nghị",
+    "current_elevation": "Góc ngẩng hiện tại",
+    "desired_elevation": "Góc ngẩng mong muốn",
+    "physical_tilt": "Góc nghiêng vật lý của thiết bị đầu cuối"
+  },
+  "usage": {
+    "title": "Cách đọc biểu đồ này",
+    "band_desc": "<arc>cung sáng ở vòng ngoài</arc> đánh dấu vị trí phạm vi khuyến nghị (khuyến nghị = giá trị kỳ vọng ± {{tol}}, tức tổng cộng rộng {{total}}). <band>dải hình quạt ở vòng trong</band> chính là phạm vi khuyến nghị: ",
+    "band_in_band": "Màu xám nghĩa là chưa vào dải, màu xanh lá nghĩa là đã vào dải.",
+    "band_no_band": "Thiết bị chưa báo giá trị kỳ vọng nên trang này không vẽ phạm vi khuyến nghị.",
+    "pointer": "<strong>Kim màu cam</strong> là hướng thiết bị đang thực sự chỉ tới. Khi vào dải, kim chuyển màu xanh lá và tâm bảng sẽ trực tiếp cho biết 「cần xoay thêm bao nhiêu độ về phía đông」「cần nâng thêm bao nhiêu độ」; tam giác nhỏ bên ngoài vòng chỉ hướng xoay.",
+    "tilt": "<strong>Kim trên bảng TILT lấy góc ngẩng của chùm tia</strong>, cùng hệ tọa độ với góc ngẩng kỳ vọng do thiết bị cung cấp; 「Góc nghiêng vật lý của thiết bị đầu cuối」 ở dưới là một đại lượng khác, hai giá trị chênh nhau một độ lệch lắp đặt cố định và chỉ mang tính tham khảo."
+  },
+  "legend": {
+    "out_of_band": "Chưa vào dải",
+    "in_band": "Đã vào dải",
+    "pointer": "Kim màu cam = hướng thực tế hiện tại"
+  }
+}

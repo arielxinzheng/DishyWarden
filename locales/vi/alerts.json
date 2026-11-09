@@ -1,0 +1,326 @@
+{
+  "severity": {
+    "critical": "Nghiêm trọng",
+    "warning": "Cảnh báo",
+    "info": "Thông tin"
+  },
+  "status": {
+    "new": "Mới",
+    "ongoing": "Đang diễn ra",
+    "resolved": "Đã khôi phục",
+    "acknowledged": "Đã xác nhận",
+    "snoozed": "Đã tạm ẩn"
+  },
+  "types": {
+    "dish_offline": {
+      "title": "Ăng-ten ngoại tuyến",
+      "summary": "Trạng thái ăng-ten: {{state}} — không thể kết nối với mạng vệ tinh",
+      "recommendations": [
+        "Kiểm tra bộ nguồn và cáp PoE",
+        "Khởi động lại ăng-ten"
+      ]
+    },
+    "high_latency": {
+      "title": "Độ trễ mạng quá cao",
+      "summary": "Độ trễ lên tới {{latency}} ms",
+      "recommendations": [
+        "Kiểm tra xem có đang trong khung giờ nghẽn mạng không",
+        "Thử khởi động lại bộ định tuyến"
+      ]
+    },
+    "high_packet_loss": {
+      "title": "Mất gói nghiêm trọng",
+      "summary": "Tỷ lệ mất gói là {{rate}}%",
+      "recommendations": [
+        "Kiểm tra cáp PoE và các đầu nối",
+        "Kiểm tra xem thời tiết có ảnh hưởng đến đường liên kết vệ tinh không"
+      ]
+    },
+    "obstruction_detected": {
+      "title": "Phát hiện vật cản",
+      "summary": "Tỷ lệ vật cản trong tầm nhìn là {{frac}}%",
+      "recommendations": [
+        "Xem bản đồ vật cản để xác định hướng vật cản",
+        "Di chuyển hoặc điều chỉnh vật cản"
+      ]
+    },
+    "thermal_throttle": {
+      "title": "Ăng-ten bị giới hạn tốc độ (quá nhiệt)",
+      "summary": "Nhiệt độ ăng-ten {{temp}}°, bảo vệ giới hạn tốc độ đã kích hoạt",
+      "recommendations": [
+        "Đảm bảo thông gió và tản nhiệt cho ăng-ten",
+        "Tránh ánh nắng trực tiếp chiếu vào vỏ ăng-ten"
+      ]
+    },
+    "alignment_issue": {
+      "title": "Căn chỉnh ăng-ten bất thường",
+      "summary": "Sai số tư thế {{err}}°, độ lệch hướng vượt quá dung sai",
+      "recommendations": [
+        "Tinh chỉnh hướng theo hướng dẫn trên trang “Căn chỉnh”",
+        "Kiểm tra ăng-ten được gắn chắc chắn và không bị rung lắc"
+      ]
+    },
+    "motors_stowed": {
+      "title": "Ăng-ten ở trạng thái thu gọn",
+      "summary": "Động cơ đã thu ăng-ten nên không thể hướng tới vệ tinh",
+      "recommendations": [
+        "Hủy thu gọn trong phần cài đặt để trở lại trạng thái hoạt động",
+        "Kiểm tra xem chính sách tự động thu gọn có được kích hoạt không"
+      ]
+    },
+    "gnss_positioning": {
+      "title": "Định vị GNSS bất thường",
+      "summary": "Số vệ tinh khả kiến là {{sats}}, định vị chưa hội tụ",
+      "recommendations": [
+        "Chờ 5–10 phút để định vị hội tụ",
+        "Đảm bảo phía trên ăng-ten có tầm nhìn thoáng"
+      ]
+    },
+    "dish_heating": {
+      "title": "Ăng-ten đang sưởi tan băng",
+      "summary": "Bật sưởi do nhiệt độ thấp, nhiệt độ ăng-ten là {{temp}}°",
+      "recommendations": [
+        "Đây là hoạt động tan băng bình thường và thường tự kết thúc",
+        "Nếu kéo dài mãi, kiểm tra cảm biến nhiệt độ môi trường"
+      ]
+    },
+    "slow_ethernet": {
+      "title": "Tốc độ Ethernet suy giảm",
+      "summary": "Tốc độ thương lượng chỉ {{speed}} Mbps",
+      "recommendations": [
+        "Thay cáp mạng bị hỏng hoặc chất lượng kém",
+        "Kiểm tra tiếp xúc của cổng mạng có tốt không"
+      ]
+    },
+    "cable_connectivity": {
+      "title": "Kết nối cáp bất thường",
+      "summary": "Đường liên kết giữa ăng-ten và bộ định tuyến bị ngắt quãng",
+      "recommendations": [
+        "Kiểm tra cáp PoE có bị lỏng không",
+        "Đảm bảo cáp không bị hư hỏng vật lý"
+      ]
+    },
+    "dns_resolution": {
+      "title": "Phân giải DNS bất thường",
+      "summary": "Thiết bị báo lỗi DNS (trạng thái {{state}})",
+      "recommendations": [
+        "Kiểm tra cài đặt DNS của bộ định tuyến và hệ thống",
+        "Thử chuyển sang 1.1.1.1 hoặc 8.8.8.8"
+      ]
+    },
+    "router_flapping": {
+      "title": "Bộ định tuyến ngắt kết nối liên tục",
+      "summary": "Số bộ định tuyến được kết nối đã thay đổi {{count}} lần trong 10 phút gần đây",
+      "recommendations": [
+        "Kiểm tra cáp PoE giữa ăng-ten và bộ định tuyến",
+        "Đảm bảo nguồn cấp cho bộ định tuyến ổn định"
+      ]
+    },
+    "low_throughput": {
+      "title": "Tốc độ mạng quá thấp",
+      "summary": "Đường xuống chỉ {{down}} Mbps",
+      "recommendations": [
+        "Kiểm tra xem có lưu lượng lớn chiếm băng thông không",
+        "Kiểm tra xem có vật cản hoặc suy hao tín hiệu không"
+      ]
+    },
+    "low_snr": {
+      "title": "Chất lượng tín hiệu kém",
+      "summary": "SNR chỉ {{snr}} dB",
+      "recommendations": [
+        "Kiểm tra tầm nhìn của ăng-ten có bị che khuất không",
+        "Xác nhận góc ngẩng và hướng của ăng-ten"
+      ]
+    },
+    "severe_weather": {
+      "title": "Thời tiết xấu ảnh hưởng tín hiệu",
+      "summary": "Mất gói {{rate}}%, SNR {{snr}} dB",
+      "recommendations": [
+        "Thường tự khôi phục khi thời tiết tốt lên",
+        "Nếu tình trạng kéo dài, kiểm tra xem ăng-ten có đọng nước hoặc tuyết không"
+      ]
+    },
+    "high_temperature": {
+      "title": "Nhiệt độ thiết bị quá cao",
+      "summary": "Ăng-ten {{temp}}°, nguồn điện {{temp2}}°",
+      "recommendations": [
+        "Cải thiện môi trường tản nhiệt cho thiết bị",
+        "Tránh ánh nắng trực tiếp trong thời gian dài"
+      ]
+    },
+    "poe_power": {
+      "title": "PoE / nguồn điện bất thường",
+      "summary": "Thiết bị khởi động lại thường xuyên (đã chạy {{minutes}} phút)",
+      "recommendations": [
+        "Kiểm tra bộ nguồn và nguồn cấp PoE",
+        "Thay thiết bị cấp nguồn để kiểm tra"
+      ]
+    },
+    "router_offline": {
+      "title": "Bộ định tuyến ngoại tuyến",
+      "summary": "Không phát hiện bộ định tuyến nào được kết nối (hiện tại {{count}})",
+      "recommendations": [
+        "Kiểm tra nguồn và đèn báo của bộ định tuyến",
+        "Xác nhận cổng LAN của bộ định tuyến hoạt động bình thường"
+      ]
+    },
+    "frequent_searching": {
+      "title": "Ngắt kết nối và kết nối lại thường xuyên",
+      "summary": "Trạng thái kết nối đã chuyển đổi {{count}} lần trong 10 phút gần đây",
+      "recommendations": [
+        "Kiểm tra vật cản trong tầm nhìn và hướng của ăng-ten",
+        "Đảm bảo nguồn cấp và kết nối cáp ổn định"
+      ]
+    },
+    "wifi_signal": {
+      "title": "Vấn đề tín hiệu Wi-Fi",
+      "summary": "RSSI {{rssi}} dBm",
+      "recommendations": [
+        "Di chuyển lại gần bộ định tuyến hoặc bổ sung nút Mesh",
+        "Chuyển sang kênh ít nhiễu hơn"
+      ]
+    },
+    "collector_heartbeat_lost": {
+      "title": "Mất heartbeat của bộ thu thập",
+      "summary": "Dịch vụ thu thập chạy nền đã ngừng phản hồi, dữ liệu có thể bị gián đoạn",
+      "recommendations": [
+        "Khởi động lại ứng dụng để khôi phục việc thu thập",
+        "Kiểm tra xem có bị tường lửa chặn không"
+      ]
+    },
+    "service_restricted": {
+      "title": "Dịch vụ bị hạn chế",
+      "summary": "Cấp dịch vụ hiện tại bị hạn chế ({{service}})",
+      "recommendations": [
+        "Kiểm tra trạng thái tài khoản và hạn mức gói dịch vụ",
+        "Liên hệ nhà cung cấp dịch vụ để xác nhận nguyên nhân hạn chế"
+      ]
+    },
+    "service_not_activated": {
+      "title": "Dịch vụ chưa được kích hoạt",
+      "summary": "Thiết bị chưa kích hoạt gói đăng ký",
+      "recommendations": [
+        "Hoàn tất quy trình kích hoạt thiết bị",
+        "Xác nhận tài khoản đã liên kết với thiết bị đầu cuối này"
+      ]
+    },
+    "location_policy_violation": {
+      "title": "Vi phạm chính sách vị trí",
+      "summary": "Vị trí hiện tại không khớp với khu vực được cấp phép dịch vụ",
+      "recommendations": [
+        "Xác nhận thiết bị đầu cuối không bị di chuyển sang khu vực khác",
+        "Kiểm tra cài đặt địa chỉ dịch vụ trên tài khoản"
+      ]
+    },
+    "account_suspended": {
+      "title": "Tài khoản bị tạm ngưng",
+      "summary": "Dịch vụ tài khoản bị tạm ngưng do chưa thanh toán hoặc do chính sách",
+      "recommendations": [
+        "Thanh toán khoản còn nợ hoặc cập nhật phương thức thanh toán",
+        "Liên hệ nhà cung cấp dịch vụ để khôi phục tài khoản"
+      ]
+    },
+    "roaming": {
+      "title": "Trạng thái chuyển vùng",
+      "summary": "Hiện đang ở mạng chuyển vùng ({{service}})",
+      "recommendations": [
+        "Tốc độ có thể bị hạn chế khi chuyển vùng là bình thường",
+        "Xác nhận khu vực hiện tại có hỗ trợ dịch vụ chuyển vùng không"
+      ]
+    },
+    "no_satellite_schedule": {
+      "title": "Không có lịch vệ tinh",
+      "summary": "Không có lịch vệ tinh, có thể do thiếu dung lượng khu vực",
+      "recommendations": [
+        "Thử lại sau, lịch được gửi định kỳ",
+        "Xác nhận khu vực hiện tại có được phủ sóng không"
+      ]
+    },
+    "dns_failure": {
+      "title": "Phân giải tên miền thất bại",
+      "summary": "{{detail}}",
+      "recommendations": [
+        "Kiểm tra cấu hình DNS cục bộ",
+        "Thử chuyển sang DNS công cộng"
+      ],
+      "case_user_only": "Mạng cơ bản vẫn thông suốt nhưng máy chủ DNS hiện tại không phản hồi",
+      "case_both": "Phân giải ở cả phía người dùng và phía chuẩn đều thất bại: lỗi lớp mạng hoặc tên miền không tồn tại",
+      "case_slow": "Độ trễ DNS cục bộ cao rõ rệt so với mức chuẩn, phân giải chậm hơn",
+      "case_generic": "Phân giải tên miền thất bại, có thể không mở được trang web"
+    }
+  },
+  "page": {
+    "title": "Cảnh báo",
+    "subtitle": "Cảnh báo về lỗi ăng-ten và chất lượng mạng",
+    "view_active": "Cảnh báo đang hoạt động",
+    "view_history": "Lịch sử",
+    "refresh": "Làm mới",
+    "filter_all_count": "Tất cả {{count}}",
+    "filter_critical_count": "Nghiêm trọng {{count}}",
+    "filter_warning_count": "Cảnh báo {{count}}",
+    "filter_info_count": "Thông tin {{count}}",
+    "error_electron_only": "Dữ liệu cảnh báo do tiến trình chính thu thập, cần xem trong môi trường Electron",
+    "error_load_failed": "Không thể tải cảnh báo: {{detail}}",
+    "empty_no_active": "Không có cảnh báo đang hoạt động",
+    "empty_filtered": "Không có cảnh báo trong danh mục này",
+    "empty_history": "Không có bản ghi cảnh báo trong khoảng thời gian này",
+    "pagination": "Trang {{page}} / {{pages}}, tổng {{total}} bản ghi",
+    "prev_page": "Trang trước",
+    "next_page": "Trang sau",
+    "default_window_hint": "Mặc định chỉ hiển thị các bản ghi trong {{days}} ngày gần đây; chọn khoảng ngày để xem lịch sử cũ hơn",
+    "day_count": "{{count}} bản ghi",
+    "false_positive_ack": "Cảm ơn phản hồi của bạn. Cảnh báo này đã được xóa và chúng tôi sẽ tiếp tục cải thiện thuật toán phát hiện"
+  },
+  "card": {
+    "status_false_positive": "🚫 Đã đánh dấu báo nhầm",
+    "duration_under_minute": "Dưới 1 phút",
+    "duration_hours_minutes": "{{hours}} giờ {{minutes}} phút",
+    "duration_days": "{{count}} ngày",
+    "snooze_until_resolved": "Đã bỏ qua cảnh báo lần này",
+    "snooze_remaining_minutes": "Còn {{count}} phút",
+    "snooze_remaining_hours": "Còn {{count}} giờ",
+    "snooze_remaining_hours_minutes": "Còn {{hours}} giờ {{minutes}} phút",
+    "first_seen": "Lần đầu {{time}}",
+    "last_seen": "Lần gần nhất {{time}}",
+    "occurrences": "Đã kích hoạt {{count}} lần",
+    "duration": "Kéo dài {{duration}}",
+    "evidence": "Dữ liệu bằng chứng",
+    "recommendations": "Hành động đề xuất",
+    "unsnooze_tooltip": "Khôi phục thông báo",
+    "snooze_menu_tooltip": "Tùy chọn bỏ qua",
+    "undo_false_positive_tooltip": "Hoàn tác đánh dấu báo nhầm và đưa cảnh báo trở lại trạng thái hoạt động",
+    "undo": "Hoàn tác"
+  },
+  "filter": {
+    "date_range": "Khoảng ngày",
+    "range_value": "{{from}} – {{to}}",
+    "start_date": "Ngày bắt đầu",
+    "end_date": "Ngày kết thúc",
+    "range_invalid": "Ngày bắt đầu không được muộn hơn ngày kết thúc",
+    "range_overrides_default": "Khi chọn sẽ thay thế mặc định {{days}} ngày gần đây",
+    "clear_range": "Xóa khoảng ngày",
+    "apply": "Áp dụng",
+    "status_all": "Tất cả trạng thái",
+    "status_resolved": "Đã khôi phục",
+    "status_false_positive": "Báo nhầm",
+    "search_placeholder": "Tìm kiếm tóm tắt / mô tả / loại",
+    "clear_keyword": "Xóa từ khóa",
+    "day_today": "Hôm nay ({{date}})",
+    "day_yesterday": "Hôm qua ({{date}})",
+    "day_unknown": "Không rõ ngày"
+  },
+  "shell": {
+    "area_app": "Ứng dụng",
+    "area_layout": "Bố cục giao diện",
+    "error_electron_only": "Cần chạy trong môi trường Electron",
+    "error_connect_timeout": "Hết thời gian kết nối: không thể truy cập thiết bị Starlink",
+    "error_no_telemetry": "Không thể lấy dữ liệu đo từ xa, vui lòng kiểm tra thiết bị Starlink đã được kết nối chưa",
+    "error_fetch_failed": "Lấy dữ liệu thất bại",
+    "error_provider_missing": "useDish phải được dùng bên trong DishProvider"
+  },
+  "error_boundary": {
+    "title_with_area": "Lỗi hiển thị {{area}}",
+    "title": "Lỗi hiển thị trang",
+    "stack_toggle": "Ngăn xếp gọi"
+  }
+}

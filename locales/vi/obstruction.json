@@ -1,0 +1,84 @@
+{
+  "page": {
+    "title": "Bản đồ vật cản",
+    "loading": "Đang tải dữ liệu bản đồ vật cản…",
+    "load_failed": "Tải thất bại: {{error}}",
+    "no_data_title": "Chưa có dữ liệu bản đồ vật cản",
+    "no_data_desc": "Thiết bị chưa trả về bản đồ vật cản trong trường nhìn. Bản đồ sẽ tự động hiển thị khi kết nối được khôi phục."
+  },
+  "source": {
+    "real": "Bản đồ vật cản do thiết bị đo thực tế",
+    "mock": "Đang hiển thị dữ liệu mô phỏng (không phải do thiết bị đo thực tế). Hệ thống sẽ tự động chuyển đổi khi thiết bị trả về bản đồ vật cản.",
+    "age_suffix": " · {{age}}"
+  },
+  "stat": {
+    "total_pixels": "Tổng số điểm ảnh",
+    "obstructed_pixels": "Điểm ảnh bị vật cản",
+    "obstruction_pct": "Tỷ lệ vật cản trong trường nhìn",
+    "max_obstruction": "Mức vật cản cao nhất",
+    "direction": "Hướng vật cản chính",
+    "impact": "Đánh giá ảnh hưởng"
+  },
+  "tip": {
+    "scale": "Phạm vi 0 ~ 1, biểu thị mức suy giảm tín hiệu tại <strong>điểm nghiêm trọng nhất trong trường nhìn</strong>.",
+    "extremes": "0 = vùng trời đó hoàn toàn trong, 1 = vật cản vật lý đã chặn hoàn toàn tín hiệu.",
+    "compare": "Khác với “Tỷ lệ vật cản trong trường nhìn”: chỉ số này xem <strong>mức độ nghiêm trọng tại một điểm</strong>, còn tỷ lệ xem <strong>phạm vi bị chặn rộng bao nhiêu</strong>.",
+    "threshold": "Màu thẻ dùng cùng ngưỡng với chế độ xem 3D: ≤ {{clearMax}} Không bị che khuất · ≤ {{partialMax}} Che khuất một phần · > {{partialMax}} Che khuất hoàn toàn"
+  },
+  "direction": {
+    "none": "Không có vật cản rõ ràng",
+    "hint": "Góc phương vị khoảng {{deg}}° (so với hướng của ăng-ten)",
+    "hint_uniform": "Vật cản phân bố đều trong trường nhìn, không có phương vị chiếm ưu thế"
+  },
+  "impact": {
+    "none": "Không ảnh hưởng",
+    "low": "Thấp",
+    "medium": "Trung bình",
+    "high": "Cao"
+  },
+  "data_notes": {
+    "title": "Giải thích dữ liệu",
+    "body": "Chế độ xem này biểu diễn trường nhìn của ăng-ten bằng phép chiếu phối cảnh bán cầu 3D. Tâm là thiên đỉnh (ngay phía trên), rìa ngoài là đường chân trời. Thang màu dùng cùng tiêu chí với “Tỷ lệ vật cản trong trường nhìn” phía trên (mức vật cản chuẩn hóa ≤ {{clearMax}} được tính là Không bị che khuất, vượt quá {{partialMax}} được tính là Che khuất hoàn toàn), vì vậy diện tích đỏ/cam luôn khớp với con số tỷ lệ."
+  },
+  "legend": {
+    "unmapped": "Chưa quét",
+    "clear": "Không bị che khuất",
+    "partial": "Che khuất một phần",
+    "blocked": "Che khuất hoàn toàn"
+  },
+  "events": {
+    "title": "Lịch sử sự kiện vật cản (7 ngày gần nhất)",
+    "empty": "Không có sự kiện vật cản nào trong 7 ngày qua"
+  },
+  "event": {
+    "severity_low": "Nhẹ",
+    "severity_medium": "Trung bình",
+    "severity_high": "Nghiêm trọng",
+    "duration": "Thời lượng {{duration}}",
+    "avg_obstruction": "Tỷ lệ vật cản trung bình: {{value}}%",
+    "peak": "Giá trị đỉnh: {{value}}%"
+  },
+  "duration": {
+    "seconds": "{{count}} giây",
+    "minutes": "{{count}} phút",
+    "hours": "{{count}} giờ",
+    "hours_minutes": "{{count}} giờ {{mins}} phút"
+  },
+  "dir": {
+    "n": "Bắc",
+    "ne": "Đông Bắc",
+    "e": "Đông",
+    "se": "Đông Nam",
+    "s": "Nam",
+    "sw": "Tây Nam",
+    "w": "Tây",
+    "nw": "Tây Bắc"
+  },
+  "age": {
+    "unknown": "Không rõ thời gian",
+    "just_now": "Vừa thu thập",
+    "minutes": "Thu thập {{count}} phút trước",
+    "hours": "Thu thập {{count}} giờ trước",
+    "days": "Thu thập {{count}} ngày trước"
+  }
+}

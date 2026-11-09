@@ -1,0 +1,326 @@
+{
+  "severity": {
+    "critical": "치명적",
+    "warning": "경고",
+    "info": "정보"
+  },
+  "status": {
+    "new": "신규",
+    "ongoing": "진행 중",
+    "resolved": "복구됨",
+    "acknowledged": "확인됨",
+    "snoozed": "알림 중지됨"
+  },
+  "types": {
+    "dish_offline": {
+      "title": "안테나 오프라인",
+      "summary": "안테나 상태: {{state}} — 위성 네트워크에 연결할 수 없습니다",
+      "recommendations": [
+        "전원 어댑터와 PoE 케이블을 확인합니다",
+        "안테나를 재시작합니다"
+      ]
+    },
+    "high_latency": {
+      "title": "네트워크 지연 과다",
+      "summary": "지연이 최대 {{latency}} ms에 달합니다",
+      "recommendations": [
+        "네트워크 혼잡 시간대인지 확인합니다",
+        "라우터 재시작을 시도합니다"
+      ]
+    },
+    "high_packet_loss": {
+      "title": "심각한 패킷 손실",
+      "summary": "패킷 손실률은 {{rate}}%입니다",
+      "recommendations": [
+        "PoE 케이블과 커넥터를 확인합니다",
+        "기상 조건이 위성 링크에 영향을 주는지 확인합니다"
+      ]
+    },
+    "obstruction_detected": {
+      "title": "장애물 감지",
+      "summary": "가시 영역의 장애물 비율은 {{frac}}%입니다",
+      "recommendations": [
+        "장애물 지도에서 장애물 방향을 확인합니다",
+        "장애물을 치우거나 위치를 조정합니다"
+      ]
+    },
+    "thermal_throttle": {
+      "title": "안테나 스로틀링(과열)",
+      "summary": "안테나 온도가 {{temp}}°이므로 스로틀링 보호가 작동했습니다",
+      "recommendations": [
+        "안테나의 통풍과 방열을 확보합니다",
+        "안테나 하우징에 직사광선이 닿지 않도록 합니다"
+      ]
+    },
+    "alignment_issue": {
+      "title": "안테나 정렬 이상",
+      "summary": "자세 불확실성 {{err}}°, 지향 편차가 허용 범위를 초과했습니다",
+      "recommendations": [
+        "'정렬' 페이지 안내에 따라 방향을 미세 조정합니다",
+        "안테나가 단단히 고정되어 흔들림이 없는지 확인합니다"
+      ]
+    },
+    "motors_stowed": {
+      "title": "안테나 보관 상태",
+      "summary": "모터가 안테나를 접어 위성을 지향할 수 없습니다",
+      "recommendations": [
+        "설정에서 보관을 해제하고 작동 상태로 복원합니다",
+        "자동 보관 정책이 작동했는지 확인합니다"
+      ]
+    },
+    "gnss_positioning": {
+      "title": "GNSS 측위 이상",
+      "summary": "가시 위성 {{sats}}기, 측위가 아직 수렴하지 않았습니다",
+      "recommendations": [
+        "측위가 수렴할 때까지 5~10분 기다립니다",
+        "안테나 상공의 시야가 확보되었는지 확인합니다"
+      ]
+    },
+    "dish_heating": {
+      "title": "안테나 제빙 가열 중",
+      "summary": "저온 환경에서 가열이 작동 중이며 안테나 온도는 {{temp}}°입니다",
+      "recommendations": [
+        "정상적인 제빙 동작이며 대개 자동으로 종료됩니다",
+        "오랫동안 종료되지 않으면 주변 온도 센서를 확인합니다"
+      ]
+    },
+    "slow_ethernet": {
+      "title": "이더넷 속도 저하",
+      "summary": "네고시에이션 속도가 {{speed}} Mbps에 불과합니다",
+      "recommendations": [
+        "손상되었거나 품질이 낮은 랜 케이블을 교체합니다",
+        "랜 포트 접촉이 양호한지 확인합니다"
+      ]
+    },
+    "cable_connectivity": {
+      "title": "케이블 연결 이상",
+      "summary": "안테나와 라우터 간 링크가 간헐적으로 끊깁니다",
+      "recommendations": [
+        "PoE 케이블이 느슨하지 않은지 확인합니다",
+        "케이블에 물리적 손상이 없는지 확인합니다"
+      ]
+    },
+    "dns_resolution": {
+      "title": "DNS 확인 이상",
+      "summary": "기기가 DNS 이상을 보고했습니다(상태 {{state}})",
+      "recommendations": [
+        "라우터와 시스템의 DNS 설정을 확인합니다",
+        "1.1.1.1 또는 8.8.8.8로 변경을 시도합니다"
+      ]
+    },
+    "router_flapping": {
+      "title": "라우터 연결 반복 끊김",
+      "summary": "최근 10분간 연결된 라우터 수가 {{count}}회 변경되었습니다",
+      "recommendations": [
+        "안테나와 라우터 사이의 PoE 케이블을 확인합니다",
+        "라우터 전원 공급이 안정적인지 확인합니다"
+      ]
+    },
+    "low_throughput": {
+      "title": "네트워크 속도 과소",
+      "summary": "다운링크 속도가 {{down}} Mbps에 불과합니다",
+      "recommendations": [
+        "대용량 트래픽이 대역폭을 차지하지 않는지 확인합니다",
+        "장애물이나 신호 감쇠가 있는지 확인합니다"
+      ]
+    },
+    "low_snr": {
+      "title": "신호 품질 저하",
+      "summary": "SNR이 {{snr}} dB에 불과합니다",
+      "recommendations": [
+        "안테나 시야가 가려지지 않았는지 확인합니다",
+        "안테나 앙각과 방향을 확인합니다"
+      ]
+    },
+    "severe_weather": {
+      "title": "악천후로 인한 신호 영향",
+      "summary": "패킷 손실 {{rate}}%, SNR {{snr}} dB",
+      "recommendations": [
+        "날씨가 나아지면 대개 자동으로 복구됩니다",
+        "이상이 계속되면 안테나에 물이나 눈이 고였는지 확인합니다"
+      ]
+    },
+    "high_temperature": {
+      "title": "기기 온도 과열",
+      "summary": "안테나 {{temp}}°, 전원 {{temp2}}°",
+      "recommendations": [
+        "기기의 방열 환경을 개선합니다",
+        "장시간 직사광선을 피합니다"
+      ]
+    },
+    "poe_power": {
+      "title": "PoE / 전원 이상",
+      "summary": "기기가 자주 재시작합니다(가동 {{minutes}}분)",
+      "recommendations": [
+        "전원 어댑터와 PoE 전원 공급을 확인합니다",
+        "전원 공급 장치를 교체하여 테스트합니다"
+      ]
+    },
+    "router_offline": {
+      "title": "라우터 오프라인",
+      "summary": "연결된 라우터가 감지되지 않았습니다(현재 {{count}}대)",
+      "recommendations": [
+        "라우터 전원과 표시등을 확인합니다",
+        "라우터 LAN 포트가 정상인지 확인합니다"
+      ]
+    },
+    "frequent_searching": {
+      "title": "빈번한 끊김과 재연결",
+      "summary": "최근 10분간 연결 상태가 {{count}}회 전환되었습니다",
+      "recommendations": [
+        "안테나 시야의 장애물과 방향을 확인합니다",
+        "전원 공급과 케이블 연결이 안정적인지 확인합니다"
+      ]
+    },
+    "wifi_signal": {
+      "title": "Wi-Fi 신호 문제",
+      "summary": "RSSI {{rssi}} dBm",
+      "recommendations": [
+        "라우터에 가까이 가거나 메시 노드를 추가합니다",
+        "간섭이 적은 채널로 전환합니다"
+      ]
+    },
+    "collector_heartbeat_lost": {
+      "title": "수집기 하트비트 손실",
+      "summary": "백그라운드 수집 서비스가 응답을 멈춰 데이터가 중단되었을 수 있습니다",
+      "recommendations": [
+        "앱을 재시작하여 수집을 복구합니다",
+        "방화벽에 의해 차단되었는지 확인합니다"
+      ]
+    },
+    "service_restricted": {
+      "title": "서비스 제한",
+      "summary": "현재 서비스 등급이 제한되었습니다({{service}})",
+      "recommendations": [
+        "계정 상태와 플랜 잔여량을 확인합니다",
+        "서비스 제공자에게 제한 원인을 확인합니다"
+      ]
+    },
+    "service_not_activated": {
+      "title": "서비스 미활성화",
+      "summary": "기기가 아직 구독을 활성화하지 않았습니다",
+      "recommendations": [
+        "기기 활성화 절차를 완료합니다",
+        "계정이 본 단말에 연결되어 있는지 확인합니다"
+      ]
+    },
+    "location_policy_violation": {
+      "title": "위치 정책 위반",
+      "summary": "현재 위치가 서비스 허용 지역과 일치하지 않습니다",
+      "recommendations": [
+        "단말이 다른 지역으로 이동되지 않았는지 확인합니다",
+        "계정의 서비스 주소 설정을 확인합니다"
+      ]
+    },
+    "account_suspended": {
+      "title": "계정 일시 중지",
+      "summary": "미결제 또는 정책으로 인해 계정 서비스가 일시 중지되었습니다",
+      "recommendations": [
+        "미납 금액을 결제하거나 결제 방법을 갱신합니다",
+        "서비스 제공자에게 연락하여 계정을 복구합니다"
+      ]
+    },
+    "roaming": {
+      "title": "로밍 상태",
+      "summary": "현재 로밍 네트워크에 연결되어 있습니다({{service}})",
+      "recommendations": [
+        "로밍 중 속도 제한은 정상 동작입니다",
+        "현재 지역에서 로밍 서비스가 지원되는지 확인합니다"
+      ]
+    },
+    "no_satellite_schedule": {
+      "title": "위성 스케줄 없음",
+      "summary": "위성 스케줄을 사용할 수 없습니다. 지역 용량 부족일 수 있습니다",
+      "recommendations": [
+        "잠시 후 다시 시도합니다. 스케줄은 주기적으로 발행됩니다",
+        "현재 지역이 서비스 범위에 포함되는지 확인합니다"
+      ]
+    },
+    "dns_failure": {
+      "title": "도메인 확인 실패",
+      "summary": "{{detail}}",
+      "recommendations": [
+        "로컬 DNS 설정을 확인합니다",
+        "공용 DNS로 변경을 시도합니다"
+      ],
+      "case_user_only": "기본 네트워크는 정상이지만 현재 DNS 서버가 응답하지 않습니다",
+      "case_both": "사용자 측과 기준 측 모두 확인에 실패했습니다. 네트워크 계층 장애 또는 존재하지 않는 도메인입니다",
+      "case_slow": "로컬 DNS 지연이 기준보다 뚜렷하게 높아 확인이 느립니다",
+      "case_generic": "도메인 확인에 실패하여 웹 페이지가 열리지 않을 수 있습니다"
+    }
+  },
+  "page": {
+    "title": "알림",
+    "subtitle": "안테나 이상 및 네트워크 품질 알림",
+    "view_active": "활성 알림",
+    "view_history": "기록",
+    "refresh": "새로 고침",
+    "filter_all_count": "전체 {{count}}",
+    "filter_critical_count": "치명적 {{count}}",
+    "filter_warning_count": "경고 {{count}}",
+    "filter_info_count": "정보 {{count}}",
+    "error_electron_only": "알림 데이터는 메인 프로세스가 수집하므로 Electron 환경에서 확인해야 합니다",
+    "error_load_failed": "알림을 불러오지 못했습니다: {{detail}}",
+    "empty_no_active": "활성 알림이 없습니다",
+    "empty_filtered": "이 분류에 알림이 없습니다",
+    "empty_history": "해당 시간 범위에 알림 기록이 없습니다",
+    "pagination": "{{page}} / {{pages}} 페이지, 총 {{total}}건",
+    "prev_page": "이전",
+    "next_page": "다음",
+    "default_window_hint": "기본적으로 최근 {{days}}일 기록만 표시합니다. 이전 이력은 날짜 범위를 선택하여 확인합니다",
+    "day_count": "{{count}}건",
+    "false_positive_ack": "피드백에 감사합니다. 해당 알림을 지웠으며 감지 알고리즘을 계속 개선하겠습니다"
+  },
+  "card": {
+    "status_false_positive": "🚫 오탐으로 표시됨",
+    "duration_under_minute": "1분 미만",
+    "duration_hours_minutes": "{{hours}}시간 {{minutes}}분",
+    "duration_days": "{{count}}일",
+    "snooze_until_resolved": "이번 알림은 무시됨",
+    "snooze_remaining_minutes": "{{count}}분 남음",
+    "snooze_remaining_hours": "{{count}}시간 남음",
+    "snooze_remaining_hours_minutes": "{{hours}}시간 {{minutes}}분 남음",
+    "first_seen": "최초 {{time}}",
+    "last_seen": "최근 {{time}}",
+    "occurrences": "{{count}}회 발생",
+    "duration": "지속 {{duration}}",
+    "evidence": "근거 데이터",
+    "recommendations": "권장 조치",
+    "unsnooze_tooltip": "알림 재개",
+    "snooze_menu_tooltip": "무시 옵션",
+    "undo_false_positive_tooltip": "오탐 표시를 취소하고 활성 알림으로 되돌립니다",
+    "undo": "되돌리기"
+  },
+  "filter": {
+    "date_range": "날짜 범위",
+    "range_value": "{{from}} ~ {{to}}",
+    "start_date": "시작일",
+    "end_date": "종료일",
+    "range_invalid": "시작일은 종료일보다 늦을 수 없습니다",
+    "range_overrides_default": "선택 시 기본값인 최근 {{days}}일을 덮어씁니다",
+    "clear_range": "범위 지우기",
+    "apply": "적용",
+    "status_all": "모든 상태",
+    "status_resolved": "복구됨",
+    "status_false_positive": "오탐",
+    "search_placeholder": "요약 / 설명 / 유형 검색",
+    "clear_keyword": "키워드 지우기",
+    "day_today": "오늘 ({{date}})",
+    "day_yesterday": "어제 ({{date}})",
+    "day_unknown": "날짜 미상"
+  },
+  "shell": {
+    "area_app": "앱",
+    "area_layout": "화면 레이아웃",
+    "error_electron_only": "Electron 환경에서 실행해야 합니다",
+    "error_connect_timeout": "연결 시간 초과: Starlink 기기에 접근할 수 없습니다",
+    "error_no_telemetry": "텔레메트리 데이터를 가져올 수 없습니다. Starlink 기기가 연결되어 있는지 확인합니다",
+    "error_fetch_failed": "데이터를 가져오지 못했습니다",
+    "error_provider_missing": "useDish는 DishProvider 내에서 사용해야 합니다"
+  },
+  "error_boundary": {
+    "title_with_area": "{{area}} 렌더링 오류",
+    "title": "페이지 렌더링 오류",
+    "stack_toggle": "호출 스택"
+  }
+}

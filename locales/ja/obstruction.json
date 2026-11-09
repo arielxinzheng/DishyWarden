@@ -1,0 +1,84 @@
+{
+  "page": {
+    "title": "障害マップ",
+    "loading": "障害マップのデータを読み込んでいます…",
+    "load_failed": "読み込みに失敗しました: {{error}}",
+    "no_data_title": "障害マップのデータがまだありません",
+    "no_data_desc": "デバイスがまだ視野の障害マップを返していません。接続が回復すると自動的に表示されます。"
+  },
+  "source": {
+    "real": "デバイス実測の障害マップ",
+    "mock": "現在はシミュレーションデータを表示しています（デバイス実測ではありません）。デバイスが障害マップを返すと自動的に切り替わります。",
+    "age_suffix": " · {{age}}"
+  },
+  "stat": {
+    "total_pixels": "総ピクセル数",
+    "obstructed_pixels": "障害ピクセル",
+    "obstruction_pct": "視野の障害率",
+    "max_obstruction": "最大障害度",
+    "direction": "主な障害方向",
+    "impact": "影響評価"
+  },
+  "tip": {
+    "scale": "0～1 の範囲で、<strong>視野内で最も深刻な点</strong>における信号の減衰度を表します。",
+    "extremes": "0 = その領域の空が完全にクリア、1 = 物理的な障害物が信号を完全に遮断している状態です。",
+    "compare": "「視野の障害率」との違い: こちらは<strong>1 点がどれだけ深刻か</strong>を見ますが、障害率は<strong>遮られている範囲の広さ</strong>を見ます。",
+    "threshold": "カードの色は 3D ビューと同じしきい値を使用します: ≤ {{clearMax}} 遮蔽なし · ≤ {{partialMax}} 部分遮蔽 · > {{partialMax}} 完全遮蔽"
+  },
+  "direction": {
+    "none": "明確な障害なし",
+    "hint": "方位角 約 {{deg}}°（アンテナの向きを基準）",
+    "hint_uniform": "障害は視野内に均等に分布しており、主となる方位はありません"
+  },
+  "impact": {
+    "none": "影響なし",
+    "low": "低",
+    "medium": "中",
+    "high": "高"
+  },
+  "data_notes": {
+    "title": "データの説明",
+    "body": "このビューは 3D 半球のパースペクティブ投影でアンテナの視野を表示します。中心は天頂（真上）、外周は地平線を表します。色分けは上部の「視野の障害率」と同じ判定基準を使用します（正規化した障害度が {{clearMax}} 以下なら遮蔽なし、{{partialMax}} を超える場合は完全遮蔽とみなします）。そのため、赤／橙の面積とパーセント値は必ず一致します。"
+  },
+  "legend": {
+    "unmapped": "未スキャン",
+    "clear": "遮蔽なし",
+    "partial": "部分遮蔽",
+    "blocked": "完全遮蔽"
+  },
+  "events": {
+    "title": "障害イベント履歴（直近 7 日間）",
+    "empty": "過去 7 日間、障害イベントの記録はありません"
+  },
+  "event": {
+    "severity_low": "軽微",
+    "severity_medium": "中程度",
+    "severity_high": "重大",
+    "duration": "継続時間 {{duration}}",
+    "avg_obstruction": "平均障害率: {{value}}%",
+    "peak": "ピーク: {{value}}%"
+  },
+  "duration": {
+    "seconds": "{{count}} 秒",
+    "minutes": "{{count}} 分",
+    "hours": "{{count}} 時間",
+    "hours_minutes": "{{count}} 時間 {{mins}} 分"
+  },
+  "dir": {
+    "n": "北",
+    "ne": "北東",
+    "e": "東",
+    "se": "南東",
+    "s": "南",
+    "sw": "南西",
+    "w": "西",
+    "nw": "北西"
+  },
+  "age": {
+    "unknown": "時刻不明",
+    "just_now": "たった今取得",
+    "minutes": "{{count}} 分前に取得",
+    "hours": "{{count}} 時間前に取得",
+    "days": "{{count}} 日前に取得"
+  }
+}
