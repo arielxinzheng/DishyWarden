@@ -61,6 +61,13 @@ export interface AlertRule {
  */
 const OUTAGE_FRESH_WINDOW_MS = 2 * 60_000;
 
+/** 断线重连判定窗口：10 分钟内的时间窗 */
+const LINK_FLIP_WINDOW_MS = 10 * 60_000;
+/** 窗口内 ONLINE ↔ 非 ONLINE 翻转达到该次数 ⇒ 判为频繁断线重连 */
+const LINK_FLIP_THRESHOLD = 3;
+/** 连续卡在 SEARCHING 超过该时长 ⇒ 同样判为「持续搜星连不上」 */
+const SEARCHING_STUCK_MS = 10 * 60_000;
+
 export class AlertManager extends EventEmitter {
   private db: AlertDatabase;
   private notifier: Notifier;
@@ -75,6 +82,19 @@ export class AlertManager extends EventEmitter {
   private dnsProbeLastResults: Map<string, any> = new Map();
   // 用于依赖压制判断的 ICMP 探针状态
   private icmpProbeStates: Map<string, { reachable: boolean; consecutiveFailures: number }> = new Map();
+
+  /**
+   * 连接状态历史 —— 供 `frequent_searching`（频繁断线重连）使用。
+   *
+   * 规则只能拿到**单帧** telemetry，而"频繁重连"本质是**跨帧**现象：
+   * 一帧 SEARCHING 可能只是正常切换，十帧里反复 ONLINE→SEARCHING→ONLINE
+   * 才是问题。所以计数必须由管理器自己维护，规则只做查询。
+   */
+  private lastLinkState: TelemetryData['state'] | null = null;
+  /** 最近窗口内 ONLINE ↔ 非 ONLINE 的翻转时刻（epoch ms） */
+  private linkFlips: number[] = [];
+  /** 进入 SEARCHING 的时刻；null = 当前不在搜星 */
+  private searchingSince: number | null = null;
 
   constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds, dbPath?: string) {
     super();
@@ -610,14 +630,29 @@ export class AlertManager extends EventEmitter {
         name: '频繁断线重连',
         enabled: true,
         severity: 'warning',
-        condition: (data) => {
-          // 这个规则需要历史状态才能判断, 当前只检测 SEARCHING 状态
-          // 在实际使用中, 需要在 AlertManager 层面维护状态切换计数
-          return data.state === 'SEARCHING' && (data.uptime || 0) > 600; // 运行超过 10 分钟还在搜星
+        // 跨帧判据，数据来自 AlertManager 自己维护的状态历史：
+        //   1) 10 分钟内 ONLINE ↔ 非 ONLINE 反复翻转 ≥3 次 ⇒ 断线重连
+        //   2) 连续卡在 SEARCHING ≥10 分钟 ⇒ 一直连不上
+        // 旧实现用 `state === 'SEARCHING' && uptime > 600` —— 那是"设备开机超过
+        // 10 分钟"而不是"卡了 10 分钟"，刚开机正常锁星的用户会被误报；
+        // 而且只看单帧，真正的频繁重连（帧与帧之间反复横跳）根本抓不到。
+        condition: () => {
+          const now = Date.now();
+          if (this.recentLinkFlips(now) >= LINK_FLIP_THRESHOLD) return true;
+          return this.searchingSince !== null && now - this.searchingSince >= SEARCHING_STUCK_MS;
         },
-        summary: () => '天线持续搜索卫星, 无法建立稳定连接',
-        description: (data) => 
-          `设备已运行 ${Math.floor((data.uptime || 0) / 60)} 分钟, 但仍在搜索卫星`,
+        summary: () => {
+          const flips = this.recentLinkFlips();
+          if (flips >= LINK_FLIP_THRESHOLD) return `近 10 分钟断线重连 ${flips} 次`;
+          return '天线持续搜索卫星, 无法建立稳定连接';
+        },
+        description: () => {
+          const flips = this.recentLinkFlips();
+          if (flips >= LINK_FLIP_THRESHOLD) {
+            return `近 10 分钟内连接状态在 ONLINE / 非 ONLINE 之间切换 ${flips} 次`;
+          }
+          return '已连续 10 分钟以上停留在搜索卫星状态, 未能建立稳定连接';
+        },
         evidence: (data) => ({
           state: data.state,
           uptime_seconds: data.uptime,
@@ -937,9 +972,44 @@ export class AlertManager extends EventEmitter {
   /**
    * 检查遥测数据并触发告警
    */
+  /**
+   * 记录连接状态，并维护「翻转时刻」与「进入搜星的时刻」。
+   *
+   * 只统计 **ONLINE ↔ 非 ONLINE** 的跃迁：BOOTING→SEARCHING 这种开机过程中的
+   * 正常演进不该算作"断线重连"。
+   */
+  private recordLinkState(state: TelemetryData['state'], now = Date.now()): void {
+    if (this.lastLinkState !== null && this.lastLinkState !== state) {
+      const wasOnline = this.lastLinkState === 'ONLINE';
+      const isOnline = state === 'ONLINE';
+      if (wasOnline !== isOnline) {
+        this.linkFlips.push(now);
+        const cutoff = now - LINK_FLIP_WINDOW_MS;
+        this.linkFlips = this.linkFlips.filter((t) => t >= cutoff);
+      }
+    }
+
+    this.lastLinkState = state;
+
+    if (state === 'SEARCHING') {
+      if (this.searchingSince === null) this.searchingSince = now;
+    } else {
+      this.searchingSince = null;
+    }
+  }
+
+  /** 窗口内 ONLINE ↔ 非 ONLINE 的翻转次数 */
+  private recentLinkFlips(now = Date.now()): number {
+    const cutoff = now - LINK_FLIP_WINDOW_MS;
+    return this.linkFlips.filter((t) => t >= cutoff).length;
+  }
+
   async checkTelemetry(telemetry: TelemetryData): Promise<void> {
     // 更新采集器心跳时间
     this.lastCollectorSuccess = new Date();
+
+    // 先把本帧状态记进历史 —— frequent_searching 需要跨帧计数
+    this.recordLinkState(telemetry.state);
 
     const now = new Date().toISOString();
 

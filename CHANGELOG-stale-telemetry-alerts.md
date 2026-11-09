@@ -175,3 +175,48 @@ frequent_searching warning    天线持续搜索卫星       ← 误报（同一
 - `manager.test.ts`：SEARCHING **不应**报 `dish_offline`
 - `dishClient.desired.test.ts`：有下行 ⇒ ONLINE ／ 无下行+路由器 ⇒ SEARCHING ／
   无下行+无路由器 ⇒ OFFLINE ／ uptime<60 ⇒ BOOTING ／ 恶劣天气仍判 ONLINE
+
+## 8. 追加修复：`frequent_searching` 改为跨帧判据
+
+### 问题
+
+规则名是「频繁断线重连」，但实现是：
+
+```ts
+condition: (data) => data.state === 'SEARCHING' && (data.uptime || 0) > 600
+```
+
+两个毛病：
+
+1. **判据根本不是"卡住多久"而是"设备开机多久"**。刚开机、正常锁星的设备
+   只要 `uptime > 600`，就会报「无法建立稳定连接」。
+2. **只看单帧，抓不到真正的频繁重连**。断线重连的本质是帧与帧之间
+   ONLINE ↔ 非 ONLINE 反复横跳，单帧数据里没有任何信息。
+
+### 修法
+
+在 `AlertManager` 里维护状态历史（规则只查询、不自己攒状态）：
+
+- `recordLinkState(state)` —— 在 `checkTelemetry` 入口调用，统计
+  **ONLINE ↔ 非 ONLINE** 的跃迁时刻（BOOTING→SEARCHING 这种开机演进不算）
+- `linkFlips` + `searchingSince` 两个小字段，只在 10 分钟窗口内保留
+
+新判据（满足任一即触发）：
+
+| 条件 | 含义 |
+|---|---|
+| 10 分钟内 ONLINE ↔ 非 ONLINE 翻转 ≥ 3 次 | 真的在反复断线重连 |
+| 连续停留在 SEARCHING ≥ 10 分钟 | 这个方向一直连不上 |
+
+`summary` / `description` 会区分是哪一种，不再一律说"持续搜索卫星"。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `vitest run` | 20 文件 / **304 测试全过**（新增 3 项：翻转触发、稳定在线不触发、卡住 10 分钟触发） |
+| 实机 | 无活跃告警；用 DishyMock `POST /api/transport {"mode":"flap"}` 抖动 90 秒，未产生误报 |
+
+**说明**：传输层 `flap` 造成的是**缺帧**（采集失败），不会产生 SEARCHING 状态，
+所以不适合用来验证本规则 —— 那种情况由 `collector_heartbeat_lost` 负责。
+要真机复现"反复 ONLINE/SEARCHING"，需要让设备在搜星与锁定之间来回横跳。

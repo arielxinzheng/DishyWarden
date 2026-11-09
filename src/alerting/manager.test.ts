@@ -441,6 +441,36 @@ describe('alerting 集成测试 - AlertManager', () => {
       expect(active).toHaveLength(0);
     });
 
+    it('频繁断线重连（10 分钟内翻转 ≥3 次）才报 frequent_searching', async () => {
+      // 单帧 SEARCHING 只是正常锁星，跨帧反复横跳才是问题 —— 旧实现
+      // 用 uptime > 600 冒充"卡了 10 分钟"，刚开机正常锁星的用户会被误报。
+      for (let i = 0; i < 6; i++) {
+        await manager.checkTelemetry(
+          createMockTelemetry({ state: i % 2 === 0 ? 'ONLINE' : 'SEARCHING' })
+        );
+      }
+      const active = manager.getActiveAlerts();
+      expect(active.some((a) => a.alert_type === 'frequent_searching')).toBe(true);
+    });
+
+    it('状态稳定 ONLINE 时不报 frequent_searching', async () => {
+      for (let i = 0; i < 10; i++) {
+        await manager.checkTelemetry(createMockTelemetry({ state: 'ONLINE' }));
+      }
+      const active = manager.getActiveAlerts();
+      expect(active.some((a) => a.alert_type === 'frequent_searching')).toBe(false);
+    });
+
+    it('连续卡在 SEARCHING 超过 10 分钟 ⇒ 报 frequent_searching', async () => {
+      await manager.checkTelemetry(createMockTelemetry({ state: 'SEARCHING' }));
+      // 把"进入搜星的时刻"往前推 11 分钟, 模拟持续卡住
+      (manager as any).searchingSince = Date.now() - 11 * 60_000;
+      await manager.checkTelemetry(createMockTelemetry({ state: 'SEARCHING' }));
+
+      const active = manager.getActiveAlerts();
+      expect(active.some((a) => a.alert_type === 'frequent_searching')).toBe(true);
+    });
+
     it('SEARCHING（正在锁星）不应报「天线未连接」', async () => {
       // 回归: 旧判据是 state !== 'ONLINE'，刚开始搜星的家庭网络会被判成
       // critical「天线未连接」；恶劣天气导致 SNR 掉到噪声底时也会触发，
