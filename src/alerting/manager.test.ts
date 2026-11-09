@@ -496,6 +496,66 @@ describe('alerting 集成测试 - AlertManager', () => {
       expect(active.some((a) => a.alert_type === 'frequent_searching')).toBe(true);
     });
 
+    it('设备上报 alerts.dns 时报 DNS 解析异常', async () => {
+      // 回归: proto 里 `bool dns = 15` 是一等字段，此前没有任何规则消费它，
+      // 设备报了等于白报。
+      const data = createMockTelemetry({
+        alerts: { dns: true } as any,
+      });
+      await manager.checkTelemetry(data);
+
+      const active = manager.getActiveAlerts();
+      expect(active.some((a) => a.alert_type === 'dns_resolution')).toBe(true);
+    });
+
+    it('alerts.dns 为 false 时不报 DNS 解析异常', async () => {
+      await manager.checkTelemetry(createMockTelemetry({ alerts: { dns: false } as any }));
+      expect(
+        manager.getActiveAlerts().some((a) => a.alert_type === 'dns_resolution')
+      ).toBe(false);
+    });
+
+    it('路由器数量反复变化时报「路由器反复掉线」', async () => {
+      // router_offline 只抓"数量为 0"的彻底断开；抓不到"掉一下又回来"的抖动
+      const counts = [2, 1, 2, 1, 2];
+      for (const c of counts) {
+        await manager.checkTelemetry(createMockTelemetry({ connectedRouterCount: c }));
+      }
+      const active = manager.getActiveAlerts();
+      expect(active.some((a) => a.alert_type === 'router_flapping')).toBe(true);
+      // 路由器始终至少有一台 ⇒ 不该报"路由器离线"
+      expect(active.some((a) => a.alert_type === 'router_offline')).toBe(false);
+    });
+
+    it('路由器数量稳定时不报「路由器反复掉线」', async () => {
+      for (let i = 0; i < 8; i++) {
+        await manager.checkTelemetry(createMockTelemetry({ connectedRouterCount: 2 }));
+      }
+      expect(
+        manager.getActiveAlerts().some((a) => a.alert_type === 'router_flapping')
+      ).toBe(false);
+    });
+
+    it('路由器稳定后满 5 分钟静默期即恢复', async () => {
+      for (const c of [2, 1, 2, 1, 2]) {
+        await manager.checkTelemetry(createMockTelemetry({ connectedRouterCount: c }));
+      }
+      expect(
+        manager.getActiveAlerts().some((a) => a.alert_type === 'router_flapping')
+      ).toBe(true);
+
+      // 把变化时刻推到 6 分钟前（仍在统计窗口内，但已过静默期）
+      (manager as any).routerCountChanges = (manager as any).routerCountChanges.map(
+        (t: number) => t - 6 * 60_000
+      );
+      (manager as any).lastRouterCount = 2;
+
+      await manager.checkTelemetry(createMockTelemetry({ connectedRouterCount: 2 }));
+      expect(
+        manager.getActiveAlerts().some((a) => a.alert_type === 'router_flapping')
+      ).toBe(false);
+    });
+
     it('SEARCHING（正在锁星）不应报「天线未连接」', async () => {
       // 回归: 旧判据是 state !== 'ONLINE'，刚开始搜星的家庭网络会被判成
       // critical「天线未连接」；恶劣天气导致 SNR 掉到噪声底时也会触发，

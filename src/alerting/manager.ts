@@ -67,6 +67,12 @@ const LINK_FLIP_WINDOW_MS = 10 * 60_000;
 const LINK_FLIP_THRESHOLD = 3;
 /** 连续卡在 SEARCHING 超过该时长 ⇒ 同样判为「持续搜星连不上」 */
 const SEARCHING_STUCK_MS = 10 * 60_000;
+/** 路由器数量变化的统计窗口 */
+const ROUTER_FLAP_WINDOW_MS = 10 * 60_000;
+/** 窗口内「已连接路由器数量」变化达到该次数 ⇒ 判为反复掉线 */
+const ROUTER_FLAP_THRESHOLD = 3;
+/** 静默期：稳定该时长后撤警（与 frequent_searching 同一思路） */
+const ROUTER_FLAP_QUIET_MS = 5 * 60_000;
 /**
  * 静默期：最后一次翻转之后稳定该时长，就认为「不再频繁重连」，告警应当恢复。
  *
@@ -105,6 +111,9 @@ export class AlertManager extends EventEmitter {
   private linkFlips: number[] = [];
   /** 进入 SEARCHING 的时刻；null = 当前不在搜星 */
   private searchingSince: number | null = null;
+  /** 「已连接路由器数量」的变化时刻（epoch ms），供 router_flapping 规则跨帧统计 */
+  private routerCountChanges: number[] = [];
+  private lastRouterCount: number | null = null;
 
   constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds, dbPath?: string) {
     super();
@@ -417,6 +426,69 @@ export class AlertManager extends EventEmitter {
           '尝试更换 PoE 网线',
           '检查 PoE 供电设备是否正常',
           '线缆过长（>100米）可能导致信号衰减',
+        ],
+      },
+
+      // DNS 解析异常（设备侧上报的 alerts.dns）
+      {
+        id: 'dns_resolution',
+        name: 'DNS 解析异常',
+        enabled: true,
+        severity: 'warning',
+        // 设备自己把 DNS 标志位置起来了。proto 里 `bool dns = 15` 是一等字段，
+        // 但此前**没有任何规则消费它** —— 设备报了等于白报。
+        // 归属说明：DNS 异常通常是「本机/路由器 DNS 配置」或「运营商 DNS 故障」，
+        // 所以按 warning 而非 critical；真断网由 cable_connectivity / router_offline 负责。
+        condition: (data) => hasAlert(data, 'dns') || false,
+        summary: () => '设备报告 DNS 解析异常',
+        description: (data) =>
+          `天线侧 DNS 标志位已置起（alerts.dns），当前状态 ${data.state}，延迟 ${Math.round(data.popPingLatencyMs || 0)}ms`,
+        evidence: (data) => ({
+          dns_alert: hasAlert(data, 'dns'),
+          state: data.state,
+          latency_ms: data.popPingLatencyMs,
+        }),
+        recommendations: [
+          '检查路由器 / 本机的 DNS 设置是否被改过或失效',
+          '尝试把 DNS 手动改为 8.8.8.8 或 1.1.1.1',
+          '确认代理 / VPN 客户端没有接管 DNS（fake-ip 模式下会出现解析异常）',
+          '重启路由器与天线，排除缓存异常',
+        ],
+      },
+
+      // 本地路由器反复掉线（跨帧判据）
+      {
+        id: 'router_flapping',
+        name: '路由器反复掉线',
+        enabled: true,
+        severity: 'warning',
+        // 「已连接路由器数量」在窗口内反复变化 ⇒ 有路由器（或下游设备）在
+        // 反复上下线。`router_offline` 只看"数量为 0"那种彻底断开，抓不到
+        // 这种"掉一下又回来"的抖动 —— 而它恰恰是网线/PoE/供电不稳的典型征兆。
+        condition: () => {
+          const now = Date.now();
+          const changes = this.recentRouterCountChanges(now);
+          if (changes.length < ROUTER_FLAP_THRESHOLD) return false;
+          const last = changes[changes.length - 1]!;
+          // 静默期：稳定一段时间就撤警，避免"已经好了但告警还挂着"
+          return now - last <= ROUTER_FLAP_QUIET_MS;
+        },
+        summary: () => {
+          const n = this.recentRouterCountChanges().length;
+          return `本地路由器反复上下线（近 ${Math.round(ROUTER_FLAP_WINDOW_MS / 60000)} 分钟 ${n} 次）`;
+        },
+        description: () =>
+          '已连接路由器数量反复变化，说明有路由器或下游设备在反复断开重连，通常指向网线 / PoE / 供电不稳',
+        evidence: (data) => ({
+          connected_router_count: data.connectedRouterCount,
+          state: data.state,
+          uptime_s: data.uptime,
+        }),
+        recommendations: [
+          '检查天线到路由器之间的 PoE 网线是否松动',
+          '确认路由器供电与 PoE 协商速率是否稳定',
+          '检查路由器固件与过热情况',
+          '若只有无线客户端在掉线，检查 WiFi 覆盖与漫游策略',
         ],
       },
 
@@ -1028,12 +1100,36 @@ export class AlertManager extends EventEmitter {
     return this.linkFlips.filter((t) => t >= cutoff).length;
   }
 
+  /**
+   * 记录「已连接路由器数量」的变化。
+   *
+   * 数量不变（绝大多数帧）不记账，只记变化时刻 —— 这样窗口内统计到的
+   * 就是"抖了几次"，而不是"采了几帧"。
+   */
+  private recordRouterCount(count: number | undefined, now = Date.now()): void {
+    if (count === undefined) return;
+    if (this.lastRouterCount !== null && this.lastRouterCount !== count) {
+      this.routerCountChanges.push(now);
+      const cutoff = now - ROUTER_FLAP_WINDOW_MS;
+      this.routerCountChanges = this.routerCountChanges.filter((t) => t >= cutoff);
+    }
+    this.lastRouterCount = count;
+  }
+
+  /** 窗口内「已连接路由器数量」的变化次数 */
+  private recentRouterCountChanges(now = Date.now()): number[] {
+    const cutoff = now - ROUTER_FLAP_WINDOW_MS;
+    return this.routerCountChanges.filter((t) => t >= cutoff);
+  }
+
   async checkTelemetry(telemetry: TelemetryData): Promise<void> {
     // 更新采集器心跳时间
     this.lastCollectorSuccess = new Date();
 
     // 先把本帧状态记进历史 —— frequent_searching 需要跨帧计数
     this.recordLinkState(telemetry.state);
+    // 路由器数量同理 —— router_flapping 需要跨帧计数
+    this.recordRouterCount(telemetry.connectedRouterCount);
 
     const now = new Date().toISOString();
 

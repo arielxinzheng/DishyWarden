@@ -42,6 +42,8 @@ export type DishAlertFlag =
   | 'isHeating'
   | 'slowEthernetSpeeds'
   | 'connectivity'
+  /** 设备侧 DNS 异常（proto: `bool dns = 15`）。此前无规则消费，等于静默丢弃。 */
+  | 'dns'
   | 'installPending'
   | 'movingFastInHelloMobile'
   | 'unexpectedLocation'
