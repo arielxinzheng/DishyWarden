@@ -99,6 +99,8 @@ export class AlertManager extends EventEmitter {
   private rules: Map<string, AlertRule> = new Map();
   private checkInterval?: NodeJS.Timeout;
   private heartbeatInterval?: NodeJS.Timeout;
+  /** 离线队列定时清理（已冲刷记录的兜底回收） */
+  private offlineQueueCleanupInterval?: NodeJS.Timeout;
   private thresholds: AlertThresholds;
   private lastCollectorSuccess: Date | null = null;
   private heartbeatStartTime: Date = new Date(); // 心跳检查启动时间
@@ -127,6 +129,11 @@ export class AlertManager extends EventEmitter {
   constructor(notificationConfig: NotificationConfig, thresholds: AlertThresholds, dbPath?: string) {
     super();
     this.db = new AlertDatabase(dbPath);
+
+    // 启动自检：数据库连接刚建立，先清掉上次进程意外退出可能残留的
+    // 已冲刷队列行（补发成功但没来得及清理的那些）。
+    this.runOfflineQueueCleanup();
+
     this.notifier = new Notifier(notificationConfig);
     this.dispatcher = new AlertDispatcher({
       notifier: this.notifier,
@@ -1258,6 +1265,33 @@ export class AlertManager extends EventEmitter {
   }
 
   /**
+   * 启动离线队列的定时清理。
+   *
+   * 即时 GC（冲刷后立刻回收）只覆盖"正常补发"的路径；进程被强杀、
+   * 补发中途崩溃等情况下仍可能留下已冲刷的行 —— 这条兜底保证长连接
+   * 运行下存储收敛，而不是只增不减。
+   *
+   * @param intervalMs 清理间隔，默认 24 小时
+   */
+  startOfflineQueueCleanup(intervalMs = 86400000): void {
+    this.offlineQueueCleanupInterval = setInterval(() => {
+      this.runOfflineQueueCleanup();
+    }, intervalMs);
+  }
+
+  /** 执行一次离线队列清理（已冲刷的记录立即回收） */
+  private runOfflineQueueCleanup(): void {
+    try {
+      const removed = this.db.cleanupFlushedOfflineAlerts();
+      if (removed > 0) {
+        console.log(`[AlertManager] 清理已冲刷的离线队列记录：${removed} 条`);
+      }
+    } catch (error) {
+      console.error('[AlertManager] 清理离线队列失败:', error);
+    }
+  }
+
+  /**
    * 检查采集器心跳
    */
   private async checkCollectorHeartbeat(timeoutMinutes: number): Promise<void> {
@@ -1934,6 +1968,9 @@ export class AlertManager extends EventEmitter {
     }
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
+    }
+    if (this.offlineQueueCleanupInterval) {
+      clearInterval(this.offlineQueueCleanupInterval);
     }
     this.db.close();
   }

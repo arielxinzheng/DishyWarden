@@ -201,7 +201,32 @@ export class AlertDispatcher {
       this.flushing = false;
     }
 
+    // 消费完立即回收：让到下一个 tick 再执行 DELETE，不阻塞主流程。
+    // 用 daysToKeep=0 —— 这批行刚补发完，原始告警仍在 alerts 表里
+    // （汇总文案里的"详见控制台"指的就是它），队列行只是冗余副本，
+    // 留着只会让库只增不减。
+    this.scheduleImmediateQueueGC();
+
     return flushed;
+  }
+
+  /**
+   * 即时清理已冲刷的队列行。
+   *
+   * 放到 setImmediate 里：DELETE 是同步的（better-sqlite3），
+   * 但队列很小、删除极快，用不着为此挂起整条告警流程。
+   */
+  private scheduleImmediateQueueGC(): void {
+    setImmediate(() => {
+      try {
+        const removed = this.deps.db.cleanupFlushedOfflineAlerts(0);
+        if (removed > 0) {
+          console.log(`[Dispatcher] 已回收 ${removed} 条冲刷过的离线队列记录`);
+        }
+      } catch (error) {
+        console.error('[Dispatcher] 清理离线队列失败:', error);
+      }
+    });
   }
 
   /** 待补发条数 */

@@ -672,8 +672,16 @@ export class AlertDatabase {
     tx(ids);
   }
 
-  /** 清理已冲刷的历史（保留 N 天） */
-  cleanupFlushedOfflineAlerts(daysToKeep = 7): number {
+  /**
+   * 清理已冲刷的队列行。
+   *
+   * 保留期默认 **0 天**（= 立即回收）：已冲刷的队列行只是告警的**冗余副本**，
+   * 原始告警一直留在 `alerts` 表里（补发汇总里的「详见控制台」指的就是它），
+   * 留着只���让库只增不减。
+   *
+   * @param daysToKeep 已冲刷记录再保留几天（默认 0 = 立刻删）
+   */
+  cleanupFlushedOfflineAlerts(daysToKeep = 0): number {
     const cutoff = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000).toISOString();
     return this.db
       .prepare(`DELETE FROM offline_alerts_queue WHERE flushed_at IS NOT NULL AND flushed_at < ?`)

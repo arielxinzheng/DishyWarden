@@ -64,6 +64,9 @@ class FakeQueue {
     () => this.items.filter((i) => !i.flushed_at).length,
   );
 
+  /** 离线队列清理（GC）—— 记录调用次数供断言 */
+  cleanupFlushedOfflineAlerts = vi.fn((_daysToKeep?: number) => 0);
+
   markOfflineAlertsFlushed = vi.fn((ids: number[]) => {
     this.flushed.push(...ids);
     for (const item of this.items) {
@@ -254,6 +257,29 @@ describe('告警分发器', () => {
 
       expect(flushed).toBe(0);
       expect(queue.flushed).toHaveLength(0); // 没标记 ⇒ 下次还会重试
+    });
+
+    it('冲刷后立即回收已冲刷的队列行（daysToKeep=0，不等定时器）', async () => {
+      path = 'starlink';
+      queue.enqueueOfflineAlert('telegram', alertRecord(), {});
+      const { dispatcher } = build([{ kind: 'telegram', scope: 'public' }]);
+
+      await dispatcher.flushIfRecovered();
+
+      // 回收是 setImmediate（后台）—— 让出一次事件循环再断言
+      await new Promise((r) => setTimeout(r, 0));
+      expect(queue.cleanupFlushedOfflineAlerts).toHaveBeenCalledTimes(1);
+      expect(queue.cleanupFlushedOfflineAlerts).toHaveBeenCalledWith(0);
+    });
+
+    it('没有待冲刷内容时不做无意义的回收', async () => {
+      path = 'starlink';
+      const { dispatcher } = build([{ kind: 'telegram', scope: 'public' }]);
+
+      await dispatcher.flushIfRecovered();
+
+      await new Promise((r) => setTimeout(r, 0));
+      expect(queue.cleanupFlushedOfflineAlerts).not.toHaveBeenCalled();
     });
 
     it('多通道各自冲刷（各发一条汇总）', async () => {

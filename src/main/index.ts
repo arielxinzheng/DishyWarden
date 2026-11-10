@@ -241,6 +241,8 @@ async function startBackgroundServices() {
     
     // 启动采集器心跳检查（3 分钟超时，每 30 秒检查一次）
     alertManager.startHeartbeatCheck(3, 30000);
+    // 离线队列兜底清理：每 24 小时回收一次已冲刷的记录
+    alertManager.startOfflineQueueCleanup(86400000);
 
     // 监听告警事件
     alertManager.on('alert:new', (alert) => {
@@ -539,6 +541,8 @@ ipcMain.handle('update-notification-config', (_event, config) => {
     // ⚠️ 必须一起重启心跳检查 —— stop() 会 clearInterval(heartbeatInterval),
     //    不重启的话, 用户改过一次通知设置后, 采集器失联就永远不再告警了。
     alertManager.startHeartbeatCheck(3, 30000);
+    // 离线队列兜底清理：每 24 小时回收一次已冲刷的记录
+    alertManager.startOfflineQueueCleanup(86400000);
     
     // 重新绑定事件监听
     alertManager.on('alert:new', (alert) => {

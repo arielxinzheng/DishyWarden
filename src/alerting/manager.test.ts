@@ -119,6 +119,9 @@ vi.mock('./database', () => {
         return filtered.length;
       }
 
+      /** 离线队列清理（GC）—— 记录调用次数供断言 */
+      cleanupFlushedOfflineAlerts = vi.fn((_daysToKeep = 0) => 0);
+
       close(): void {
         this.alerts.clear();
       }
