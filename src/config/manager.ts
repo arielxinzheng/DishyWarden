@@ -242,7 +242,15 @@ export class ConfigManager {
           ? { ...defaults.notifications.telegram!, ...loaded.notifications.telegram }
           : defaults.notifications.telegram,
         webhook: loaded.notifications?.webhook
-          ? { ...defaults.notifications.webhook!, ...loaded.notifications.webhook }
+          ? {
+              ...defaults.notifications.webhook!,
+              ...loaded.notifications.webhook,
+              // 迁移：老版本允许 'PUT'，现在只支持 GET / POST
+              method:
+                loaded.notifications.webhook.method === 'GET'
+                  ? 'GET'
+                  : 'POST',
+            }
           : defaults.notifications.webhook,
         email: loaded.notifications?.email
           ? { ...defaults.notifications.email!, ...loaded.notifications.email }

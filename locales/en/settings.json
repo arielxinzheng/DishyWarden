@@ -123,7 +123,17 @@
     "webhook_enable": "Enable webhook notifications",
     "webhook_url": "Webhook URL",
     "webhook_url_placeholder": "https://example.com/webhook",
-    "http_method": "HTTP method"
+    "http_method": "HTTP method",
+    "webhook_headers_label": "Request Headers",
+    "webhook_headers_placeholder": "{\"Authorization\": \"Bearer xxx\"}",
+    "webhook_headers_hint": "Optional. A JSON object (string keys and values) used to authenticate against the endpoint",
+    "webhook_headers_invalid": "Request headers must be a valid JSON object",
+    "webhook_template_label": "Custom Payload (Payload Template)",
+    "webhook_template_hint": "JSON template. Use {{variable}} placeholders to insert alert fields",
+    "webhook_template_invalid": "The template does not render to valid JSON",
+    "webhook_template_reset": "Reset to default template",
+    "webhook_vars_help": "Variables available in the template (listed below in monospace). Each placeholder is replaced with the matching alert content, e.g. {{alert_title}}.",
+    "webhook_timeout_label": "Request timeout (ms)"
   },
   "status": {
     "enabled": "Enabled",

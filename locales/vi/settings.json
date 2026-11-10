@@ -123,7 +123,17 @@
     "webhook_enable": "Bật thông báo Webhook",
     "webhook_url": "Webhook URL",
     "webhook_url_placeholder": "https://example.com/webhook",
-    "http_method": "Phương thức HTTP"
+    "http_method": "Phương thức HTTP",
+    "webhook_headers_label": "Tiêu đề yêu cầu",
+    "webhook_headers_placeholder": "{\"Authorization\": \"Bearer xxx\"}",
+    "webhook_headers_hint": "Tùy chọn. Đối tượng JSON với khóa và giá trị đều là chuỗi, dùng để xác thực với endpoint",
+    "webhook_headers_invalid": "Tiêu đề yêu cầu không phải là một đối tượng JSON hợp lệ",
+    "webhook_template_label": "Payload tùy chỉnh (Payload Template)",
+    "webhook_template_hint": "Mẫu JSON. Dùng placeholder {{biến}} để chèn các trường cảnh báo",
+    "webhook_template_invalid": "Mẫu không tạo ra JSON hợp lệ",
+    "webhook_template_reset": "Khôi phục mẫu mặc định",
+    "webhook_vars_help": "Các biến dùng được trong mẫu (được liệt kê bên dưới bằng phông chữ đẳng khoảng). Mỗi placeholder sẽ được thay bằng nội dung cảnh báo tương ứng, ví dụ {{alert_title}}.",
+    "webhook_timeout_label": "Thời gian chờ yêu cầu (mili giây)"
   },
   "status": {
     "enabled": "Đã bật",

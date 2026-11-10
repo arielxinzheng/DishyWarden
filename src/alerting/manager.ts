@@ -1695,11 +1695,22 @@ export class AlertManager extends EventEmitter {
    */
   private async sendNotification(context: NotificationContext): Promise<void> {
     try {
-      await this.notifier.notify(context);
+      // 统一在这里补上告警标题：规则的中文名（如「恶劣天气影响」）。
+      // webhook 模板里的 {{alert_title}} 用它 —— 没有对应规则时
+      // （如 dns_failure / probe_source_unavailable）留空，由通知层回退成 alert_type。
+      await this.notifier.notify({
+        ...context,
+        title: context.title ?? this.ruleTitleFor(context.alert.alert_type),
+      });
     } catch (error) {
       console.error('Failed to send notification:', error);
       this.emit('notification:error', { context, error });
     }
+  }
+
+  /** 取告警类型对应的规则中文名；没有对应规则时返回 undefined */
+  private ruleTitleFor(alertType: string): string | undefined {
+    return this.rules.get(alertType)?.name;
   }
 
   /**

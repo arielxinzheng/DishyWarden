@@ -2,7 +2,7 @@
  * 设置页面
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -13,6 +13,16 @@ import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPi
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+// 共享常量：默认模板 + 变量清单（纯 TS，渲染层可安全引用）
+import { DEFAULT_WEBHOOK_TEMPLATE } from '../../alerting/webhookTemplate';
+import {
+  DEFAULT_WEBHOOK_TIMEOUT_MS,
+  WEBHOOK_TEMPLATE_VARIABLE_KEYS,
+  formatWebhookHeaders,
+  isValidWebhookTemplate,
+  parseWebhookHeaders,
+  parseWebhookTimeout,
+} from '../lib/webhookTemplate';
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -28,13 +38,37 @@ export default function Settings() {
   const [latitude, setLatitude] = useState<string>('');
   const [longitude, setLongitude] = useState<string>('');
 
+  // ── Webhook 表单的「原文」状态 ────────────────────────────────────────────
+  // 配置里存的是解析后的结果（headers 是对象），界面显示的是用户手写的原文。
+  // 两者必须分开：用户正在写半截 JSON 时不能把他正在写的东西抹掉，
+  // 但半截 JSON 绝不能落盘（否则会把坏数据发给主进程）。
+  const [webhookHeadersText, setWebhookHeadersText] = useState<string>('');
+  const [webhookPayloadText, setWebhookPayloadText] = useState<string>('');
+  const [webhookTimeoutText, setWebhookTimeoutText] = useState<string>('');
+  // 回填标记：配置被重新加载时清零，用来触发一次「表单原文 ← 配置」的同步
+  const webhookFormSynced = useRef(false);
+
   useEffect(() => {
     loadConfig();
   }, []);
 
+  // 配置到位后回填表单原文。
+  // 只在「配置刚被重新加载」时回填一次（首次加载 / 点重置后），
+  // 之后完全由用户输入驱动 —— 否则每敲一个字都会被回填写回去。
+  useEffect(() => {
+    if (!config || webhookFormSynced.current) return;
+    webhookFormSynced.current = true;
+    const webhook = config.notifications.webhook;
+    setWebhookHeadersText(formatWebhookHeaders(webhook?.headers));
+    setWebhookPayloadText(webhook?.payloadTemplate ?? DEFAULT_WEBHOOK_TEMPLATE);
+    setWebhookTimeoutText(String(webhook?.timeoutMs ?? DEFAULT_WEBHOOK_TIMEOUT_MS));
+  }, [config]);
+
   const loadConfig = async () => {
     if (window.electronAPI) {
       const cfg = await window.electronAPI.getConfig();
+      // 新配置到位 → 表单原文回填一次（首次加载 / 点「重置」后）
+      webhookFormSynced.current = false;
       setConfig(cfg);
       // 加载位置信息
       const savedLat = localStorage.getItem('terminal_latitude');
@@ -43,6 +77,7 @@ export default function Settings() {
       if (savedLon) setLongitude(savedLon);
     } else {
       // 开发模式下使用默认配置
+      webhookFormSynced.current = false;
       setConfig({
         collector: {
           dishAddress: '127.0.0.1',
@@ -781,16 +816,153 @@ export default function Settings() {
                         ...config.notifications,
                         webhook: {
                           ...config.notifications.webhook!,
-                          method: e.target.value as 'POST' | 'PUT',
+                          method: e.target.value as 'GET' | 'POST',
                         },
                       },
                     })
                   }
                   className="w-full h-10 px-3 rounded-md border border-input bg-background"
                 >
+                  <option value="GET">GET</option>
                   <option value="POST">POST</option>
-                  <option value="PUT">PUT</option>
                 </select>
+              </div>
+
+              {/* 请求头：界面显示原文，落盘存解析后的对象 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  {t('settings:notifications.webhook_headers_label')}
+                </label>
+                <textarea
+                  value={webhookHeadersText}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setWebhookHeadersText(text);
+                    // 解析失败也照旧更新配置，但存的是空对象（坏数据不落盘）
+                    const parsed = parseWebhookHeaders(text);
+                    setConfig({
+                      ...config,
+                      notifications: {
+                        ...config.notifications,
+                        webhook: {
+                          ...config.notifications.webhook!,
+                          headers: parsed.value,
+                        },
+                      },
+                    });
+                  }}
+                  placeholder={t('settings:notifications.webhook_headers_placeholder')}
+                  rows={3}
+                  spellCheck={false}
+                  className="flex w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 font-mono text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('settings:notifications.webhook_headers_hint')}
+                </p>
+                {parseWebhookHeaders(webhookHeadersText).ok ? null : (
+                  <p className="text-xs text-destructive">
+                    {t('settings:notifications.webhook_headers_invalid')}
+                  </p>
+                )}
+              </div>
+
+              {/* 自定义请求体（Payload Template） */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium">
+                    {t('settings:notifications.webhook_template_label')}
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      setWebhookPayloadText(DEFAULT_WEBHOOK_TEMPLATE);
+                      setConfig({
+                        ...config,
+                        notifications: {
+                          ...config.notifications,
+                          webhook: {
+                            ...config.notifications.webhook!,
+                            payloadTemplate: DEFAULT_WEBHOOK_TEMPLATE,
+                          },
+                        },
+                      });
+                    }}
+                  >
+                    <RotateCcw className="w-3 h-3 mr-1" />
+                    {t('settings:notifications.webhook_template_reset')}
+                  </Button>
+                </div>
+                <textarea
+                  value={webhookPayloadText}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setWebhookPayloadText(text);
+                    setConfig({
+                      ...config,
+                      notifications: {
+                        ...config.notifications,
+                        webhook: {
+                          ...config.notifications.webhook!,
+                          payloadTemplate: text,
+                        },
+                      },
+                    });
+                  }}
+                  rows={10}
+                  spellCheck={false}
+                  className="flex w-full min-h-[180px] rounded-md border border-input bg-background px-3 py-2 font-mono text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('settings:notifications.webhook_template_hint')}
+                </p>
+                {isValidWebhookTemplate(webhookPayloadText) ? null : (
+                  <p className="text-xs text-destructive">
+                    {t('settings:notifications.webhook_template_invalid')}
+                  </p>
+                )}
+                {/* 可用变量：变量名是后端约定的英文标识符，语言中立，不翻译 */}
+                <p className="text-xs text-muted-foreground">
+                  {t('settings:notifications.webhook_vars_help')}
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {WEBHOOK_TEMPLATE_VARIABLE_KEYS.map((key) => (
+                    <code
+                      key={key}
+                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                    >
+                      {`{{${key}}}`}
+                    </code>
+                  ))}
+                </div>
+              </div>
+
+              {/* 请求超时 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  {t('settings:notifications.webhook_timeout_label')}
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  step={100}
+                  value={webhookTimeoutText}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setWebhookTimeoutText(text);
+                    setConfig({
+                      ...config,
+                      notifications: {
+                        ...config.notifications,
+                        webhook: {
+                          ...config.notifications.webhook!,
+                          timeoutMs: parseWebhookTimeout(text),
+                        },
+                      },
+                    });
+                  }}
+                />
               </div>
             </>
           )}
