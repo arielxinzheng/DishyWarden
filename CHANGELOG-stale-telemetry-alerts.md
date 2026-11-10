@@ -252,3 +252,65 @@ condition: (data) => data.state === 'SEARCHING' && (data.uptime || 0) > 600
 |---|---|
 | `vitest run` | 20 文件 / **305 测试全过**（新增 4 项：翻转触发、稳定在线不触发、卡住 10 分钟触发、静默期恢复） |
 | 实机 | 抖动期间只出 `frequent_searching` 一条，无 `dish_offline` / `low_throughput` 误报；停止后 5 分钟自愈 |
+
+---
+
+## 9. DNS 探针「依赖抑制」：目标不可达 ≠ 域名解析失败
+
+### 问题
+`dns-dual-check` 探针连不上目标 DNS 服务器时（`ECONNREFUSED`），报的是
+**「域名解析失败 / 双轨探测均失败 → 网络层故障或域名不存在」**。
+
+这是**误诊**：挂掉的不是用户的 DNS，而是**被测数据源本身**（本地 mock 进程退出、
+探针目标下线）。用户看到这条会被引导去改自己的 DNS 设置，而真正该做的事是
+把数据源拉起来。2026-11-09 就撞上过一次：mock 进程被杀 ⇒ SLMonitor 里挂着
+`dns_failure:dns-dual-check`，而 mock 的场景状态其实早就恢复了。
+
+### 判定：两种失败模式必须分开
+Node 的 DNS 错误码可以直接区分：
+
+| 错误码 | 含义 | 归类 |
+|---|---|---|
+| `ECONNREFUSED` / `EHOSTUNREACH` / `ENETUNREACH` / `EADDRNOTAVAIL` / `ENETDOWN` / `EPIPE` | 根本没联系上服务器 | **`unreachable`** ⇒ 数据源不可用 |
+| `ENOTFOUND` / `NXDOMAIN` / `ESERVFAIL` / `ETIMEOUT` / `EAI_AGAIN` | 连上了但解析不出 | **`resolution`** ⇒ 真的是 DNS 问题 |
+| 错误码缺失/未知 | 拿不准 | 按 `resolution` 处理（宁可多报，不静默真故障） |
+
+实现：`src/core/probeRunner.ts` 的 `classifyDnsError()`，
+`ProbeResult.failureMode` + `dualDns.user/baseline.failureMode` 逐轨透传。
+
+### 告警层分流（`src/alerting/manager.ts`）
+- `resolution` ⇒ 原样报 `dns_failure`（标题/摘要/建议不变）。
+- `unreachable` ⇒ **不报** `dns_failure`，改报新类型
+  **`probe_source_unavailable`**（摘要「数据源不可用（探针目标不可达）」），
+  并且**主动撤掉**此前挂着的 `dns_failure`（那个条件已经不成立了）。
+- 数据源恢复 ⇒ 探针成功 ⇒ 自动 `resolved`。
+
+> 为什么不是"直接不告警"：静默吞掉会变成盲区（本项目已经吃过一次
+> `alerts.dns` 没人消费的亏）。换成准确命名的独立告警，既不误诊、也不丢信号。
+
+### 顺带修掉一个更严重的 bug：本地化摘要是空的
+`localizeAlert()` 先 `t('alerts:types.X.summary')` 得到**已翻译的字符串**，
+再把这串字符当**键**传给第二次 `t()` —— 第二次必然查不到，而
+`parseMissingKeyHandler` 返回空串 ⇒ **所有告警类型的本地化摘要全是空的**
+（界面上根本不显示摘要行，只有标题）。
+
+修法：一次 `t()` 调用同时完成"取模板 + 插值"：
+```ts
+const summary = t(`${typeKey}.summary`, { ...params, defaultValue: '' });
+```
+新增 `src/renderer/lib/alertMessage.test.ts`（7 例）锁住这个行为，
+其中测试实例**必须配 `parseMissingKeyHandler: () => ''`**，
+否则测不到真实兜底行为（这正是它第一次跑绿的原因）。
+
+### 新增文案键
+`alerts:types.probe_source_unavailable.{title,summary,recommendations}`
+（5 语言各一份），摘要模板用 `{{node}}`（探针节点 id）与 `{{errcode}}`（底层错误码）。
+
+> ⚠️ `{{err}}` 已被"姿态不确定度"占用，新模板必须用 `{{errcode}}`。
+
+### 验证
+- 单测：新增 `manager.probe-suppression.test.ts`（5 例）+ `probeRunner` 分类（4 例）
+  + `alertMessage.test.ts`（7 例）；全量 **25 文件 / 364 测试全过**，tsc 双配置 0 错误。
+- 真机端到端：杀掉 mock ⇒ 探针 ECONNREFUSED ⇒ 库里只有
+  `probe_source_unavailable:dns-dual-check`（**没有** `dns_failure`），
+  界面中英文摘要均正确插值；重启 mock ⇒ 探针恢复 ⇒ 告警自动 resolved。

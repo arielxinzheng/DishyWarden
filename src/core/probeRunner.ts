@@ -38,6 +38,38 @@ const execAsync = (cmd: string, timeoutMs: number) =>
     });
   });
 
+/**
+ * DNS 探测失败的两种模式 —— 二者语义完全不同，不能混为一谈。
+ *
+ * - `unreachable`：**连 DNS 服务器都没连上**（端口拒绝 / 主机不可达 / 网络不可达）。
+ *   这说明**被测的那个数据源本身不在了**（本地 mock 挂了、探针目标下线了），
+ *   和"用户域名解析失败"是两回事 —— 后者会被归因成"你的 DNS 配置有问题"，那是误诊。
+ * - `resolution`：服务器连上了但**解析不出域名**（NXDOMAIN / SERVFAIL / 超时）。
+ *   这才是真正的 DNS 解析问题。
+ */
+export type DnsFailureMode = 'unreachable' | 'resolution';
+
+/** 这些错误码说明"根本没联系上 DNS 服务器" */
+const DNS_UNREACHABLE_CODES = new Set([
+  'ECONNREFUSED', // 端口没人监听（典型：本地 mock 没启动）
+  'EHOSTUNREACH', // 主机不可达
+  'ENETUNREACH',  // 网络不可达
+  'EADDRNOTAVAIL',// 本地没有该地址
+  'ENETDOWN',     // 网卡 down
+  'EPIPE',        // 连接被中途断开
+]);
+
+/**
+ * 按 Node 的错误码判定 DNS 失败模式。
+ *
+ * 拿不准时（错误码缺失或未知）一律按 `resolution` 处理 ——
+ * 宁可多报一次 DNS 告警，也不要把真故障静默掉。
+ */
+export function classifyDnsError(code: string | undefined | null): DnsFailureMode {
+  if (!code) return 'resolution';
+  return DNS_UNREACHABLE_CODES.has(String(code).toUpperCase()) ? 'unreachable' : 'resolution';
+}
+
 /** 一次探测的结果 */
 export interface ProbeResult {
   /** 节点 id */
@@ -52,6 +84,8 @@ export interface ProbeResult {
   detail?: string;
   /** 探测时刻 epoch ms */
   ts: number;
+  /** DNS 探测失败模式(仅 DNS 类探测有值): unreachable=数据源不可达, resolution=解析失败 */
+  failureMode?: DnsFailureMode;
   /** 双轨 DNS 探测数据(仅 dns_dual 类型) */
   dualDns?: {
     /** 用户态探测(使用系统默认 DNS) */
@@ -60,6 +94,8 @@ export interface ProbeResult {
       rttMs: number | null;
       error?: string;
       resolvedIp?: string;
+      /** 该轨的失败模式 */
+      failureMode?: DnsFailureMode;
     };
     /** 基准态探测(使用公网 DNS 如 8.8.8.8) */
     baseline: {
@@ -67,6 +103,8 @@ export interface ProbeResult {
       rttMs: number | null;
       error?: string;
       resolvedIp?: string;
+      /** 该轨的失败模式 */
+      failureMode?: DnsFailureMode;
     };
   };
 }
@@ -184,6 +222,7 @@ async function probeDns(node: ProbeNodeConfig): Promise<ProbeResult> {
       ok: false,
       rttMs: null,
       error: err?.code || err?.message || '解析失败',
+      failureMode: classifyDnsError(err?.code),
       ts: Date.now(),
     };
   }
@@ -242,6 +281,8 @@ async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
   const ok = userResult.ok;
   const rttMs = userResult.rttMs;
   const error = userResult.error;
+  // 失败模式取用户态那一轨：连不上服务器 ⇒ 数据源不可用（不是解析失败）
+  const failureMode = userResult.failureMode;
 
   // 生成详情文案
   let detail = '';
@@ -255,7 +296,12 @@ async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
   } else if (!ok && baselineResult.ok) {
     detail = `用户 DNS 故障，但基准 DNS 正常 → 本地 DNS 配置问题`;
   } else if (!ok && !baselineResult.ok) {
-    detail = `双轨探测均失败 → 网络层故障或域名不存在`;
+    // 两轨都失败时还要再看失败模式：都"连不上"说明是数据源没了，不是解析问题
+    if (failureMode === 'unreachable' && baselineResult.failureMode === 'unreachable') {
+      detail = `双轨目标均不可达 → 数据源不可用`;
+    } else {
+      detail = `双轨探测均失败 → 网络层故障或域名不存在`;
+    }
   }
 
   return {
@@ -264,6 +310,7 @@ async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
     rttMs,
     error,
     detail,
+    failureMode,
     ts: Date.now(),
     dualDns: {
       user: {
@@ -271,12 +318,14 @@ async function probeDnsDual(node: ProbeNodeConfig): Promise<ProbeResult> {
         rttMs: userResult.rttMs,
         error: userResult.error,
         resolvedIp: userResult.resolvedIp,
+        failureMode: userResult.failureMode,
       },
       baseline: {
         ok: baselineResult.ok,
         rttMs: baselineResult.rttMs,
         error: baselineResult.error,
         resolvedIp: baselineResult.resolvedIp,
+        failureMode: baselineResult.failureMode,
       },
     },
   };
@@ -298,6 +347,7 @@ async function probeDnsSingle(
   rttMs: number | null;
   error?: string;
   resolvedIp?: string;
+  failureMode?: DnsFailureMode;
 }> {
   const started = Date.now();
   try {
@@ -311,10 +361,14 @@ async function probeDnsSingle(
     };
   } catch (error: unknown) {
     const err = error as NodeJS.ErrnoException;
+    const code = err?.code || err?.message || '解析失败';
     return {
       ok: false,
       rttMs: null,
-      error: err?.code || err?.message || '解析失败',
+      error: code,
+      // 关键：区分"连不上服务器"和"解析不出域名" ——
+      // 前者是数据源不可用，不能报成"域名解析失败"。
+      failureMode: classifyDnsError(err?.code),
     };
   }
 }

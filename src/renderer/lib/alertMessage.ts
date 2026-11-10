@@ -75,6 +75,9 @@ export function buildAlertParams(evidence: Record<string, unknown> | null): Reco
     down: num(e.downlink_mbps, 1),
     rssi: num(e.wifi_rssi),
     count: num(e.change_count ?? e.flip_count ?? e.connected_router_count),
+    // 探针类告警：节点 id 与底层错误码（如 ECONNREFUSED）
+    node: typeof e.node_id === 'string' && e.node_id ? e.node_id : '—',
+    errcode: typeof e.error === 'string' && e.error ? e.error : '—',
     minutes: num(
       typeof e.uptime_seconds === 'number' ? (e.uptime_seconds as number) / 60 : e.uptime_s
     ),
@@ -117,10 +120,17 @@ export function localizeAlert(alert: AlertRecordLike, t: TFunction): LocalizedAl
 
   const typeKey = `alerts:types.${alert.alert_type}`;
   const title = t(`${typeKey}.title`, { defaultValue: '' });
-  const summaryTemplate =
+
+  // ⚠️ 摘要必须**一次 t() 调用**完成"取模板 + 插值"。
+  // 曾经写成两段：先 t(键) 得到已翻译的字符串，再把这串字符当**键**传给第二次 t() ——
+  // 第二次必然查不到，而 parseMissingKeyHandler 返回空串，于是所有告警的摘要都是空的。
+  const summary =
     alert.alert_type === 'dns_failure'
-      ? t(`alerts:${dnsFailureCaseKey(parseEvidence(alert.evidence))}`, { defaultValue: '' })
-      : t(`${typeKey}.summary`, { defaultValue: '' });
+      ? t(`alerts:${dnsFailureCaseKey(parseEvidence(alert.evidence))}`, {
+          ...params,
+          defaultValue: '',
+        })
+      : t(`${typeKey}.summary`, { ...params, defaultValue: '' });
 
   const rawRecommendations = t(`${typeKey}.recommendations`, {
     returnObjects: true,
@@ -133,7 +143,7 @@ export function localizeAlert(alert: AlertRecordLike, t: TFunction): LocalizedAl
   // 三处兜底：模板缺失 ⇒ 用数据库原文（老类型 / 未翻译的新类型）
   return {
     title: title || alert.alert_type,
-    summary: summaryTemplate ? t(summaryTemplate, { ...params, defaultValue: summaryTemplate }) : (alert.summary ?? ''),
+    summary: summary || alert.summary || '',
     recommendations: recommendations.length > 0 ? recommendations : parseRecommendations(alert.recommendations),
     severityLabel,
     statusLabel,

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { runProbe } from './probeRunner';
+import { runProbe, classifyDnsError } from './probeRunner';
 import type { ProbeNodeConfig } from '../config/manager';
 
 const node = (over: Partial<ProbeNodeConfig> = {}): ProbeNodeConfig => ({
@@ -76,4 +76,34 @@ describe('probeRunner / TLS', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   }, 20000);
+});
+
+/**
+ * DNS 失败模式分类 —— 决定告警是「DNS 解析失败」还是「数据源不可用」。
+ *
+ * 判错的后果很具体：把"mock 挂了"报成"你的 DNS 配置坏了"是误诊。
+ */
+describe('DNS 失败模式分类', () => {
+  it('连不上服务器 ⇒ unreachable（数据源不可用）', () => {
+    for (const code of ['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EADDRNOTAVAIL', 'ENETDOWN', 'EPIPE']) {
+      expect(classifyDnsError(code), code).toBe('unreachable');
+    }
+  });
+
+  it('服务器答了但解析不出 ⇒ resolution（真的是 DNS 问题）', () => {
+    for (const code of ['ENOTFOUND', 'NXDOMAIN', 'ESERVFAIL', 'ETIMEOUT', 'EAI_AGAIN']) {
+      expect(classifyDnsError(code), code).toBe('resolution');
+    }
+  });
+
+  it('错误码大小写不敏感', () => {
+    expect(classifyDnsError('econnrefused')).toBe('unreachable');
+  });
+
+  it('错误码缺失/未知 ⇒ 按 resolution 处理（宁可多报，不要静默掉真故障）', () => {
+    expect(classifyDnsError(undefined)).toBe('resolution');
+    expect(classifyDnsError(null)).toBe('resolution');
+    expect(classifyDnsError('')).toBe('resolution');
+    expect(classifyDnsError('SOMETHING_NEW')).toBe('resolution');
+  });
 });

@@ -176,6 +176,8 @@ describe('i18n 字典完整性', () => {
     for (const m of managerSrc.matchAll(/\n        id: '([a-z_]+)',/g)) ruleIds.add(m[1]);
     // 探针驱动的告警不走规则表，单独补上
     ruleIds.add('dns_failure');
+    // 探针依赖抑制产生的告警类型（不在 RULES 里，是 triggerProbeSourceAlert 直接落库的）
+    ruleIds.add('probe_source_unavailable');
 
     expect(ruleIds.size, '没有从 manager.ts 提取到任何规则 id').toBeGreaterThan(10);
 

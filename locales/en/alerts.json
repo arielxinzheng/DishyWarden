@@ -247,6 +247,14 @@
       "case_both": "Both user and baseline DNS failed — network-layer fault or the domain does not exist",
       "case_slow": "Local DNS latency is clearly higher than the baseline",
       "case_generic": "DNS resolution failed — web pages may not load"
+    },
+    "probe_source_unavailable": {
+      "title": "Data source unavailable",
+      "summary": "Probe target for {{node}} is unreachable ({{errcode}}); DNS failure alert suppressed",
+      "recommendations": [
+        "Check whether the data source is running (local mock / probe target)",
+        "This alert clears automatically once the data source recovers"
+      ]
     }
   },
   "page": {

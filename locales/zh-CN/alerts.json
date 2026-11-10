@@ -247,6 +247,14 @@
       "case_both": "用户态与基准态解析均失败：网络层故障或域名不存在",
       "case_slow": "本地 DNS 延迟明显高于基准，解析偏慢",
       "case_generic": "域名解析失败，网页可能无法打开"
+    },
+    "probe_source_unavailable": {
+      "title": "数据源不可用",
+      "summary": "探针 {{node}} 的目标不可达（{{errcode}}），已抑制 DNS 解析失败告警",
+      "recommendations": [
+        "确认被测数据源是否在运行（本地 mock / 探针目标服务）",
+        "数据源恢复后本告警会自动解除"
+      ]
     }
   },
   "page": {

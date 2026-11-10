@@ -247,6 +247,14 @@
       "case_both": "Phân giải ở cả phía người dùng và phía chuẩn đều thất bại: lỗi lớp mạng hoặc tên miền không tồn tại",
       "case_slow": "Độ trễ DNS cục bộ cao rõ rệt so với mức chuẩn, phân giải chậm hơn",
       "case_generic": "Phân giải tên miền thất bại, có thể không mở được trang web"
+    },
+    "probe_source_unavailable": {
+      "title": "Nguồn dữ liệu không khả dụng",
+      "summary": "Đích của bộ dò {{node}} không thể truy cập ({{errcode}}); cảnh báo lỗi phân giải DNS đã bị chặn",
+      "recommendations": [
+        "Kiểm tra xem nguồn dữ liệu có đang chạy (mock cục bộ / đích dò)",
+        "Cảnh báo sẽ tự động gỡ khi nguồn dữ liệu hoạt động lại"
+      ]
     }
   },
   "page": {

@@ -1413,7 +1413,7 @@ export class AlertManager extends EventEmitter {
    * 从 ProbeRunner 接收探针结果，维护连续失败计数，
    * 根据「连续 3 次失败」触发告警，并实施依赖压制逻辑。
    */
-  checkDnsProbe(probeResult: any): void {
+  async checkDnsProbe(probeResult: any): Promise<void> {
     // 只处理 dns_dual 类型探针
     if (!probeResult.dualDns) return;
 
@@ -1430,12 +1430,22 @@ export class AlertManager extends EventEmitter {
 
       // 连续 3 次失败触发告警
       if (failures >= 3) {
-        this.triggerDnsAlert(nodeId, probeResult, now);
+        // 依赖抑制：连 DNS 服务器都连不上 ⇒ 是【数据源不可用】，不是【域名解析失败】。
+        // 这两种情况混在一起会误诊 —— 用户会以为自己的 DNS 配置坏了，
+        // 实际上挂掉的是被测数据源（本地 mock / 探针目标）。
+        if (probeResult.failureMode === 'unreachable') {
+          await this.triggerProbeSourceAlert(nodeId, probeResult, now);
+          // 之前那条"域名解析失败"如果还挂着，要撤掉：它描述的条件已经不成立了
+          this.resolveDnsAlert(nodeId, now);
+        } else {
+          this.triggerDnsAlert(nodeId, probeResult, now);
+        }
       }
     } else {
       // 探测成功，重置计数并尝试解除告警
       this.dnsProbeFailures.set(nodeId, 0);
       this.resolveDnsAlert(nodeId, now);
+      this.resolveProbeSourceAlert(nodeId, now);
     }
   }
 
@@ -1548,6 +1558,104 @@ export class AlertManager extends EventEmitter {
   /**
    * 解除 DNS 告警
    */
+  /**
+   * 触发「数据源不可用」告警。
+   *
+   * 触发条件：DNS 探针**连不上目标服务器**（ECONNREFUSED / 主机不可达 …）。
+   * 这说明被测的数据源本身下线了，而不是"用户域名解析失败"。
+   *
+   * 与 `dns_failure` 的分工：
+   * - `dns_failure` —— 服务器答了但解析不出域名 ⇒ 真的是 DNS 问题
+   * - `probe_source_unavailable` —— 服务器都联系不上 ⇒ 依赖挂了，别误诊成 DNS 问题
+   */
+  private async triggerProbeSourceAlert(nodeId: string, probeResult: any, now: string): Promise<void> {
+    const alertKey = `probe_source_unavailable:${nodeId}`;
+    const { dualDns } = probeResult;
+    const userErr = dualDns?.user?.error ?? probeResult.error ?? 'unknown';
+    const baselineErr = dualDns?.baseline?.error ?? 'unknown';
+
+    const existing = this.db.getAlertByKey(alertKey);
+    const firstSeen = existing && existing.status === 'ongoing' ? existing.first_seen : now;
+
+    const alert: Omit<AlertRecord, 'id' | 'created_at' | 'updated_at'> = {
+      alert_key: alertKey,
+      alert_type: 'probe_source_unavailable',
+      severity: 'warning',
+      status: 'ongoing',
+      first_seen: firstSeen,
+      last_seen: now,
+      occurrence_count: this.dnsProbeFailures.get(nodeId) || 3,
+      last_notified_at: null,
+      notification_count: 0,
+      summary: '数据源不可用（探针目标不可达）',
+      description:
+        `探针 ${nodeId} 连不上目标 DNS 服务器（用户态 ${userErr} / 基准态 ${baselineErr}）。` +
+        `这属于依赖不可用，不是域名解析失败 —— 相应的「DNS 解析失败」告警已抑制，避免误诊。`,
+      evidence: JSON.stringify({
+        node_id: nodeId,
+        failure_mode: 'unreachable',
+        error: userErr,
+        user_dns: {
+          ok: dualDns?.user?.ok ?? false,
+          rtt_ms: dualDns?.user?.rttMs ?? null,
+          error: userErr,
+        },
+        baseline_dns: {
+          ok: dualDns?.baseline?.ok ?? false,
+          rtt_ms: dualDns?.baseline?.rttMs ?? null,
+          error: baselineErr,
+        },
+      }),
+      recommendations: JSON.stringify([
+        '确认被测数据源是否在运行（本地 mock / 探针目标服务）',
+        '数据源恢复后本告警会自动解除',
+      ]),
+    };
+
+    const result = this.db.upsertAlert(alert);
+    console.log(`[AlertManager] 数据源不可用告警触发: ${nodeId} (${userErr})`);
+
+    if (result === 'new') {
+      const record = this.db.getAlertByKey(alertKey)!;
+      await this.sendNotification({ type: 'new', alert: record });
+      this.db.markNotified(alertKey);
+      this.emit('alert:new', record);
+    } else if (result === 'ongoing') {
+      this.emit('alert:update', { alertKey });
+    }
+  }
+
+  /** 数据源恢复后解除「数据源不可用」告警 */
+  private resolveProbeSourceAlert(nodeId: string, now: string): void {
+    const alertKey = `probe_source_unavailable:${nodeId}`;
+    const existing = this.db.getAlertByKey(alertKey);
+    if (!existing || existing.status !== 'ongoing') return;
+
+    const duration = this.calculateDuration(existing.first_seen, now);
+    this.db.upsertAlert({
+      alert_key: alertKey,
+      alert_type: 'probe_source_unavailable',
+      severity: 'warning',
+      status: 'resolved',
+      first_seen: existing.first_seen,
+      last_seen: now,
+      occurrence_count: existing.occurrence_count,
+      last_notified_at: existing.last_notified_at,
+      notification_count: existing.notification_count,
+      summary: existing.summary,
+      description: '探针目标已恢复可达',
+      evidence: existing.evidence,
+      recommendations: existing.recommendations,
+    });
+
+    void this.sendNotification({
+      type: 'resolved',
+      alert: { ...existing, status: 'resolved', last_seen: now },
+      duration,
+    });
+    console.log(`[AlertManager] 数据源不可用告警已恢复: ${nodeId}`);
+  }
+
   private resolveDnsAlert(nodeId: string, now: string): void {
     const alertKey = `dns_failure:${nodeId}`;
     const existing = this.db.getAlertByKey(alertKey);
