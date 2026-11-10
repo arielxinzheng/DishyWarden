@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import type { NotificationConfig } from '../alerting/notifier';
+import { DEFAULT_WEBHOOK_TEMPLATE } from '../alerting/webhookTemplate';
 
 export interface CollectorConfig {
   interval: number; // 采集间隔(毫秒)
@@ -113,6 +114,9 @@ const DEFAULT_CONFIG: AppConfig = {
       enabled: false,
       url: '',
       method: 'POST',
+      headers: {},
+      payloadTemplate: DEFAULT_WEBHOOK_TEMPLATE,
+      timeoutMs: 5000,
     },
     email: {
       enabled: false,
