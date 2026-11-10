@@ -133,7 +133,8 @@
     "webhook_template_invalid": "Mẫu không tạo ra JSON hợp lệ",
     "webhook_template_reset": "Khôi phục mẫu mặc định",
     "webhook_vars_help": "Các biến dùng được trong mẫu (được liệt kê bên dưới bằng phông chữ đẳng khoảng). Mỗi placeholder sẽ được thay bằng nội dung cảnh báo tương ứng, ví dụ {{alert_title}}.",
-    "webhook_timeout_label": "Thời gian chờ yêu cầu (mili giây)"
+    "webhook_timeout_label": "Thời gian chờ yêu cầu (mili giây)",
+    "public_channel_offline_hint": "Lưu ý: Trong cấu hình một liên kết, cảnh báo mất kết nối nghiêm trọng sẽ được gửi sau khi kết nối được khôi phục. Để nhận thông báo mất kết nối theo thời gian thực, hãy dùng kết hợp router đa WAN hoặc bật Cloud watchdog."
   },
   "status": {
     "enabled": "Đã bật",

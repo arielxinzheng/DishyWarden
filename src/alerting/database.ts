@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import type { QueuedAlert } from './offlineQueue';
 
 /**
  * 告警生命周期状态。
@@ -152,6 +153,26 @@ export class AlertDatabase {
       CREATE INDEX IF NOT EXISTS idx_status ON alerts(status);
       CREATE INDEX IF NOT EXISTS idx_severity ON alerts(severity);
       CREATE INDEX IF NOT EXISTS idx_first_seen ON alerts(first_seen);
+
+      -- 离线暂存队列：断网期间发不出去的公网告警先存这儿，恢复后聚合补发。
+      -- 新增表用 CREATE TABLE IF NOT EXISTS 对旧库安全（不涉及改列）。
+      CREATE TABLE IF NOT EXISTS offline_alerts_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel TEXT NOT NULL,
+        alert_key TEXT NOT NULL,
+        alert_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        description TEXT,
+        evidence TEXT,
+        recommendations TEXT,
+        context TEXT,
+        queued_at TEXT NOT NULL,
+        flushed_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_queue_pending
+        ON offline_alerts_queue(channel, flushed_at, queued_at);
     `);
 
     // 第二步：为旧库补齐降噪字段。
@@ -581,6 +602,84 @@ export class AlertDatabase {
   /**
    * 关闭数据库连接
    */
+  /**
+   * 断网期间发不出去的告警入队。
+   *
+   * @param channel 通道（telegram / email / webhook）
+   * @param alert   告警记录
+   * @param context 通知上下文（new / resolved / duration）的 JSON
+   */
+  enqueueOfflineAlert(channel: string, alert: AlertRecord, context?: unknown): void {
+    this.db
+      .prepare(
+        `INSERT INTO offline_alerts_queue
+           (channel, alert_key, alert_type, severity, summary, description,
+            evidence, recommendations, context, queued_at, flushed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      )
+      .run(
+        channel,
+        alert.alert_key,
+        alert.alert_type,
+        alert.severity,
+        alert.summary,
+        alert.description ?? null,
+        alert.evidence ?? null,
+        alert.recommendations ?? null,
+        context === undefined ? null : JSON.stringify(context),
+        new Date().toISOString(),
+      );
+  }
+
+  /** 取待冲刷的队列条目（按入队时间正序） */
+  getPendingOfflineAlerts(channel?: string): QueuedAlert[] {
+    const rows = channel
+      ? (this.db
+          .prepare(
+            `SELECT * FROM offline_alerts_queue
+             WHERE channel = ? AND flushed_at IS NULL
+             ORDER BY queued_at ASC, id ASC`,
+          )
+          .all(channel) as QueuedAlert[])
+      : (this.db
+          .prepare(
+            `SELECT * FROM offline_alerts_queue
+             WHERE flushed_at IS NULL
+             ORDER BY queued_at ASC, id ASC`,
+          )
+          .all() as QueuedAlert[]);
+    return rows;
+  }
+
+  /** 待冲刷条数（按通道统计） */
+  countPendingOfflineAlerts(): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM offline_alerts_queue WHERE flushed_at IS NULL`)
+      .get() as { n: number };
+    return row?.n ?? 0;
+  }
+
+  /** 标记已冲刷（补发成功后才标记，避免丢消息） */
+  markOfflineAlertsFlushed(ids: number[]): void {
+    if (ids.length === 0) return;
+    const stmt = this.db.prepare(
+      `UPDATE offline_alerts_queue SET flushed_at = ? WHERE id = ?`,
+    );
+    const now = new Date().toISOString();
+    const tx = this.db.transaction((list: number[]) => {
+      for (const id of list) stmt.run(now, id);
+    });
+    tx(ids);
+  }
+
+  /** 清理已冲刷的历史（保留 N 天） */
+  cleanupFlushedOfflineAlerts(daysToKeep = 7): number {
+    const cutoff = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000).toISOString();
+    return this.db
+      .prepare(`DELETE FROM offline_alerts_queue WHERE flushed_at IS NOT NULL AND flushed_at < ?`)
+      .run(cutoff).changes;
+  }
+
   close(): void {
     this.db.close();
   }

@@ -740,6 +740,11 @@ export default function Settings() {
               </div>
             </>
           )}
+
+          {/* 公网通道行为说明: 断网期间发不出去, 恢复后聚合补发, 避免用户误以为能实时收到 */}
+          <p className="text-xs text-muted-foreground">
+            {t('settings:notifications.public_channel_offline_hint')}
+          </p>
         </CardContent>
       </Card>
 

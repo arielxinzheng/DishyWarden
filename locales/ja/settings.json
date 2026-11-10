@@ -133,7 +133,8 @@
     "webhook_template_invalid": "テンプレートが有効な JSON に変換されません",
     "webhook_template_reset": "デフォルトのテンプレートに戻す",
     "webhook_vars_help": "テンプレートで使用できる変数（下に等幅フォントで一覧表示）。プレースホルダーは対応するアラート内容に置き換えられます（例: {{alert_title}}）。",
-    "webhook_timeout_label": "リクエストタイムアウト (ミリ秒)"
+    "webhook_timeout_label": "リクエストタイムアウト (ミリ秒)",
+    "public_channel_offline_hint": "注: 単一リンク構成では、重大な通信断のアラートは接続復旧後に送信されます。通信断をリアルタイムで通知するには、マルチ WAN ルーターを併用するか、クラウドウォッチドッグを有効にしてください。"
   },
   "status": {
     "enabled": "有効",

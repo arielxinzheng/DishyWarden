@@ -133,7 +133,8 @@
     "webhook_template_invalid": "模板渲染后不是合法的 JSON",
     "webhook_template_reset": "恢复默认模板",
     "webhook_vars_help": "模板中可用的变量（下方以等宽字体列出），插值时会替换成对应的告警内容，例如 {{alert_title}}。",
-    "webhook_timeout_label": "请求超时 (毫秒)"
+    "webhook_timeout_label": "请求超时 (毫秒)",
+    "public_channel_offline_hint": "注：单链路环境下，严重断网告警将在网络恢复连通后补发。如需实时断网通知，请配合多 WAN 路由或启用 Cloud 看门狗。"
   },
   "status": {
     "enabled": "已启用",

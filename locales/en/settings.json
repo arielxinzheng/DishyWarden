@@ -133,7 +133,8 @@
     "webhook_template_invalid": "The template does not render to valid JSON",
     "webhook_template_reset": "Reset to default template",
     "webhook_vars_help": "Variables available in the template (listed below in monospace). Each placeholder is replaced with the matching alert content, e.g. {{alert_title}}.",
-    "webhook_timeout_label": "Request timeout (ms)"
+    "webhook_timeout_label": "Request timeout (ms)",
+    "public_channel_offline_hint": "Note: On a single-link setup, severe outage alerts will be sent after connectivity is restored. For real-time outage notifications, use a multi-WAN router or enable a Cloud watchdog."
   },
   "status": {
     "enabled": "Enabled",

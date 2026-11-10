@@ -10,6 +10,20 @@ import {
   buildWebhookRequest,
   type WebhookVarValue,
 } from './webhookTemplate';
+import {
+  classifyTarget,
+  hostFromSmtpAddress,
+  hostFromUrl,
+  type ChannelKind,
+  type ClassifiedTarget,
+} from './targetClassifier';
+
+/** 单次发送的结果 */
+export interface SendResult {
+  ok: boolean;
+  /** 失败原因（成功时为空） */
+  error?: string;
+}
 
 export interface NotificationConfig {
   telegram?: {
@@ -58,24 +72,59 @@ export class Notifier {
   constructor(private config: NotificationConfig) {}
 
   /**
-   * 发送通知到所有启用的渠道
+   * 发送通知到所有启用的渠道。
+   *
+   * ⚠️ 直接用这个方法会**绕过**内网/公网分流（内网目标不该等公网连通性、
+   * 公网目标不该在无外网时干等）。告警链路请走 `AlertDispatcher.dispatch()`。
    */
   async notify(context: NotificationContext): Promise<void> {
-    const promises: Promise<void>[] = [];
+    const targets = this.enabledTargets();
+    await Promise.allSettled(targets.map((t) => this.sendTo(t.kind, context)));
+  }
+
+  /**
+   * 当前启用的通道 + 它们的可达域分类。
+   *
+   * 分发器靠它决定：内网目标立刻发，公网目标要先看网络路径。
+   */
+  enabledTargets(): ClassifiedTarget[] {
+    const out: ClassifiedTarget[] = [];
 
     if (this.config.telegram?.enabled) {
-      promises.push(this.sendTelegram(context));
+      out.push(classifyTarget('telegram', 'api.telegram.org'));
     }
-
     if (this.config.webhook?.enabled) {
-      promises.push(this.sendWebhook(context));
+      out.push(classifyTarget('webhook', hostFromUrl(this.config.webhook.url ?? '')));
     }
-
     if (this.config.email?.enabled) {
-      promises.push(this.sendEmail(context));
+      out.push(classifyTarget('email', hostFromSmtpAddress(this.config.email.smtpHost ?? '')));
     }
+    return out;
+  }
 
-    await Promise.allSettled(promises);
+  /**
+   * 发给**指定**通道，返回成功与否。
+   *
+   * 永远不抛异常 —— 调用方（分发器）需要用这个结果决定"入队还是算了"。
+   */
+  async sendTo(kind: ChannelKind, context: NotificationContext): Promise<SendResult> {
+    try {
+      switch (kind) {
+        case 'telegram':
+          await this.sendTelegram(context);
+          break;
+        case 'email':
+          await this.sendEmail(context);
+          break;
+        case 'webhook':
+          return await this.sendWebhook(context);
+      }
+      return { ok: true };
+    } catch (error) {
+      const message = (error as Error)?.message ?? String(error);
+      console.error(`[Notifier] ${kind} 发送失败:`, message);
+      return { ok: false, error: message };
+    }
   }
 
   /**
@@ -106,6 +155,7 @@ export class Notifier {
       throw error;
     }
   }
+
 
   /**
    * 格式化 Telegram 消息
@@ -163,7 +213,7 @@ ${emoji} <b>[${alert.severity.toUpperCase()}]</b> ${alert.summary}
   /**
    * Webhook 通知
    */
-  private async sendWebhook(context: NotificationContext): Promise<void> {
+  private async sendWebhook(context: NotificationContext): Promise<SendResult> {
     const cfg = this.config.webhook!;
     const timeoutMs = cfg.timeoutMs && cfg.timeoutMs > 0 ? cfg.timeoutMs : 5000;
 
@@ -181,7 +231,7 @@ ${emoji} <b>[${alert.severity.toUpperCase()}]</b> ${alert.summary}
     } catch (error) {
       // 模板/URL 构造失败 —— 属于配置问题，同样不能拖垮主进程
       await this.logWebhookError('构建请求失败', error);
-      return;
+      return { ok: false, error: '构建请求失败' };
     }
 
     if (request.unknownVars.length > 0) {
@@ -203,10 +253,11 @@ ${emoji} <b>[${alert.severity.toUpperCase()}]</b> ${alert.summary}
       });
 
       if (!response.ok) {
-        await this.logWebhookError(
-          `目标返回 HTTP ${response.status} ${response.statusText}`,
-        );
+        const reason = `目标返回 HTTP ${response.status} ${response.statusText}`;
+        await this.logWebhookError(reason);
+        return { ok: false, error: reason };
       }
+      return { ok: true };
     } catch (error) {
       // ⚠️ 绝不能抛出：webhook 挂了不能影响告警流程，更不能让主进程崩
       const reason =
@@ -214,6 +265,7 @@ ${emoji} <b>[${alert.severity.toUpperCase()}]</b> ${alert.summary}
           ? `请求超时（${timeoutMs}ms）`
           : String((error as Error)?.message ?? error);
       await this.logWebhookError(reason, error);
+      return { ok: false, error: reason };
     } finally {
       clearTimeout(timer);
     }

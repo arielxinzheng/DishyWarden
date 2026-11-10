@@ -6,6 +6,9 @@
 import { EventEmitter } from 'events';
 import { AlertDatabase, type AlertRecord } from './database';
 import { Notifier, type NotificationConfig, type NotificationContext } from './notifier';
+import { AlertDispatcher } from './dispatcher';
+import { resolveNetworkPath, type NetworkPath } from './networkPath';
+import { defaultAlertLabel } from './offlineQueue';
 import type { TelemetryData } from '../core/dishClient';
 import { hasAlert, readServiceState } from '../core/serviceState';
 import type { AlertThresholds } from '../config/manager';
@@ -86,6 +89,12 @@ const LINK_FLIP_QUIET_MS = 5 * 60_000;
 
 export class AlertManager extends EventEmitter {
   private db: AlertDatabase;
+  /** 告警分发器（内网直发 / 公网预检 / 离线暂存 / 恢复补发） */
+  private dispatcher: AlertDispatcher;
+  /** 上一次判定的外网路径 —— 用来发现「无外网 → 有外网」的恢复瞬间 */
+  private lastNetworkPath: NetworkPath = 'starlink';
+  /** 星链终端当前是否在线（用于识别多 WAN / 5G 备线） */
+  private starlinkOnline: boolean = true;
   private notifier: Notifier;
   private rules: Map<string, AlertRule> = new Map();
   private checkInterval?: NodeJS.Timeout;
@@ -119,6 +128,12 @@ export class AlertManager extends EventEmitter {
     super();
     this.db = new AlertDatabase(dbPath);
     this.notifier = new Notifier(notificationConfig);
+    this.dispatcher = new AlertDispatcher({
+      notifier: this.notifier,
+      db: this.db,
+      currentPath: () => this.currentNetworkPath(),
+      labelOf: (alertType) => this.ruleTitleFor(alertType) ?? defaultAlertLabel(alertType),
+    });
     this.thresholds = thresholds;
     this.initializeDefaultRules();
   }
@@ -1130,6 +1145,10 @@ export class AlertManager extends EventEmitter {
     // 更新采集器心跳时间
     this.lastCollectorSuccess = new Date();
 
+    // 星链是否在线 —— 用于区分「星链链路」与「多 WAN / 5G 备线」
+    this.starlinkOnline = telemetry.state === 'ONLINE';
+    void this.checkNetworkRecovery();
+
     // 先把本帧状态记进历史 —— frequent_searching 需要跨帧计数
     this.recordLinkState(telemetry.state);
     // 路由器数量同理 —— router_flapping 需要跨帧计数
@@ -1454,6 +1473,10 @@ export class AlertManager extends EventEmitter {
    */
   updateIcmpProbeState(nodeId: string, reachable: boolean, consecutiveFailures: number): void {
     this.icmpProbeStates.set(nodeId, { reachable, consecutiveFailures });
+    // 公网恢复的瞬间 ⇒ 冲刷离线队列（后台做，不阻塞探针回调）
+    if (nodeId === 'public-ping') {
+      void this.checkNetworkRecovery();
+    }
   }
 
   /**
@@ -1698,13 +1721,56 @@ export class AlertManager extends EventEmitter {
       // 统一在这里补上告警标题：规则的中文名（如「恶劣天气影响」）。
       // webhook 模板里的 {{alert_title}} 用它 —— 没有对应规则时
       // （如 dns_failure / probe_source_unavailable）留空，由通知层回退成 alert_type。
-      await this.notifier.notify({
+      //
+      // ⚠️ 走分发器而不是 notifier.notify()：内网目标要立刻发（不等公网连通性），
+      // 公网目标在无外网时要进离线队列而不是干等。
+      const result = await this.dispatcher.dispatch({
         ...context,
         title: context.title ?? this.ruleTitleFor(context.alert.alert_type),
       });
+      if (result.queued.length > 0) {
+        this.emit('notification:queued', {
+          channels: result.queued.map((q) => q.channel),
+          pending: this.dispatcher.pendingCount(),
+        });
+      }
     } catch (error) {
       console.error('Failed to send notification:', error);
       this.emit('notification:error', { context, error });
+    }
+  }
+
+  /**
+   * 当前外网路径。
+   *
+   * - 公网可达性 ← `public-ping` 探针（还没跑过时乐观当作可达：
+   *   最坏结果只是发一次失败然后入队，不会丢消息）；
+   * - 星链是否在线 ← 采集到的终端状态。
+   */
+  private currentNetworkPath(): NetworkPath {
+    const publicState = this.icmpProbeStates.get('public-ping');
+    const publicReachable = publicState ? publicState.reachable : true;
+    return resolveNetworkPath({
+      publicReachable,
+      starlinkOnline: this.starlinkOnline,
+    });
+  }
+
+  /**
+   * 发现「无外网 → 有外网」的恢复瞬间 ⇒ 冲刷离线队列（聚合补发）。
+   *
+   * 不抛异常：补发失败只是队列还在，不该影响别的流程。
+   */
+  private async checkNetworkRecovery(): Promise<void> {
+    const path = this.currentNetworkPath();
+    const previous = this.lastNetworkPath;
+    this.lastNetworkPath = path;
+    if (previous === 'none' && path !== 'none') {
+      try {
+        await this.dispatcher.flushIfRecovered();
+      } catch (error) {
+        console.error('[AlertManager] 离线队列冲刷失败:', error);
+      }
     }
   }
 
