@@ -26,3 +26,6 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+
+# 云端服务独立仓库（git 独立于本仓库，勿作为子目录提交）
+CloudServer/
