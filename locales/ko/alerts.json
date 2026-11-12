@@ -277,7 +277,8 @@
     "next_page": "다음",
     "default_window_hint": "기본적으로 최근 {{days}}일 기록만 표시합니다. 이전 이력은 날짜 범위를 선택하여 확인합니다",
     "day_count": "{{count}}건",
-    "false_positive_ack": "피드백에 감사합니다. 해당 알림을 지웠으며 감지 알고리즘을 계속 개선하겠습니다"
+    "false_positive_ack": "피드백에 감사합니다. 해당 알림을 지웠으며 감지 알고리즘을 계속 개선하겠습니다",
+    "false_positive_upload_confirm": "알림 스냅샷을 익명으로 전송합니다(탐지 규칙 개선용).\n\n· 계정이나 알림 설정은 포함되지 않습니다\n· 좌표와 IP 주소는 전송됩니다\n· 설정 → 업데이트 및 익명 피드백에서 언제든 끌 수 있습니다\n\n전송할까요?"
   },
   "card": {
     "status_false_positive": "🚫 오탐으로 표시됨",

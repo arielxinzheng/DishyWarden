@@ -277,7 +277,8 @@
     "next_page": "下一页",
     "default_window_hint": "默认仅显示最近 {{days}} 天的记录，可选择日期范围查看更早历史",
     "day_count": "{{count}} 条",
-    "false_positive_ack": "感谢反馈，已为您清除该提示，我们将持续优化检测算法。"
+    "false_positive_ack": "感谢反馈，已为您清除该提示，我们将持续优化检测算法。",
+    "false_positive_upload_confirm": "将匿名上报告警快照（用于改进检测规则）。\n\n· 不含账号、通知配置等敏感信息\n· 坐标与 IP 会上报\n· 随时可在「设置 → 升级与匿名反馈」关闭\n\n是否上报？"
   },
   "card": {
     "status_false_positive": "🚫 已标记误报",

@@ -9,6 +9,8 @@ import type { HistorySample, HistorySummary, PruneResult, StorageStats, Obstruct
 import type { RouterProbeResult } from '../core/routerProbeTypes';
 import type { ProbeResult, ProbeNodeState } from '../core/probeRunner';
 import type { HandoffEvent } from '../core/outageAnalyzer';
+import type { UpdateState } from '../core/updater';
+import type { CloudConfig } from '../config/manager';
 
 /**
  * 告警历史查询参数。
@@ -180,6 +182,35 @@ export interface ElectronAPI {
     user_dns: { ok: boolean; rtt_ms: number | null; error?: string; resolved_ip?: string };
     baseline_dns: { ok: boolean; rtt_ms: number | null; error?: string; resolved_ip?: string };
   } | null>;
+
+  // ===== 升级与云端反馈 =====
+
+  /** 获取升级状态 */
+  getUpdateState: () => Promise<UpdateState>;
+
+  /** 手动检查更新 */
+  checkForUpdate: () => Promise<UpdateState>;
+
+  /** 下载更新（用户确认后） */
+  downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
+
+  /** 安装更新并重启 */
+  installUpdate: (params?: { toVersion?: string }) => Promise<{ success: boolean; error?: string }>;
+
+  /** 订阅升级状态变化 */
+  onUpdateState: (callback: (state: UpdateState) => void) => () => void;
+
+  /** 保存云端配置 */
+  updateCloudConfig: (config: Partial<CloudConfig>) => Promise<{ success: boolean; error?: string }>;
+
+  /** 上报告警误报负样本（用户确认后调用） */
+  reportFalsePositive: (params: {
+    alertKey: string;
+    severity?: string;
+    title?: string;
+    evidence?: unknown;
+    note?: string;
+  }) => Promise<{ success: boolean; skipped?: boolean; error?: string }>;
 }
 
 /**
@@ -314,4 +345,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('get-obstruction-events', fromMs, toMs, limit),
 
   getLatestDnsProbe: () => ipcRenderer.invoke('get-latest-dns-probe'),
+
+  // ===== 升级与云端反馈 =====
+
+  getUpdateState: () => ipcRenderer.invoke('get-update-state'),
+
+  checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
+
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+
+  installUpdate: (params?: { toVersion?: string }) =>
+    ipcRenderer.invoke('install-update', params),
+
+  onUpdateState: (callback: (state: UpdateState) => void) => {
+    const listener = (_event: any, state: UpdateState) => callback(state);
+    ipcRenderer.on('update-state', listener);
+
+    return () => {
+      ipcRenderer.removeListener('update-state', listener);
+    };
+  },
+
+  updateCloudConfig: (config: Partial<CloudConfig>) =>
+    ipcRenderer.invoke('update-cloud-config', config),
+
+  reportFalsePositive: (params: {
+    alertKey: string;
+    severity?: string;
+    title?: string;
+    evidence?: unknown;
+    note?: string;
+  }) => ipcRenderer.invoke('report-false-positive', params),
 } as ElectronAPI);

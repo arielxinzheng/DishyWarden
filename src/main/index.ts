@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { createCollector, DataCollector } from '../collector/historian';
 import { createExporter, PrometheusExporter } from '../collector/exporter';
@@ -9,6 +10,8 @@ import { loadTLESeed, warmupTLESeed } from './tleSeed';
 import { AlertManager } from '../alerting/manager';
 import { getConfigManager } from '../config/manager';
 import { createGrafanaManager, GrafanaManager } from '../prometheus/grafana';
+import { CloudClient } from '../core/cloudClient';
+import { UpdateManager, UpdateState } from '../core/updater';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +24,49 @@ let alertManager: AlertManager | null = null;
 let grafanaManager: GrafanaManager | null = null;
 let probeRunner: ProbeRunner | null = null;
 let storagePruneTimer: NodeJS.Timeout | null = null;
+let cloudClient: CloudClient | null = null;
+let updateManager: UpdateManager | null = null;
 const configManager = getConfigManager();
+
+/**
+ * 初始化云端相关能力（上报客户端 + 升级管理器）。
+ *
+ * 两者都**默认静默**：
+ * - 没配 endpoint ⇒ 一个字节都不发
+ * - 没配 updateFeedUrl ⇒ 不检查更新
+ *
+ * 这样云端服务还没上线时，客户端可以照常发布、零噪音。
+ */
+function initCloudServices(): void {
+  // 匿名装机 ID：首次运行时生成随机 UUID v4 并落盘。
+  // 不派生自任何硬件/用户信息，只用于升级漏斗按"装机"统计。
+  try {
+    if (!configManager.getConfig().cloud.clientId) {
+      configManager.updateCloudConfig({ clientId: randomUUID() });
+      console.log('[Main] 已生成匿名装机 ID');
+    }
+  } catch (err) {
+    console.warn('[Main] 生成匿名装机 ID 失败:', err);
+  }
+
+  cloudClient = new CloudClient({
+    getConfig: () => configManager.getConfig(),
+    getAppVersion: () => app.getVersion(),
+    getPlatform: () => process.platform,
+  });
+
+  updateManager = new UpdateManager({
+    getConfig: () => configManager.getConfig(),
+    getAppVersion: () => app.getVersion(),
+    isPackaged: () => app.isPackaged,
+    onState: (state: UpdateState) => {
+      sendToRenderer('update-state', state);
+    },
+    report: (record) => {
+      void cloudClient?.report(record);
+    },
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -491,6 +536,90 @@ ipcMain.handle('mark-false-positive', (_event, params: {
 });
 
 /**
+ * IPC 处理器：获取升级状态
+ */
+ipcMain.handle('get-update-state', () => {
+  if (!updateManager) {
+    return { status: 'disabled', currentVersion: app.getVersion() };
+  }
+  return updateManager.getState();
+});
+
+/**
+ * IPC 处理器：手动检查更新（设置页按钮）
+ */
+ipcMain.handle('check-for-update', async () => {
+  if (!updateManager) {
+    return { status: 'disabled', currentVersion: app.getVersion() };
+  }
+  return await updateManager.check(true);
+});
+
+/**
+ * IPC 处理器：下载更新（用户确认后）
+ */
+ipcMain.handle('download-update', async () => {
+  if (!updateManager) return { success: false, error: '更新管理器未初始化' };
+  const ok = await updateManager.download();
+  return ok ? { success: true } : { success: false, error: '下载失败' };
+});
+
+/**
+ * IPC 处理器：安装更新并重启（需求 2.8.3）
+ */
+ipcMain.handle('install-update', (_event, params?: { toVersion?: string }) => {
+  if (!updateManager) return { success: false, error: '更新管理器未初始化' };
+  const ok = updateManager.install(params?.toVersion);
+  return ok ? { success: true } : { success: false, error: '安装失败' };
+});
+
+/**
+ * IPC 处理器：保存云端配置（地址 / 反馈开关 / 更新源）
+ */
+ipcMain.handle('update-cloud-config', (_event, params: {
+  endpoint?: string;
+  feedbackEnabled?: boolean;
+  updateFeedUrl?: string;
+  checkIntervalHours?: number;
+}) => {
+  try {
+    configManager.updateCloudConfig(params ?? {});
+    // 配置变了 ⇒ 轮询节奏与更新源都可能变，重新排一次
+    updateManager?.start();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : '保存失败' };
+  }
+});
+
+/**
+ * IPC 处理器：上报告警误报负样本
+ *
+ * 只在用户明确确认后调用；上报失败不影响本地标记（本地才是真值）。
+ */
+ipcMain.handle('report-false-positive', (_event, params: {
+  alertKey: string;
+  severity?: string;
+  title?: string;
+  evidence?: unknown;
+  note?: string;
+}) => {
+  if (!cloudClient) return { success: false, skipped: true };
+  if (!params || typeof params.alertKey !== 'string') {
+    return { success: false, error: '缺少 alertKey' };
+  }
+  void cloudClient.report({
+    type: 'alert_false_positive',
+    alert_key: params.alertKey,
+    severity: params.severity,
+    title: params.title,
+    evidence: params.evidence,
+    note: params.note,
+  });
+  return { success: true };
+});
+
+/**
  * IPC 处理器：获取最新 DNS 探测结果
  */
 ipcMain.handle('get-latest-dns-probe', () => {
@@ -753,8 +882,16 @@ app.whenReady().then(async () => {
   // 后台预热种子数据, 不阻塞窗口显示
   warmupTLESeed();
 
+  initCloudServices();
+
   await startBackgroundServices();
   createWindow();
+
+  // 升级嗅探：延迟首查 + 之后按间隔轮询（12h ± 抖动）。
+  // 任何失败都在 UpdateManager 内部降级，绝不影响监控主职。
+  updateManager?.start();
+  // 启动心跳：兼作"升级成功"确认与版本分布统计
+  updateManager?.reportHeartbeat();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -770,5 +907,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  updateManager?.stop();
   await stopBackgroundServices();
 });

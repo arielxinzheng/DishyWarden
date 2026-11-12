@@ -277,7 +277,8 @@
     "next_page": "Next",
     "default_window_hint": "Showing the last {{days}} days by default — pick a date range to see older history",
     "day_count": "{{count}} record(s)",
-    "false_positive_ack": "Thanks for the feedback — this alert has been cleared and we'll keep improving detection."
+    "false_positive_ack": "Thanks for the feedback — this alert has been cleared and we'll keep improving detection.",
+    "false_positive_upload_confirm": "Upload the alert snapshot anonymously (to improve detection rules).\n\n· No account or notification credentials included\n· Coordinates and IP address will be uploaded\n· You can turn this off anytime in Settings → Updates & anonymous feedback\n\nUpload?"
   },
   "card": {
     "status_false_positive": "🚫 Marked false positive",

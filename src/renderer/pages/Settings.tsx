@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin } from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
+import { UpdateFeedbackCard } from '../components/Settings/UpdateFeedbackCard';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 // 共享常量：默认模板 + 变量清单（纯 TS，渲染层可安全引用）
 import { DEFAULT_WEBHOOK_TEMPLATE } from '../../alerting/webhookTemplate';
@@ -126,6 +127,13 @@ export default function Settings() {
         probe: {
           traceTarget: 'example.com',
           nodes: [],
+        },
+        cloud: {
+          endpoint: '',
+          clientId: '',
+          feedbackEnabled: false,
+          updateFeedUrl: '',
+          checkIntervalHours: 12,
         },
         version: '0.1.0',
       } as AppConfig);
@@ -649,6 +657,9 @@ export default function Settings() {
           }
         />
       )}
+
+      {/* 升级与匿名反馈(需求文档 2.8 自动检查升级更新) */}
+      {config && <UpdateFeedbackCard cloud={config.cloud} />}
 
       {/* Telegram 通知 */}
       <Card>

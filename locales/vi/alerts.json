@@ -277,7 +277,8 @@
     "next_page": "Trang sau",
     "default_window_hint": "Mặc định chỉ hiển thị các bản ghi trong {{days}} ngày gần đây; chọn khoảng ngày để xem lịch sử cũ hơn",
     "day_count": "{{count}} bản ghi",
-    "false_positive_ack": "Cảm ơn phản hồi của bạn. Cảnh báo này đã được xóa và chúng tôi sẽ tiếp tục cải thiện thuật toán phát hiện"
+    "false_positive_ack": "Cảm ơn phản hồi của bạn. Cảnh báo này đã được xóa và chúng tôi sẽ tiếp tục cải thiện thuật toán phát hiện",
+    "false_positive_upload_confirm": "Gửi ảnh chụp dữ liệu cảnh báo ở dạng ẩn danh (để cải thiện quy tắc phát hiện).\n\n· Không bao gồm tài khoản hay thông tin thông báo\n· Tọa độ và địa chỉ IP sẽ được gửi\n· Có thể tắt bất cứ lúc nào trong Cài đặt → Cập nhật & phản hồi ẩn danh\n\nGửi?"
   },
   "card": {
     "status_false_positive": "🚫 Đã đánh dấu báo nhầm",

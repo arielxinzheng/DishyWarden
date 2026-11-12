@@ -81,6 +81,24 @@ export interface ProbeConfig {
   traceTarget: string;
 }
 
+/**
+ * 云端服务（SL Cloud）配置。
+ *
+ * 全部留空 = 完全不触网 —— 这样在云端服务上线前，客户端可以照常发布。
+ */
+export interface CloudConfig {
+  /** 云端地址，如 https://cloud.example.com（空 = 不上报） */
+  endpoint: string;
+  /** 匿名装机 ID（随机 UUID v4，首次运行时生成） */
+  clientId: string;
+  /** 是否上报告警误报负样本 */
+  feedbackEnabled: boolean;
+  /** 更新源 feed URL（空 = 不检查更新） */
+  updateFeedUrl: string;
+  /** 检查更新间隔（小时） */
+  checkIntervalHours: number;
+}
+
 export interface AppConfig {
   collector: CollectorConfig;
   prometheus: PrometheusConfig;
@@ -88,6 +106,7 @@ export interface AppConfig {
   grafana: GrafanaConfig;
   alertThresholds: AlertThresholds;
   probe: ProbeConfig;
+  cloud: CloudConfig;
   version: string;
 }
 
@@ -190,6 +209,15 @@ const DEFAULT_CONFIG: AppConfig = {
       },
     ],
   },
+  cloud: {
+    // 默认全部留空 ⇒ 客户端完全不触云。
+    // 云端服务上线后在设置页填 endpoint / updateFeedUrl 即可，无需改代码。
+    endpoint: '',
+    clientId: '',
+    feedbackEnabled: false,
+    updateFeedUrl: '',
+    checkIntervalHours: 12,
+  },
   version: '0.1.0',
 };
 
@@ -266,6 +294,9 @@ export class ConfigManager {
           ? loaded.probe.nodes
           : defaults.probe.nodes,
       },
+      // 云端配置: 老配置文件里没有这一段 ⇒ 必须用默认值兜底,
+      // 否则 loaded.cloud 是 undefined, 读 .cloud.endpoint 直接抛。
+      cloud: { ...defaults.cloud, ...loaded.cloud },
       version: loaded.version || defaults.version,
     };
   }
@@ -337,6 +368,14 @@ export class ConfigManager {
    */
   updateGrafanaConfig(config: Partial<GrafanaConfig>): void {
     this.config.grafana = { ...this.config.grafana, ...config };
+    this.save(this.config);
+  }
+
+  /**
+   * 更新云端配置(地址 / 反馈开关 / 更新源)
+   */
+  updateCloudConfig(config: Partial<CloudConfig>): void {
+    this.config.cloud = { ...this.config.cloud, ...config };
     this.save(this.config);
   }
 

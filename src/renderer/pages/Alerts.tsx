@@ -28,6 +28,8 @@ import { cn } from '../lib/utils';
 import type { AlertRecord } from '../../alerting/database';
 import { AlertCard, type Severity } from '../components/Alerts/AlertCard';
 import { HistoryFilterBar } from '../components/Alerts/HistoryFilterBar';
+import { uploadFalsePositive } from '../lib/cloudFeedback';
+import { parseEvidence } from '../lib/alertFormat';
 import {
   DEFAULT_HISTORY_FILTERS,
   isDefaultWindow,
@@ -191,6 +193,19 @@ export default function AlertsPage() {
     if (result.success) {
       // TODO: 显示 Toast 提示（文案已进字典，等接入 Toast 后直接调用）
       console.log(t('alerts:page.false_positive_ack'));
+
+      // 匿名上报误报负样本（用于阈值调优）。
+      // 上报失败不影响本地标记 —— 本地库里那条记录才是真值。
+      const record = alerts.find((a) => a.alert_key === alertKey);
+      await uploadFalsePositive(
+        {
+          alertKey,
+          severity: record?.severity,
+          title: record?.summary,
+          evidence: parseEvidence(record?.evidence) ?? undefined,
+        },
+        t('alerts:page.false_positive_upload_confirm'),
+      );
     }
   };
 
