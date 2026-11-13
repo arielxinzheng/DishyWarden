@@ -131,3 +131,62 @@ electron-builder 在 macOS 上给 `SLMonitor.exe` 写图标与版本信息需要
 5. **首次启动没有位置向导**：卫星方位/仰角需要手工去设置页填经纬度。
 6. **未签名的自动更新**：更新源 `UPDATE_FEED_URL` 目前为空 ⇒ 检查更新功能处于
    "更新通道未开放"状态，不会联网。
+
+
+---
+
+## NSIS 安装器在部分 Win10 上崩溃（c0000005 / 应用程序错误 1000）
+
+### 现象
+
+双击安装器 → 「应用程序错误 1000」→ 任务管理器里没有 SLMonitor 进程。
+
+WER 事件数据的特征（用来确认是**安装器**崩、不是应用崩）：
+
+```
+故障模块: C:\Users\<user>\AppData\Local\Temp\nswXXXX.tmp\System.dll
+异常代码: c0000005（STATUS_ACCESS_VIOLATION 访问冲突）
+```
+
+- `nsw*.tmp` 是 **NSIS 安装器的临时解包目录** ⇒ 崩在安装过程中
+- 那个 `System.dll` **不是** Windows 的 System.dll，是 **NSIS 的 System 插件**
+  （electron-builder 自带 `nsis-3.0.4.1/Plugins/x86-ansi/System.dll`）
+- ⇒ **应用本体从未启动过**，与应用代码无关
+
+### 崩在哪
+
+electron-builder 的 `installer.nsi` → `multiUser.nsh` 求「每用户程序目录」：
+
+```nsis
+System::Call 'SHELL32::SHGetKnownFolderPath(g "${FOLDERID_UserProgramFiles}", i ${KF_FLAG_CREATE}, p 0, *p .r2)i.r1'
+System::Call '*$2(&w${NSIS_MAX_STRLEN} .s)'
+```
+
+「每用户程序目录」解析异常时，NSIS System 插件会在自己代码里访问冲突。
+
+### 三条出路
+
+1. **用免安装 zip（推荐）**：解压到任意目录 → 直接跑 `SLMonitor.exe`。
+   完全不碰 NSIS，也没有 UAC/路径解析。
+2. **用 7-Zip 解包安装器**：NSIS 安装器本身就是 7-Zip 能读的归档 ——
+   右键 → 7-Zip → 打开压缩包 → 取出 `SLMonitor.exe` 与 `resources/` → 直接运行。
+3. **查那台机器**（如果一定要用安装器）：
+   - `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders\Programs`
+     是否被**重定向**到网络盘/失效路径/EFS 加密目录（域策略常见）——
+     这正是 `SHGetKnownFolderPath(FOLDERID_UserProgramFiles)` 出问题的典型原因
+   - 崩溃报告里 **Desktop 路径与 Temp 路径属于不同用户** ⇒ 安装器可能是在
+     "另一个账户"（管理员/域账号）下运行的，`HKCU` 指向了意料之外的配置
+   - 杀毒软件（360 / 火绒 / Defender）是否把 `%TEMP%\nsw*.tmp` 里的插件拦了
+   - 把安装器放到纯英文、无空格的路径再试
+
+### 顺带做的瘦身（降低解包出问题的概率）
+
+把 20 个**运行时根本不需要**的包（echarts / three / @react-three / tailwind /
+grpc / react / i18next …，它们早已被 Vite/esbuild 打进产物）从 `dependencies`
+移到 `devDependencies`：
+
+| | 之前 | 之后 |
+|---|---|---|
+| app.asar | 227 MB | **40 MB** |
+| NSIS 安装器 | 129 MB | **98.5 MB** |
+| 解包文件数 | — | 297 |
