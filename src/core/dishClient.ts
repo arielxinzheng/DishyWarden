@@ -312,7 +312,7 @@ export class DishClient {
      * 曾经这里写的是 `num(status.popPingDropRate, prev?.popPingDropRate ?? 0)`：
      * 设备恢复健康、丢包率回到 0 之后，字段消失 ⇒ 沿用上一帧的 0.6
      * ⇒ `high_packet_loss` / `severe_weather` 永远成立 ⇒ **告警永远不消失**。
-     * 实测就是这样：DishyMock 恢复全部告警后，SLMonitor 里两条告警
+     * 实测就是这样：DishyMock 恢复全部告警后，DishyWarden 里两条告警
      * 的 occurrence_count 一路涨到 68，last_seen 一直刷新。
      *
      * 量值缺失即 0，这才是 proto3 的语义。

@@ -30,6 +30,7 @@ export ELECTRON_BUILDER_CACHE="$PWD/release/.cache/builder"
 npx electron-builder --win nsis zip --x64 --publish never \
   --config.win.signAndEditExecutable=false
 
+VER="$(node -p "require('./package.json').version")"
 echo "[build-win] 产物:"
-echo "  release/SLMonitor Setup 0.1.0.exe   （NSIS 安装器）"
-echo "  release/SLMonitor-0.1.0-win.zip     （免安装版，推荐优先试这个）"
+echo "  release/DishyWarden-Setup-${VER}.exe    （NSIS 安装器）"
+echo "  release/DishyWarden-${VER}-win-x64.zip  （免安装版，推荐优先试这个）"

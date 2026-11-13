@@ -30,6 +30,53 @@ let updateManager: UpdateManager | null = null;
 const configManager = getConfigManager();
 
 /**
+ * 固定打包态的 userData 目录。
+ *
+ * 产品从 SLMonitor 改名为 DishyWarden 之后，`name` / `productName` 一变，
+ * Electron 推导出的 userData 路径就跟着漂（实测旧版本在不同平台分别落到了
+ * `…/Application Support/SLMonitor` 和 `…/slmonitor` 两个目录）。
+ * 路径漂移会直接造成「升级后配置和 3 天历史全没了」，云端升级方案也没法做
+ * 版本对照 —— 所以这里显式钉死，并一次性迁移旧目录里的数据。
+ *
+ * 开发态保持 Electron 默认目录（`…/Electron`）不动，避免开发数据污染发布数据。
+ */
+function pinUserDataDir(): void {
+  // 允许在未打包环境验证迁移逻辑（仅测试用，跑完删掉测试目录）
+  if (!app.isPackaged && process.env.DW_USERDATA_TEST !== '1') return;
+  const target = path.join(app.getPath('appData'), 'DishyWarden');
+  // 旧版本可能落在这两个目录里（productName / name 两种解析结果）
+  const legacy = ['SLMonitor', 'slmonitor']
+    .map((n) => path.join(app.getPath('appData'), n))
+    .filter((dir) => fs.existsSync(dir));
+
+  // 注意用「是否已初始化」而不是「目录是否存在」：
+  // Electron 在 setPath 生效前就可能先把 userData 目录建出来（里面只有 Cache 之类），
+  // 按存在性判断会永远跳过迁移。
+  const alreadyInitialized = fs.existsSync(path.join(target, 'config', 'config.json'));
+  if (!alreadyInitialized) {
+    const source = legacy.find((dir) => fs.existsSync(path.join(dir, 'config', 'config.json')))
+      ?? legacy[0];
+    if (source) {
+      try {
+        // 只迁需要保留的三样：配置、遥测/告警库、语言等 localStorage
+        for (const sub of ['config', 'data', 'Local Storage']) {
+          const from = path.join(source, sub);
+          if (fs.existsSync(from)) {
+            fs.cpSync(from, path.join(target, sub), { recursive: true });
+          }
+        }
+        console.log(`[Main] userData 已从旧目录迁移: ${source} → ${target}`);
+      } catch (err) {
+        console.warn('[Main] userData 迁移失败（将使用空目录）:', err);
+      }
+    }
+  }
+  app.setPath('userData', target);
+}
+
+pinUserDataDir();
+
+/**
  * 初始化云端相关能力（上报客户端 + 升级管理器）。
  *
  * 两者都**默认静默**：

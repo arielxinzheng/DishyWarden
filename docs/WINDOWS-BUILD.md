@@ -8,7 +8,9 @@
 npm run build:win
 ```
 
-产物：`release/SLMonitor Setup 0.1.0.exe`（NSIS 安装器，约 129 MB）。
+产物（命名由 package.json 的 `build.artifactName` 决定，产品名为 **DishyWarden**）：
+- `release/DishyWarden-Setup-<版本>.exe` —— NSIS 安装器
+- `release/DishyWarden-<版本>-win-x64.zip` —— 免安装版（**推荐优先试这个**）
 
 脚本内部（`scripts/build-win.sh`）：
 
@@ -67,7 +69,7 @@ file node_modules/better-sqlite3/build/Release/better-sqlite3.node
 
 ### 2. exe 图标/版本信息需要 wine —— 用 electron-builder 自带的 portable wine
 
-electron-builder 在 macOS 上给 `SLMonitor.exe` 写图标与版本信息需要 **wine**。
+electron-builder 在 macOS 上给 `DishyWarden.exe` 写图标与版本信息需要 **wine**。
 它会**自动下载一份 portable wine**（`wine-4.0.1-mac.7z`，19 MB）✓ 不需要自己装。
 
 但 wine 首次运行要初始化 wineprefix，默认位置是 `~/.wine`：
@@ -124,12 +126,12 @@ electron-builder 在 macOS 上给 `SLMonitor.exe` 写图标与版本信息需要
    → 「更多信息」→「仍要运行」。
 2. **防火墙弹窗**：Prometheus exporter 监听 9817，首次启动会弹网络访问询问。
    不需要 Prometheus 可以忽略（缺失二进制时主进程会打 warn 并跳过 ✓）。
-3. **数据目录**：打包版的 userData 是 **`%APPDATA%\slmonitor\`**
-   （取自 package.json 的 `name`，全小写；`productName` 只影响 exe/安装器名字）
+3. **数据目录**：打包版的 userData 是 **`%APPDATA%\DishyWarden\`**
+   （显式钉死在代码里，不再随 name/productName 漂移）
    —— 开发态是 `%APPDATA%\Electron\`，**两套数据互不相通**。
-   配置文件在 `%APPDATA%\slmonitor\config\config.json`，
-   遥测/告警库在 `%APPDATA%\slmonitor\data\`。
-   实测（Parallels Windows 11）：`C:\Users\<user>\AppData\Roaming\slmonitor\data\telemetry.db` ✓
+   配置文件在 `%APPDATA%\DishyWarden\config\config.json`，
+   遥测/告警库在 `%APPDATA%\DishyWarden\data\`。
+   实测（Parallels Windows 11）：`C:\Users\<user>\AppData\Roaming\DishyWarden\data\telemetry.db` ✓
 4. **默认配置指向本机 dish**：`collector.dishAddress=127.0.0.1:9200`，
    测试机上没有 dish ⇒ 采集器连不上 ⇒ 约 3 分钟后会报"采集心跳丢失"告警（属预期行为）。
 5. **首次启动没有位置向导**：卫星方位/仰角需要手工去设置页填经纬度。
@@ -162,7 +164,7 @@ React 容器（`__reactContainer$…`）存在但 `#root.children.length === 0`�
 **快速自检**：打包后开远程调试，读渲染进程 DOM：
 
 ```bash
-SLMonitor.exe --remote-debugging-port=9222
+DishyWarden.exe --remote-debugging-port=9222
 # 然后 GET http://127.0.0.1:9222/json/list 拿到 webSocketDebuggerUrl，
 # 用 Runtime.evaluate 取 document.getElementById('root').children.length
 # 正常应 > 0；黑屏时是 0
@@ -172,7 +174,7 @@ SLMonitor.exe --remote-debugging-port=9222
 
 ### 现象
 
-双击安装器 → 「应用程序错误 1000」→ 任务管理器里没有 SLMonitor 进程。
+双击安装器 → 「应用程序错误 1000」→ 任务管理器里没有 DishyWarden 进程。
 
 WER 事件数据的特征（用来确认是**安装器**崩、不是应用崩）：
 
@@ -197,13 +199,28 @@ System::Call '*$2(&w${NSIS_MAX_STRLEN} .s)'
 
 「每用户程序目录」解析异常时，NSIS System 插件会在自己代码里访问冲突。
 
-### 三条出路
+### 已采用的修法：`nsis.perMachine = true`
 
-1. **用免安装 zip（推荐）**：解压到任意目录 → 直接跑 `SLMonitor.exe`。
-   完全不碰 NSIS，也没有 UAC/路径解析。
+这段代码只在 **per-user 安装模式**（`setInstallModePerUser`，装到
+`%LOCALAPPDATA%\Programs`）里执行。改成 **per-machine**（装到 `Program Files`，
+全机共用）走的是另一条分支，**不会调用 `SHGetKnownFolderPath`** ⇒ 崩溃消失。
+
+实测（Parallels Windows 11，UAC 关闭）：
+
+| 模式 | 结果 |
+|---|---|
+| 默认 per-user | 安装器卡住 + WER 崩溃进程（与用户报障一致） |
+| `perMachine: true` | 安装器退出码 0，`C:\Program Files\DishyWarden\DishyWarden.exe` 就位，应用正常启动 |
+
+代价：per-machine 安装需要管理员权限（UAC 开启时弹一次确认框）。
+所以要同时保留免安装 zip 作为「无管理员权限机器」的退路。
+
+### 如果还是崩，按这三条查**
+
+1. **用免安装 zip**：解压到任意目录 → 直接跑 `DishyWarden.exe`，完全不碰 NSIS。
 2. **用 7-Zip 解包安装器**：NSIS 安装器本身就是 7-Zip 能读的归档 ——
-   右键 → 7-Zip → 打开压缩包 → 取出 `SLMonitor.exe` 与 `resources/` → 直接运行。
-3. **查那台机器**（如果一定要用安装器）：
+   右键 → 7-Zip → 打开压缩包 → 取出 `DishyWarden.exe` 与 `resources/` → 直接运行。
+3. **查那台机器**：
    - `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders\Programs`
      是否被**重定向**到网络盘/失效路径/EFS 加密目录（域策略常见）——
      这正是 `SHGetKnownFolderPath(FOLDERID_UserProgramFiles)` 出问题的典型原因
@@ -223,3 +240,21 @@ grpc / react / i18next …，它们早已被 Vite/esbuild 打进产物）从 `de
 | app.asar | 227 MB | **40 MB** |
 | NSIS 安装器 | 129 MB | **98.5 MB** |
 | 解包文件数 | — | 297 |
+
+## 自动升级元数据（latest.yml）
+
+`build.publish` 配了 generic provider 之后，`electron-builder` 才会生成：
+
+- `release/latest.yml` —— electron-updater 的更新清单（version / sha512 / size / releaseDate）
+- `release/*.exe.blockmap` + `*.nsis.7z` —— 差分更新用
+
+```json
+"publish": [{ "provider": "generic", "url": "https://cloud.dishywarden.com/releases/win" }]
+```
+
+`--publish never` 只写本地、不传服务器。云服务端把这几个文件按原样托管即可，
+客户端 `UPDATE_FEED_URL` 指到对应目录（目前仍为空 ⇒ 更新通道未开放）。
+
+⚠️ **免安装 zip 不参与自动升级**：electron-updater 在 Windows 只有 `NsisUpdater`
+（只认 `latest.yml` + NSIS `.exe`）。只发 zip 就必须自己做「下载→校验→替换→重启」
+的替换器方案。

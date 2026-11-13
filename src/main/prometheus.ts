@@ -173,7 +173,7 @@ export class PrometheusManager {
    */
   private async generateConfig(): Promise<void> {
     const config = `
-# Prometheus configuration for SLMonitor
+# Prometheus configuration for DishyWarden
 global:
   scrape_interval: ${this.config.scrapeInterval}
   evaluation_interval: ${this.config.scrapeInterval}

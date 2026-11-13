@@ -1,4 +1,4 @@
-# SLMonitor - 星链监控软件
+# DishyWarden - 星链监控软件
 
 基于 Electron + React + TypeScript 的开源星链终端监控解决方案。
 

@@ -70,7 +70,7 @@ export class GrafanaManager {
    * 获取或创建 Prometheus 数据源
    */
   async ensureDataSource(prometheusUrl: string): Promise<number> {
-    const dataSourceName = 'SLMonitor Prometheus';
+    const dataSourceName = 'DishyWarden Prometheus';
 
     try {
       // 查找已存在的数据源
@@ -126,7 +126,7 @@ export class GrafanaManager {
       const response = await this.client.post('/api/dashboards/db', {
         dashboard: dashboard.dashboard,
         overwrite: true,
-        message: 'Auto-provisioned by SLMonitor',
+        message: 'Auto-provisioned by DishyWarden',
       });
 
       console.log('[Grafana] Dashboard created/updated:', response.data.uid);

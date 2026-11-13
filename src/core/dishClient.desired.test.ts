@@ -109,7 +109,7 @@ describe('parseStatus —— 期望朝向的映射', () => {
 /**
  * ===== 回归：proto3「值为 0 的字段不出现在响应里」=====
  *
- * 现象：DishyMock 恢复全部告警后，SLMonitor 里的 high_packet_loss /
+ * 现象：DishyMock 恢复全部告警后，DishyWarden 里的 high_packet_loss /
  * severe_weather 一直不消失（occurrence_count 涨到 68，last_seen 持续刷新）。
  *
  * 根因：dishGrpc 用 `defaults: false` 加载 proto，proto3 里等于默认值的字段

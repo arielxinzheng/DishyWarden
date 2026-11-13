@@ -3,7 +3,7 @@
  *
  * 重点守一个历史坑：**老配置文件里没有新增段落 ⇒ 合并时必须兜底**，
  * 否则 `config.cloud.endpoint` 直接抛 TypeError，整个设置页白屏
- * （SLMonitor 踩坑备忘 §22：老配置缺新字段 ⇒ 必须在 load() 里兼容合并）。
+ * （DishyWarden 踩坑备忘 §22：老配置缺新字段 ⇒ 必须在 load() 里兼容合并）。
  */
 
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';

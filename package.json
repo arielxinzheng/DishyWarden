@@ -1,7 +1,7 @@
 {
-  "name": "slmonitor",
+  "name": "dishywarden",
   "version": "0.1.0",
-  "description": "Starlink监控软件 - 专业的星链终端监控解决方案",
+  "description": "DishyWarden — Starlink 终端监控（延迟/丢包/遮挡/告警）",
   "main": "dist-electron/main/index.js",
   "type": "module",
   "scripts": {
@@ -87,8 +87,8 @@
     "wait-on": "^8.0.5"
   },
   "build": {
-    "appId": "com.slmonitor.app",
-    "productName": "SLMonitor",
+    "appId": "com.dishywarden.app",
+    "productName": "DishyWarden",
     "npmRebuild": false,
     "directories": {
       "output": "release"
@@ -126,7 +126,21 @@
         }
       ],
       "icon": "build/icon.png"
-    }
+    },
+    "executableName": "DishyWarden",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "perMachine": true,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://cloud.dishywarden.com/releases/win"
+      }
+    ]
   },
   "allowScripts": {
     "electron@33.4.11": true,
