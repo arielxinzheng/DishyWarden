@@ -16,12 +16,28 @@ param(
     [string]$DishIp   = '192.168.100.1',
     [int]   $DishPort = 9200,
     [string]$RouterIp = '192.168.1.1',
-    [int]   $ControlPort = 45999
+    [int]   $ControlPort = 45999,
+    [switch]$NoPause,
+    [string]$ReportPath = ''
 )
 
 $ErrorActionPreference = 'Continue'
 $notes = @()
 $proxyFake = $false
+
+Write-Output '=============================================================='
+Write-Output ' Dish endpoint verification (Starlink gRPC)'
+Write-Output ' The window stays open until you press Enter.'
+Write-Output ' A copy of this report is saved next to the script.'
+Write-Output '=============================================================='
+
+# Keep a copy on disk: "Open with -> PowerShell" opens a transient console that
+# closes the moment the script ends, so console-only output would be lost.
+if (-not $ReportPath) {
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { $env:TEMP }
+    $ReportPath = Join-Path $dir ('verify-dish-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+}
+try { Start-Transcript -Path $ReportPath -Force | Out-Null } catch { $ReportPath = '' }
 
 function Section($t) { Write-Output ''; Write-Output ("== " + $t + " ==") }
 
@@ -149,3 +165,14 @@ Write-Output '  "C:\Program Files\DishyWarden\DishyWarden.exe" --enable-logging'
 Write-Output '  success looks like: [Collector] ... and the dashboard showing telemetry,'
 Write-Output '  failure logs: "Dish collect failed: ... ECONNREFUSED 127.0.0.1:9200" (still the mock address)'
 Write-Output '                or "14 UNAVAILABLE ... 192.168.100.1:9200"'
+
+if ($ReportPath) {
+    try { Stop-Transcript | Out-Null } catch {}
+    Write-Output ''
+    Write-Output ('report saved to: ' + $ReportPath)
+}
+
+if (-not $NoPause) {
+    Write-Output ''
+    try { [void](Read-Host 'Press Enter to close this window') } catch {}
+}

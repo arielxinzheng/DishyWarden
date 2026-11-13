@@ -22,6 +22,37 @@
 
 ## 1. 在远程 Windows 上放脚本（四选一）
 
+### 1.0 「打开方式 → PowerShell」跑完窗口就没了？（已修）
+
+Windows 的「打开方式 → PowerShell」会开一个**临时控制台**，脚本一结束窗口立刻关闭，
+输出刷一下就没了。脚本现在自带两个对策：
+
+1. **结尾停在「按回车关闭」** —— 窗口不会自己关，结果看得完；
+2. **自动把整份报告写盘**（脚本同目录，`verify-dish-<时间戳>.txt`）——
+   即使窗口被误关，报告还在。
+
+```powershell
+# 默认行为：跑完停住等回车 + 写报告文件
+powershell -ExecutionPolicy Bypass -File C:\Users\Public\verify-dish.ps1
+
+# 不想停（自动化 / 已开着 PowerShell 窗口时）
+powershell -ExecutionPolicy Bypass -File C:\Users\Public\verify-dish.ps1 -NoPause
+
+# 指定报告路径
+powershell -ExecutionPolicy Bypass -File C:\Users\Public\verify-dish.ps1 -ReportPath C:\Users\Public\dish-check.txt
+```
+
+想在**已有的** PowerShell 窗口里看结果，就不要用「打开方式」，直接在这个窗口里跑：
+
+```powershell
+& C:\Users\Public\verify-dish.ps1          # 输出直接刷在当前窗口
+# 或
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Public\verify-dish.ps1 | Tee-Object C:\Users\Public\dish-check.txt
+```
+
+报告文件是 **UTF-8 with BOM**，记事本直接打开不乱码；若在 cmd 里 `type` 出现乱码，
+用 `Get-Content -Encoding UTF8` 读即可。
+
 ### A. RDP + 剪贴板（最快）
 1. 本地打开 `scripts/verify-dish.ps1`，全选复制（RDP 默认开着剪贴板重定向）
 2. 远程 Windows 的 PowerShell 里：
