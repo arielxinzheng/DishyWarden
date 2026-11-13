@@ -46,6 +46,41 @@ export interface DishConfig {
   fallbackToMock?: boolean;
 }
 
+/**
+ * dish_get_history 响应里的一组 1Hz 数组，取**最新一个样本**。
+ *
+ * 真机实测（dishylink LOCAL-API.md）：
+ *   dish_get_history = 900 样本 × 1 Hz 的环形缓冲（约 15 分钟），
+ *   里面才有真正的丢包率/延迟/吞吐数值；dish_get_status 那些字段可能一直是空的。
+ */
+export interface HistorySample {
+  dropRate?: number;
+  latencyMs?: number;
+  downlinkBps?: number;
+  uplinkBps?: number;
+}
+
+/** 从 history 响应里取最新样本（数组末尾 = 最新） */
+export function latestHistorySample(history: Record<string, unknown>): HistorySample | undefined {
+  const last = (v: unknown): number | undefined => {
+    if (!Array.isArray(v) || v.length === 0) return undefined;
+    const lastVal = v[v.length - 1];
+    if (typeof lastVal === 'number' && Number.isFinite(lastVal)) return lastVal;
+    if (typeof lastVal === 'string' && lastVal.trim() !== '') {
+      const n = Number(lastVal);
+      if (Number.isFinite(n)) return n;
+    }
+    return undefined;
+  };
+  const sample: HistorySample = {
+    dropRate: last(history.popPingDropRate),
+    latencyMs: last(history.popPingLatencyMs),
+    downlinkBps: last(history.downlinkThroughputBps),
+    uplinkBps: last(history.uplinkThroughputBps),
+  };
+  return Object.values(sample).some((v) => v !== undefined) ? sample : undefined;
+}
+
 export interface TelemetryData {
   // 连接状态
   state: 'ONLINE' | 'OFFLINE' | 'SEARCHING' | 'BOOTING';
@@ -244,7 +279,19 @@ export class DishClient {
 
     try {
       const status = await this.grpc.getStatus(this.config.timeout);
-      const telemetry = this.parseStatus(status);
+
+      // 真机实测（dishylink LOCAL-API.md）：dish_get_status 的数值字段在某些固件上
+      // **存在但永远不填**（pop_ping_drop_rate / power_in 等），真值在
+      // dish_get_history 的 1Hz 数组里。所以再拉一次 history 取最新样本补齐。
+      let historySample: HistorySample | undefined;
+      try {
+        const history = await this.grpc.getHistory(this.config.timeout);
+        historySample = latestHistorySample(history);
+      } catch (error) {
+        console.warn('[dishClient] history 获取失败, 数值指标可能缺失:', error);
+      }
+
+      const telemetry = this.parseStatus(status, historySample);
 
       // 遮挡图单独取 —— 失败只丢遮挡图, 不影响其它遥测
       try {
@@ -290,7 +337,10 @@ export class DishClient {
    * 字段名来自 DishyMock 的 proto (keepCase:false ⇒ camelCase)。
    * 响应里没有的字段用上一帧的值兜底, 缺省 0。
    */
-  private parseStatus(status: Record<string, unknown>): TelemetryData {
+  private parseStatus(
+    status: Record<string, unknown>,
+    historySample?: HistorySample,
+  ): TelemetryData {
     const prev = this.lastTelemetry;
     // int64 字段在 proto 里是 string (loader 用 longs:String) —— 这里统一转数字
     const num = (v: unknown, fallback = 0): number => {
@@ -361,8 +411,17 @@ export class DishClient {
       : prev?.dishIssues;
 
     // 原始值
-    const rawDropRate = gauge(status.popPingDropRate);
-    const downlinkBps = num(status.downlinkThroughputBps, 0);
+    // status 里的数值字段在部分真机固件上不填 ⇒ 缺失时用 history 的最新样本兜底
+    const pick = (fromStatus: unknown, fromHistory: number | undefined): number => {
+      if (typeof fromStatus === 'number' && Number.isFinite(fromStatus)) return fromStatus;
+      if (typeof fromStatus === 'string' && fromStatus.trim() !== '') {
+        const n = Number(fromStatus);
+        if (Number.isFinite(n)) return n;
+      }
+      return fromHistory ?? 0;
+    };
+    const rawDropRate = pick(status.popPingDropRate, historySample?.dropRate);
+    const downlinkBps = pick(status.downlinkThroughputBps, historySample?.downlinkBps);
 
     // 数据合理性检查：吞吐量高但丢包率 100% 是数据源异常
     // 当下行 > 50 Mbps 且丢包率 >= 95% 时，修正为 0
@@ -377,10 +436,10 @@ export class DishClient {
       state: 'SEARCHING',
       uptime: gauge(deviceState.uptimeS),
 
-      popPingLatencyMs: num(status.popPingLatencyMs, 0),
+      popPingLatencyMs: pick(status.popPingLatencyMs, historySample?.latencyMs),
       popPingDropRate: sanitizedDropRate,
       downlinkThroughputBps: downlinkBps,
-      uplinkThroughputBps: num(status.uplinkThroughputBps, 0),
+      uplinkThroughputBps: pick(status.uplinkThroughputBps, historySample?.uplinkBps),
 
       snr,
       secondsObstructed: gauge(obstructionStats.secondsObstructed),

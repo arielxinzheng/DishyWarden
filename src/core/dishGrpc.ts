@@ -18,6 +18,9 @@
 
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
+import { createFileRegistry, fromBinary, toBinary, toJson } from '@bufbuild/protobuf';
+import { FileDescriptorSetSchema, FileDescriptorProtoSchema } from '@bufbuild/protobuf/wkt';
+import { grpcWebUnary } from './grpcWeb';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -42,6 +45,31 @@ const PROTO_OPTS: protoLoader.Options = {
 
 const SERVICE_NAME = 'SpaceX.API.Device.Device';
 const SYMBOL = 'SpaceX.API.Device.Request';
+const RESPONSE_SYMBOL = 'SpaceX.API.Device.Response';
+
+/**
+ * dish 的 grpc-web 端口（HTTP/1.1）。真机上 9200 的原生 gRPC 会对部分请求分支
+ * 回 `12 UNIMPLEMENTED`，而 9201 的 grpc-web 正常（dishylink 的实测文档
+ * LOCAL-API.md 记录了同一现象：它只用 9201 调 Handle）。
+ */
+const DEFAULT_WEB_PORT = 9201;
+
+
+/**
+ * 已知分支的**字段号**（来自真机 proto 描述符，dishylink 的 schema/dish.protoset
+ * 与真机 reflection 一致）。
+ *
+ * 用途：有些固件的 reflection 描述符里**只有 Response、没有 Request**，
+ * 这时 protobufjs 查不到 Request 类型 ⇒ 退化成手工编码
+ * （tag = 字段号<<3|2，length=0；外加 id 字段）。
+ */
+const KNOWN_FIELD_NUMBERS: Record<string, number> = {
+  getStatus: 1004,
+  getHistory: 1007,
+  dishGetObstructionMap: 2008,
+  getDeviceInfo: 1008,
+  getNetworkInterfaces: 1015,
+};
 
 /** 遮挡图的 SNR 参考值: 遮挡度 = 1 - snr/12 */
 const REF_SNR = 12;
@@ -73,10 +101,18 @@ export class DishGrpcClient {
   private client: DeviceClient | null = null;
   private host: string;
   private port: number;
+  /** grpc-web 兜底端口（9201） */
+  private webPort: number;
+  /** 一旦发现原生 gRPC 不行，就一直走 grpc-web */
+  private useWebTransport = false;
+  /** reflection 拿到的描述符（用于请求编码 + 响应解码） */
+  private descriptorBytes: Uint8Array[] | null = null;
+  private registry: ReturnType<typeof createFileRegistry> | null = null;
 
-  constructor(host: string, port: number) {
+  constructor(host: string, port: number, webPort: number = DEFAULT_WEB_PORT) {
     this.host = host;
     this.port = port;
+    this.webPort = webPort;
   }
 
   /**
@@ -116,9 +152,16 @@ export class DishGrpcClient {
   /**
    * 请求服务端的 file_containing_symbol, 拿回 proto 描述符。
    *
+   * ⚠️ 必须**递归拉依赖文件**：reflection 的 file_containing_symbol 只返回
+   * "包含该符号的那个文件"，而该文件可能引用别的文件（如 SpaceX.API.Status、
+   * RouterInfo）。proto-loader 容忍缺引用，但 `@bufbuild/protobuf` 的 registry
+   * 是严格模式 —— 缺一个类型就报
+   * `invalid FieldDescriptorProto: type_name XXX not found`。
+   * grpcurl 的 `describe` 也是这么做的（逐个 file_by_filename 补依赖）。
+   *
    * 用 reflection 自己的 proto 构造客户端 —— 走标准 gRPC reflection 协议。
    */
-  private reflectFileContainingSymbol(
+  private async reflectFileContainingSymbol(
     client: grpc.Client,
     symbol: string
   ): Promise<Uint8Array[]> {
@@ -146,6 +189,9 @@ export class DishGrpcClient {
       }).serverReflectionInfo();
 
       const chunks: Uint8Array[] = [];
+      const requestedFiles = new Set<string>();
+      const pendingFiles: string[] = [];
+      let inFlight = 0;
       let done = false;
 
       const finish = (err?: Error) => {
@@ -160,26 +206,187 @@ export class DishGrpcClient {
 
       const timer = setTimeout(() => finish(new Error('reflection 超时 (10s)')), 10000);
 
+      // 收集一个文件引用的**类型名**（bufbuild 解析单个文件不校验引用 ✓）。
+      //
+      // 为什么按类型名而不是按文件名：不同固件的 reflection 对
+      // file_by_filename 的支持程度不一，而 fileContainingSymbol 一定支持。
+      // 所以用"缺哪个类型就按类型名再要一次"的方式把依赖闭包补齐
+      // （grpcurl 的 describe 也是类似的依赖解析）。
+      const collectRefs = (bytes: Uint8Array): string[] => {
+        const refs = new Set<string>();
+        try {
+          const fp = fromBinary(FileDescriptorProtoSchema, bytes);
+          // 结构化类型（bufbuild v2 里是 DescMessage，不导出 MessageType 值）
+          // bufbuild v2 的 FieldDescriptorProto 直接给 typeName（全限定名）
+          type MsgLike = {
+            field: readonly { typeName?: string }[];
+            nestedType: readonly MsgLike[];
+          };
+          const visitMessage = (m: MsgLike): void => {
+            for (const f of m.field) {
+              // 只保留全限定名（含点）—— 标量名（double/string…）不是符号
+              if (f.typeName && f.typeName.includes('.')) {
+                refs.add(f.typeName.replace(/^\./, ''));
+              }
+            }
+            for (const nested of m.nestedType) visitMessage(nested);
+          };
+          for (const m of fp.messageType) visitMessage(m);
+          for (const sv of fp.service) {
+            for (const method of sv.method) {
+              if (method.inputType) refs.add(method.inputType.replace(/^\./, ''));
+              if (method.outputType) refs.add(method.outputType.replace(/^\./, ''));
+            }
+          }
+        } catch {
+          /* 解析不了就跳过，靠已知的文件内容继续 */
+        }
+        return [...refs];
+      };
+
+      const pump = () => {
+        while (pendingFiles.length) {
+          const file = pendingFiles.shift()!;
+          if (requestedFiles.has(file)) continue;
+          requestedFiles.add(file);
+          inFlight += 1;
+          stream.write({ fileContainingSymbol: file });
+        }
+        if (inFlight === 0 && pendingFiles.length === 0 && chunks.length) {
+          stream.end();
+        }
+      };
+
       stream.on('data', (msg: unknown) => {
         // 响应里描述符在 fileDescriptorResponse.fileDescriptorProto,
         // 不是 fileContainingSymbol (那是请求侧的字段名)
         const list = (msg as {
           fileDescriptorResponse?: { fileDescriptorProto?: Uint8Array[] };
         }).fileDescriptorResponse;
+        const errorResponse = (msg as { errorResponse?: { errorMessage?: string } }).errorResponse;
+        if (errorResponse?.errorMessage) {
+          // 某个依赖拉不到 ⇒ 不致命，继续用已有的文件
+          inFlight = Math.max(0, inFlight - 1);
+          pump();
+          return;
+        }
         if (list?.fileDescriptorProto?.length) {
           chunks.push(...list.fileDescriptorProto);
+          for (const b of list.fileDescriptorProto) {
+            for (const ref of collectRefs(b)) {
+              if (!requestedFiles.has(ref)) pendingFiles.push(ref);
+            }
+          }
+          inFlight = Math.max(0, inFlight - 1);
+          pump();
         }
       });
       stream.on('error', (e: Error) => finish(e));
       stream.on('end', () => finish());
 
+      inFlight += 1;
       stream.write({ fileContainingSymbol: symbol });
-      stream.end();
     });
   }
 
-  /** 调用 Handle, oneof 分支名必须是 camelCase */
-  private async call(request: Record<string, unknown>, timeoutMs: number): Promise<Record<string, unknown>> {
+  /**
+   * 同一个语义在不同固件上可能用不同的 oneof 分支名。
+   *
+   * 实测：某台真机（Windows 侧 192.168.100.1:9200）对 `getHistory` 返回
+   * `12 UNIMPLEMENTED` —— 分支名不对，**不是网络问题**（reflection 能拿到 proto，
+   * 说明协议层是通的）。而遮挡图分支叫 `dishGetObstructionMap`（带 dish 前缀），
+   * 说明这台固件倾向 `dishGet*` 命名。
+   *
+   * 所以：按候选列表依次试，**UNIMPLEMENTED 才换下一个**（其它错误码直接抛，
+   * 免得把真故障当成"换名字"糊弄过去）。
+   */
+  private async callWithFallback(
+    candidates: string[],
+    timeoutMs: number,
+    what: string,
+  ): Promise<{ res: Record<string, unknown>; branch: string }> {
+    let lastErr: Error | null = null;
+    for (const branch of candidates) {
+      try {
+        const res = await this.call({ id: Date.now() % 100000, [branch]: {} }, timeoutMs);
+        return { res, branch };
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+        if (!/code 12\b/.test(lastErr.message)) throw lastErr; // 非 UNIMPLEMENTED ⇒ 真错误
+      }
+    }
+    throw new Error(
+      `${what}：设备不认任何一个候选分支 (${candidates.join(', ')})；` +
+      `最后错误: ${lastErr?.message ?? '未知'}`
+    );
+  }
+
+  /**
+   * 探测设备支持哪些 oneof 分支（诊断用）。
+   *
+   * transport='native' ⇒ 只走 9200 原生 gRPC；'web' ⇒ 只走 9201 grpc-web；
+   * 'auto'（默认）⇒ 原生优先，失败自动切 grpc-web。
+   */
+  async probeBranches(
+    candidates: string[],
+    timeoutMs = 6000,
+    transport: 'auto' | 'native' | 'web' = 'auto',
+  ): Promise<{ name: string; ok: boolean; code: number; message: string; keys: string[] }[]> {
+    const out: { name: string; ok: boolean; code: number; message: string; keys: string[] }[] = [];
+    for (const name of candidates) {
+      try {
+        const req = { id: Date.now() % 100000, [name]: {} };
+        const res = transport === 'native'
+          ? await this.callNative(req, timeoutMs)
+          : transport === 'web'
+            ? await this.callViaGrpcWeb(req, timeoutMs)
+            : await this.call(req, timeoutMs);
+        out.push({ name, ok: true, code: 0, message: '', keys: Object.keys(res) });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const m = message.match(/\(code (\d+)\)/);
+        out.push({ name, ok: false, code: m ? Number(m[1]) : -1, message, keys: [] });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 从 reflection 拿到的描述符里抽出疑似消息/字段名（给��看的启发式清单）。
+   *
+   * 只是提示，不是权威 proto —— 但足以看出这台设备声明了哪些分支名。
+   */
+  async describeDeclaredNames(): Promise<string[]> {
+    const chunks = await this.rawDescriptorBytes();
+    const names = new Set<string>();
+    // 描述符里的字段名/消息名都是长度前缀的 UTF-8 串，直接扫可打印 ASCII 段
+    const merged = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    const text = merged.toString('latin1');
+    for (const m of text.matchAll(/[A-Za-z][A-Za-z0-9_]{3,63}/g)) {
+      const v = m[0];
+      // 过滤 protobufjs 生成的 "XxxH" 辅助类型，保留其余消息/服务名
+      if (/H$/.test(v) && /[A-Z]/.test(v.slice(-2, -1))) continue;
+      names.add(v);
+    }
+    return [...names].sort();
+  }
+
+  /** 取 reflection 返回的原始描述符字节（诊断用） */
+  private async rawDescriptorBytes(): Promise<Uint8Array[]> {
+    const address = `${this.host}:${this.port}`;
+    const probe = new grpc.Client(address, grpc.credentials.createInsecure());
+    try {
+      return await this.reflectFileContainingSymbol(probe, SYMBOL);
+    } finally {
+      probe.close();
+    }
+  }
+
+  /** 走原生 gRPC(9200) 调用 Handle */
+  private async callNative(
+    request: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> {
     const client = await this.connect();
     return new Promise((resolve, reject) => {
       client.Handle(
@@ -191,6 +398,161 @@ export class DishGrpcClient {
         }
       );
     });
+  }
+
+  /** 调用 Handle, oneof 分支名必须是 camelCase */
+  private async call(request: Record<string, unknown>, timeoutMs: number): Promise<Record<string, unknown>> {
+    if (this.useWebTransport) return this.callViaGrpcWeb(request, timeoutMs);
+
+    try {
+      return await this.callNative(request, timeoutMs);
+    } catch (err) {
+      // 原生 gRPC(9200) 不吃这个请求 ⇒ 换 grpc-web(9201) 再试一次。
+      // 两种传输都失败时，抛原始错误（原生那条信息更贴近现场）。
+      const original = err instanceof Error ? err : new Error(String(err));
+      try {
+        const res = await this.callViaGrpcWeb(request, timeoutMs);
+        this.useWebTransport = true;
+        console.warn('[DishGrpc] 原生 gRPC 不可用, 已切换到 grpc-web 传输');
+        return res;
+      } catch (webErr) {
+        console.warn(
+          '[DishGrpc] grpc-web 兜底也失败:',
+          webErr instanceof Error ? webErr.message : webErr,
+        );
+        throw original;
+      }
+    }
+  }
+
+  /**
+   * 走 grpc-web（HTTP/1.1 + 手工帧）调用 Handle。
+   *
+   * 请求体用 protobufjs 直接编码：reflection 拿到的描述符 → Request 类型。
+   * 注意 protobufjs 的 fromObject **只认 snake_case 字段名**，
+   * 所以这里把 camelCase 分支名映射回 proto 里的真实字段名。
+   */
+  private async callViaGrpcWeb(
+    request: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> {
+    const registry = await this.ensureRegistry();
+    const responseType = registry ? registry.getMessage(RESPONSE_SYMBOL) : null;
+
+    let payload: Uint8Array;
+    try {
+      if (!registry) throw new Error('registry 不可用');
+      const requestType = registry.getMessage(SYMBOL);
+      // camelCase 分支名 → proto 字段名（snake_case）
+      const branch = Object.keys(request).find((k) => k !== 'id');
+      const field = branch
+        ? [...requestType.fields.values()].find(
+            (f) => f.name.replace(/_(\w)/g, (_, c: string) => c.toUpperCase()) === branch,
+          )
+        : undefined;
+      if (!field || !field.message) throw new Error('描述符里没有对应的 Request 分支字段');
+      payload = toBinary(requestType, {
+        $typeName: SYMBOL,
+        id: BigInt(typeof request.id === 'number' ? request.id : 0),
+        [field.name]: { $typeName: field.message.typeName },
+      } as never);
+    } catch {
+      // 描述符里没有 Request 类型 ⇒ 按字段号手工编码
+      payload = this.encodeRequestManually(request);
+    }
+
+    // Handle 的完整方法路径：/SpaceX.API.Device.Device/Handle
+    const url = `http://${this.host}:${this.webPort}/SpaceX.API.Device.Device/Handle`;
+    let result;
+    try {
+      result = await grpcWebUnary(url, payload, timeoutMs);
+    } catch (err) {
+      // 统一成和原生 gRPC 一样的错误格式，便于上层/日志区分
+      const status = (err as { grpcStatus?: number }).grpcStatus;
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        typeof status === 'number'
+          ? `gRPC 调用失败: ${message} (code ${status})`
+          : `gRPC 调用失败: ${message}`,
+      );
+    }
+    if (result.bytes.length === 0) return {};
+    if (!responseType || !registry) {
+      throw new Error(
+        'grpc-web 通道有响应，但描述符不完整、无法解码（缺跨文件类型引用）',
+      );
+    }
+    // toJson 用 proto 的 JSON 名（camelCase）⇒ 与 proto-loader keepCase:false 的结果一致
+    return toJson(responseType, fromBinary(responseType, result.bytes), {
+      registry,
+    }) as Record<string, unknown>;
+  }
+
+  /**
+   * 手工编码 `{ id, <branch>: {} }` 请求（描述符缺 Request 类型时的兜底）。
+   *
+   * 线格式：id 走字段 1（varint），分支走 `字段号<<3|2` + 长度 0。
+   */
+  private encodeRequestManually(request: Record<string, unknown>): Uint8Array {
+    const branch = Object.keys(request).find((k) => k !== 'id');
+    const fieldNum = branch ? KNOWN_FIELD_NUMBERS[branch] : undefined;
+    if (fieldNum === undefined) {
+      throw new Error(
+        `无法编码请求：描述符里没有 Request 类型，且分支 ${branch ?? '(无)'} 没有已知字段号`,
+      );
+    }
+    const bytes: number[] = [];
+    const pushVarint = (value: number) => {
+      let v = value >>> 0;
+      while (v > 0x7f) {
+        bytes.push((v & 0x7f) | 0x80);
+        v >>>= 7;
+      }
+      bytes.push(v);
+    };
+    const id = typeof request.id === 'number' ? request.id : 0;
+    bytes.push(0x08);            // field 1 (id), varint
+    pushVarint(id);
+    pushVarint((fieldNum << 3) | 2);  // 分支字段，length-delimited
+    bytes.push(0x00);            // 长度 0 ⇒ 空消息
+    return Uint8Array.from(bytes);
+  }
+
+  /**
+   * 解析 reflection 描述符 → bufbuild registry（请求编码 + 响应解码都要用）。
+   *
+   * 注意：reflection 返回的是**一个个 FileDescriptorProto**，而
+   * `@bufbuild/protobuf` 的 registry 需要一个 FileDescriptorSet
+   * ⇒ 这里复用 packFileDescriptorSet() 把它们打包起来。
+   */
+  private async ensureRegistry(): Promise<ReturnType<typeof createFileRegistry>> {
+    if (this.registry) return this.registry;
+    if (!this.descriptorBytes) {
+      const address = `${this.host}:${this.port}`;
+      const probe = new grpc.Client(address, grpc.credentials.createInsecure());
+      try {
+        this.descriptorBytes = await this.reflectFileContainingSymbol(probe, SYMBOL);
+      } finally {
+        probe.close();
+      }
+    }
+    try {
+      // v2 的 createFileRegistry 收一个 FileDescriptorSet
+      const set = fromBinary(
+        FileDescriptorSetSchema,
+        packFileDescriptorSet(this.descriptorBytes),
+      );
+      this.registry = createFileRegistry(set);
+    } catch (err) {
+      // 描述符不完整（缺跨文件类型引用）⇒ registry 建不起来。
+      // 这时仍可以**发请求**（走手工字段号编码），只是解不了响应。
+      console.warn(
+        '[DishGrpc] 描述符不完整, registry 不可用:',
+        err instanceof Error ? err.message : err,
+      );
+      this.registry = null as never;
+    }
+    return this.registry;
   }
 
   /**
@@ -263,10 +625,12 @@ export class DishGrpcClient {
 
   /** 拉取 dish 状态 */
   async getStatus(timeoutMs = 8000): Promise<Record<string, unknown>> {
-    const res = await this.call({ id: Date.now() % 100000, getStatus: {} }, timeoutMs);
-    const status = res.dishGetStatus as Record<string, unknown> | undefined;
+    const { res, branch } = await this.callWithFallback(
+      ['getStatus', 'dishGetStatus'], timeoutMs, '拉取 dish 状态');
+    const status = (res.dishGetStatus ?? res.getStatus) as Record<string, unknown> | undefined;
     if (!status) {
-      throw new Error(`响应里没有 dishGetStatus (顶层键: ${Object.keys(res).join(', ')})`);
+      throw new Error(
+        `响应里没有 dishGetStatus (分支 ${branch}, 顶层键: ${Object.keys(res).join(', ')})`);
     }
     return status;
   }
@@ -285,10 +649,12 @@ export class DishGrpcClient {
    * - outages: 中断事件数组（关键：包含卫星切换）
    */
   async getHistory(timeoutMs = 8000): Promise<Record<string, unknown>> {
-    const res = await this.call({ id: Date.now() % 100000, getHistory: {} }, timeoutMs);
-    const history = res.dishGetHistory as Record<string, unknown> | undefined;
+    const { res, branch } = await this.callWithFallback(
+      ['getHistory', 'dishGetHistory'], timeoutMs, '拉取历史数据');
+    const history = (res.dishGetHistory ?? res.getHistory) as Record<string, unknown> | undefined;
     if (!history) {
-      throw new Error(`响应里没有 dishGetHistory (顶层键: ${Object.keys(res).join(', ')})`);
+      throw new Error(
+        `响应里没有 dishGetHistory (分支 ${branch}, 顶层键: ${Object.keys(res).join(', ')})`);
     }
     return history;
   }

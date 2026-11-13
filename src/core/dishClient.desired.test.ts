@@ -230,3 +230,34 @@ describe('deriveState（经由 parseStatus）—— 状态语义', () => {
     expect(t.state).toBe('ONLINE');
   });
 });
+
+// ── history 最新样本提取（真机数值只在 dish_get_history 里）────────────────
+describe('latestHistorySample', () => {
+  it('取各数组的最后一个元素（最新样本）', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    const sample = latestHistorySample({
+      popPingDropRate: [0.1, 0.2, 0.3],
+      popPingLatencyMs: [10, 20, 30],
+      downlinkThroughputBps: [100, 200, 300],
+      uplinkThroughputBps: [1, 2, 3],
+    });
+    expect(sample).toEqual({
+      dropRate: 0.3,
+      latencyMs: 30,
+      downlinkBps: 300,
+      uplinkBps: 3,
+    });
+  });
+
+  it('空数组/缺字段 ⇒ undefined（不编造 0）', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    expect(latestHistorySample({ popPingDropRate: [] })).toBeUndefined();
+    expect(latestHistorySample({})).toBeUndefined();
+  });
+
+  it('int64 用字符串表示时也能转成数字', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    const sample = latestHistorySample({ popPingLatencyMs: ['12', '34'] });
+    expect(sample?.latencyMs).toBe(34);
+  });
+});

@@ -13,6 +13,7 @@ import { getConfigManager } from '../config/manager';
 import { createGrafanaManager, GrafanaManager } from '../prometheus/grafana';
 import { CloudClient } from '../core/cloudClient';
 import { UpdateManager, UpdateState } from '../core/updater';
+import { runDishApiDump } from './dishApiDump';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -964,6 +965,24 @@ ipcMain.handle('run-traceroute', async (_event, target?: string) => {
 });
 
 app.whenReady().then(async () => {
+  // ── 诊断模式：--dump-dish-api ─────────────────────────────
+  // 打印完就退出，不开窗口、不启动采集。用来问设备「支持哪些 oneof 分支」。
+  if (process.argv.includes('--dump-dish-api')) {
+    const argv = process.argv;
+    const ipIdx = argv.indexOf('--dish-ip');
+    const portIdx = argv.indexOf('--dish-port');
+    const cfg = configManager.getConfig().collector;
+    const host = ipIdx >= 0 && argv[ipIdx + 1] ? argv[ipIdx + 1] : cfg.dishAddress;
+    const port = portIdx >= 0 && argv[portIdx + 1] ? Number(argv[portIdx + 1]) : cfg.dishPort;
+    try {
+      await runDishApiDump({ host, port });
+    } catch (err) {
+      console.error('[DishApiDump] 探测失败:', err);
+    }
+    app.exit(0);
+    return;
+  }
+
   // 后台预热种子数据, 不阻塞窗口显示
   warmupTLESeed();
 

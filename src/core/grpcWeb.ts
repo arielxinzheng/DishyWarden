@@ -113,3 +113,150 @@ export enum GrpcStatusCode {
 export function getGrpcStatusName(code: number): string {
   return GrpcStatusCode[code] || 'UNKNOWN';
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 客户端（主进程用）：直接向 dish 的 **9201 grpc-web 端口**发 unary 调用
+// ══════════════════════════════════════════════════════════════════
+//
+// 背景（真机实测，2026-11）：
+//   dish 的两个端口是**两套协议**：
+//     9200 = 原生 gRPC(HTTP/2) —— 反射服务在这里，能拿到完整 proto
+//     9201 = grpc-web(HTTP/1.1) —— 同一个 Handle 方法，真机上正常工作
+//   实测某些固件上 9200 的 Handle 会对我们用的请求分支回 `12 UNIMPLEMENTED`，
+//   而 9201 正常。dishylink 项目（实测文档 LOCAL-API.md）也是只用 9201 调 Handle。
+//
+// 帧格式（grpc-web）：
+//   1 字节标志 + 4 字节大端长度 + 负载
+//   0x00 = protobuf 消息；0x80 = 文本 trailers（"grpc-status: 0\r\n..."）
+//   出错时 grpc-status 可能只出现在 HTTP 响应头里（没有 body）。
+//
+// 注意：dish 的 "Referer guard" —— 带 Referer/Origin 的请求会回空的 200，
+// 所以这里不发这两个头（Node fetch 默认也不发）。
+
+const MESSAGE_FRAME = 0x00;
+const TRAILERS_FRAME = 0x80;
+
+export interface GrpcWebResult {
+  /** 响应消息负载（空数组 = 没有消息体） */
+  bytes: Uint8Array;
+  /** grpc-status（0 = OK） */
+  status: number;
+  /** grpc-message */
+  message: string;
+}
+
+export class GrpcWebError extends Error {
+  constructor(
+    public readonly grpcStatus: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GrpcWebError';
+  }
+}
+
+/** 把 protobuf 负载包成 grpc-web 消息帧 */
+export function encodeGrpcWebFrame(payload: Uint8Array): Uint8Array {
+  const frame = new Uint8Array(5 + payload.length);
+  frame[0] = MESSAGE_FRAME;
+  new DataView(frame.buffer).setUint32(1, payload.length, false);
+  frame.set(payload, 5);
+  return frame;
+}
+
+/** 解析 trailers 文本里的 grpc-status / grpc-message */
+export function parseGrpcWebTrailers(text: string): { status: number; message: string } {
+  let status = 0;
+  let message = '';
+  for (const line of text.split(/\r?\n/)) {
+    const idx = line.indexOf(':');
+    if (idx < 0) continue;
+    const key = line.slice(0, idx).trim().toLowerCase();
+    const value = line.slice(idx + 1).trim();
+    if (key === 'grpc-status') status = Number(value);
+    else if (key === 'grpc-message') message = decodeURIComponent(value);
+  }
+  return { status, message };
+}
+
+/**
+ * 发一次 grpc-web unary 调用。
+ *
+ * @param url 形如 `http://192.168.100.1:9201/SpaceX.API.Device.Device/Handle`
+ * @param payload 已编码的 protobuf 请求体
+ */
+export async function grpcWebUnary(
+  url: string,
+  payload: Uint8Array,
+  timeoutMs = 8000,
+): Promise<GrpcWebResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/grpc-web+proto',
+        'accept': 'application/grpc-web+proto',
+        'x-grpc-web': '1',
+        te: 'trailers',
+      },
+      // 用 ArrayBuffer 传体：TS 5.7+ 的 Uint8Array<ArrayBufferLike> 与 DOM 的
+      // BodyInit 定义对不上（Buffer/视图会被判不兼容）
+      body: (() => {
+        const frame = encodeGrpcWebFrame(payload);
+        return frame.buffer.slice(
+          frame.byteOffset,
+          frame.byteOffset + frame.byteLength,
+        ) as ArrayBuffer;
+      })(),
+      signal: controller.signal,
+    });
+
+    const body = new Uint8Array(await res.arrayBuffer());
+
+    const headerStatus = res.headers.get('grpc-status');
+    const headerMessage = res.headers.get('grpc-message') ?? '';
+    if (!res.ok && body.length === 0) {
+      throw new GrpcWebError(
+        headerStatus ? Number(headerStatus) : res.status,
+        headerMessage || `HTTP ${res.status}`,
+      );
+    }
+
+    let bytes = new Uint8Array(0);
+    let status = headerStatus ? Number(headerStatus) : 0;
+    let message = headerMessage;
+
+    let offset = 0;
+    while (offset + 5 <= body.length) {
+      const flag = body[offset];
+      const length = new DataView(
+        body.buffer,
+        body.byteOffset + offset + 1,
+        4,
+      ).getUint32(0, false);
+      const start = offset + 5;
+      const end = start + length;
+      if (end > body.length) break;
+      if (flag === MESSAGE_FRAME) {
+        bytes = body.slice(start, end);
+      } else if (flag === TRAILERS_FRAME) {
+        const parsed = parseGrpcWebTrailers(new TextDecoder().decode(body.slice(start, end)));
+        status = parsed.status;
+        message = parsed.message;
+      } else {
+        throw new Error(`grpc-web 帧标志不支持: 0x${flag.toString(16)}`);
+      }
+      offset = end;
+    }
+
+    // 非 0 状态在这里就抛 —— 调用方不必各自记得检查 status
+    if (status !== 0) {
+      throw new GrpcWebError(status, message || `grpc-status ${status}`);
+    }
+    return { bytes, status, message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
