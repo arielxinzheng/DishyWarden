@@ -9,6 +9,7 @@
     "electron:dev": "wait-on http://localhost:5173 && cross-env NODE_ENV=development tsx src/main/dev.ts",
     "electron:build": "tsx scripts/build-electron.mjs",
     "build": "vite build && npm run electron:build && electron-builder",
+    "build:win": "vite build && npm run electron:build && electron-builder --win nsis --x64 --publish never --config.win.signAndEditExecutable=false",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "download-prometheus": "node scripts/download-prometheus.mjs",
@@ -95,7 +96,8 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "resources/**/*"
+      "resources/**/*",
+      "src/renderer/assets/tle-seed.json.gz"
     ],
     "mac": {
       "target": [
@@ -129,5 +131,8 @@
     "esbuild@0.25.12": true,
     "esbuild@0.28.2": true,
     "better-sqlite3@13.0.3": true
+  },
+  "author": {
+    "name": "DishyWarden"
   }
 }

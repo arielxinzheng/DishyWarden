@@ -68,6 +68,9 @@ export interface NotificationContext {
   title?: string;
 }
 
+/** Telegram 单次请求超时（毫秒）—— 与 webhook 默认口径一致 */
+const TELEGRAM_TIMEOUT_MS = 5000;
+
 export class Notifier {
   constructor(private config: NotificationConfig) {}
 
@@ -136,6 +139,14 @@ export class Notifier {
 
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
+    // 超时控制：Node 的 fetch **默认没有超时**。目标被黑洞(连不上的测试网、
+    // 被墙的 API)时 fetch 会一直挂到 OS 的 TCP 超时(可达数分钟)。
+    // 告警分发是串行 await 的 ⇒ 一个挂住的通道会把后面所有通道一起堵死
+    // (表现为"告警发不出去")。与 webhook 通道保持同一个 5s 口径。
+    const timeoutMs = TELEGRAM_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -145,6 +156,7 @@ export class Notifier {
           text: message,
           parse_mode: 'HTML',
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -152,7 +164,13 @@ export class Notifier {
       }
     } catch (error) {
       console.error('Failed to send Telegram notification:', error);
+      if (controller.signal.aborted) {
+        throw new Error(`请求超时（${timeoutMs}ms）`);
+      }
       throw error;
+    } finally {
+      // 必须清掉定时器 —— 否则它会吊住事件循环最多 5s（发送成功也是）
+      clearTimeout(timer);
     }
   }
 
