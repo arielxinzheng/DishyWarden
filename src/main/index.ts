@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -68,6 +69,29 @@ function initCloudServices(): void {
   });
 }
 
+/**
+ * 解析应用图标路径。
+ *
+ * 打包后图标在 app 根目录的 build/icon.png（已在 build.files 白名单里）；
+ * 开发态用项目根目录的同一个文件。两处都找不到时返回 undefined ——
+ * Electron 会退回默认图标，不该因此起不来。
+ */
+function resolveAppIcon(): string | undefined {
+  const candidates = [
+    path.join(app.getAppPath(), 'build', 'icon.png'),
+    path.join(__dirname, '../../build/icon.png'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      /* 读不到就换下一个 */
+    }
+  }
+  console.warn('[Main] 未找到应用图标 build/icon.png，使用 Electron 默认图标');
+  return undefined;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -75,6 +99,12 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 700,
     backgroundColor: '#0a0a0a', // 深色背景，匹配应用 dark mode
+    // 窗口/任务栏图标。
+    // Windows 上任务栏与 Alt-Tab 用的是**窗口图标**，不是 exe 内嵌图标 ——
+    // 而 exe 内嵌图标要靠 rcedit 写（macOS 上需要 wine，wine 4.0.1 在新版
+    // macOS 上根本跑不起来）。这里直接指定 PNG，绕开 exe 资源编辑，
+    // 任务栏/Alt-Tab/标题栏图标都能正确显示。
+    icon: resolveAppIcon(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

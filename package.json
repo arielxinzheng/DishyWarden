@@ -9,7 +9,7 @@
     "electron:dev": "wait-on http://localhost:5173 && cross-env NODE_ENV=development tsx src/main/dev.ts",
     "electron:build": "tsx scripts/build-electron.mjs",
     "build": "vite build && npm run electron:build && electron-builder",
-    "build:win": "vite build && npm run electron:build && electron-builder --win nsis --x64 --publish never --config.win.signAndEditExecutable=false",
+    "build:win": "bash scripts/build-win.sh",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "download-prometheus": "node scripts/download-prometheus.mjs",
@@ -97,7 +97,8 @@
       "dist/**/*",
       "dist-electron/**/*",
       "resources/**/*",
-      "src/renderer/assets/tle-seed.json.gz"
+      "src/renderer/assets/tle-seed.json.gz",
+      "build/icon.png"
     ],
     "mac": {
       "target": [
