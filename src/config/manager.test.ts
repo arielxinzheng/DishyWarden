@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { CLOUD_ENDPOINT, UPDATE_FEED_URL } from './manager';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,10 +44,10 @@ describe('ConfigManager · cloud 段落兼容', () => {
     const manager = new ConfigManager();
     const cloud = manager.getConfig().cloud;
 
-    expect(cloud.endpoint).toBe('');
+    expect(cloud.endpoint).toBe(CLOUD_ENDPOINT); // 后台常量, 用户不可改
     expect(cloud.clientId).toBe('');
     expect(cloud.feedbackEnabled).toBe(false);
-    expect(cloud.updateFeedUrl).toBe('');
+    expect(cloud.updateFeedUrl).toBe(UPDATE_FEED_URL);
     expect(cloud.checkIntervalHours).toBe(12);
   });
 
@@ -62,14 +63,14 @@ describe('ConfigManager · cloud 段落兼容', () => {
 
     // 这行以前会直接抛 TypeError（loaded.cloud 是 undefined）
     expect(() => manager.getConfig().cloud.endpoint).not.toThrow();
-    expect(manager.getConfig().cloud.endpoint).toBe('');
+    expect(manager.getConfig().cloud.endpoint).toBe(CLOUD_ENDPOINT);
     expect(manager.getConfig().cloud.checkIntervalHours).toBe(12);
   });
 
-  it('已有的 cloud 配置应被保留,不被默认值覆盖', () => {
+  it('已有 cloud 配置: 用户意愿字段保留, endpoint/feed 强制用后台常量', () => {
     writeConfig({
       cloud: {
-        endpoint: 'https://cloud.example.com',
+        endpoint: 'https://cloud.example.com', // 老版本存下来的，必须被覆盖
         clientId: 'abc-123',
         feedbackEnabled: true,
         updateFeedUrl: 'https://example.com/latest.yml',
@@ -80,7 +81,10 @@ describe('ConfigManager · cloud 段落兼容', () => {
 
     const cloud = new ConfigManager().getConfig().cloud;
 
-    expect(cloud.endpoint).toBe('https://cloud.example.com');
+    // endpoint / updateFeedUrl 由后台固定（防填错、防指向第三方）
+    expect(cloud.endpoint).toBe(CLOUD_ENDPOINT);
+    expect(cloud.updateFeedUrl).toBe(UPDATE_FEED_URL);
+    // 其余是用户意愿，照旧保留
     expect(cloud.clientId).toBe('abc-123');
     expect(cloud.feedbackEnabled).toBe(true);
     expect(cloud.checkIntervalHours).toBe(6);
@@ -95,14 +99,28 @@ describe('ConfigManager · cloud 段落兼容', () => {
     const cloud = manager.getConfig().cloud;
     expect(cloud.clientId).toBe('uuid-0001');
     expect(cloud.feedbackEnabled).toBe(true);
-    expect(cloud.endpoint).toBe('');
+    expect(cloud.endpoint).toBe(CLOUD_ENDPOINT); // 后台常量, 用户不可改
   });
 
   it('updateCloudConfig 应落盘,重开管理器仍在', () => {
     const manager = new ConfigManager();
-    manager.updateCloudConfig({ endpoint: 'https://cloud.example.com' });
+    manager.updateCloudConfig({ feedbackEnabled: true });
 
     const reopened = new ConfigManager();
-    expect(reopened.getConfig().cloud.endpoint).toBe('https://cloud.example.com');
+    expect(reopened.getConfig().cloud.feedbackEnabled).toBe(true);
+  });
+
+  it('updateCloudConfig 不采纳 endpoint / updateFeedUrl（防篡改渲染层）', () => {
+    const manager = new ConfigManager();
+    manager.updateCloudConfig({
+      endpoint: 'https://evil.example.com',
+      updateFeedUrl: 'https://evil.example.com/latest.yml',
+      feedbackEnabled: true,
+    });
+
+    const cloud = manager.getConfig().cloud;
+    expect(cloud.endpoint).toBe(CLOUD_ENDPOINT);
+    expect(cloud.updateFeedUrl).toBe(UPDATE_FEED_URL);
+    expect(cloud.feedbackEnabled).toBe(true);
   });
 });

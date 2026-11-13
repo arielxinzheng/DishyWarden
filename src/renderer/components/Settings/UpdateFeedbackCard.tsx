@@ -5,8 +5,10 @@
  *
  * ## 设计要点
  *
- * - **默认什么都不做**：云端地址与更新源都留空 ⇒ 不上报、不检查更新。
- *   这样云端服务没上线时客户端可以照常发布，不会有任何噪音。
+ * - **云端地址与更新源由后台固定**（`config/manager.ts` 的 CLOUD_ENDPOINT /
+ *   UPDATE_FEED_URL），界面不暴露 —— 用户填错一个字符上报就会静默全失败，
+ *   而且这两个地址本来就只有"部署事实"一个正确答案。
+ *   卡片只留用户真正能决定的东西：是否上报告警误报样本、以及升级动作。
  * - **失败静默**：检查更新失败只在卡片里显示一行文字，不弹窗、不打扰
  *   （升级嗅探绝不能影响 7×24 监控主职）。
  * - **用户确认后才下载**（需求 2.8.2）：发现新版本只提示，
@@ -17,7 +19,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Download, RefreshCw, Save, ShieldCheck, Upload } from 'lucide-react';
@@ -55,16 +56,13 @@ export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
 
   // 表单本地状态：设置页的总保存按钮是分段保存（不含 cloud 段），
   // 所以这块自己管一份，保存走独立的 update-cloud-config。
-  const [endpoint, setEndpoint] = useState(cloud?.endpoint ?? '');
-  const [updateFeedUrl, setUpdateFeedUrl] = useState(cloud?.updateFeedUrl ?? '');
+  // 端点/更新源不在表单里（后台固定），这里只管用户意愿。
   const [feedbackEnabled, setFeedbackEnabled] = useState(cloud?.feedbackEnabled ?? false);
 
   // 配置被重新加载（首次加载 / 点重置）时同步一次
   useEffect(() => {
-    setEndpoint(cloud?.endpoint ?? '');
-    setUpdateFeedUrl(cloud?.updateFeedUrl ?? '');
     setFeedbackEnabled(cloud?.feedbackEnabled ?? false);
-  }, [cloud?.endpoint, cloud?.updateFeedUrl, cloud?.feedbackEnabled]);
+  }, [cloud?.feedbackEnabled]);
 
   // 拉一次初始状态 + 订阅后续变化
   useEffect(() => {
@@ -117,12 +115,9 @@ export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await api.updateCloudConfig({
-        endpoint,
-        updateFeedUrl,
-        feedbackEnabled,
-        checkIntervalHours: cloud?.checkIntervalHours ?? 12,
-      });
+      // 只送用户意愿字段 —— endpoint / updateFeedUrl 由后台常量固定，
+      // 主进程与 ConfigManager 都只接受这三个
+      const result = await api.updateCloudConfig({ feedbackEnabled });
       if (result?.success) {
         setSaved(true);
         setTimeout(() => setSaved(false), 2500);
@@ -132,7 +127,7 @@ export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
     } finally {
       setSaving(false);
     }
-  }, [endpoint, updateFeedUrl, feedbackEnabled, cloud, t]);
+  }, [feedbackEnabled, t]);
 
   const status = updateState?.status ?? 'idle';
   const statusKey: Record<UpdateStatus, string> = {
@@ -217,34 +212,6 @@ export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
               {t('settings:cloud.install_restart')}
             </Button>
           )}
-        </div>
-
-        {/* 云端地址 */}
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="cloud-endpoint">
-            {t('settings:cloud.endpoint_label')}
-          </label>
-          <Input
-            id="cloud-endpoint"
-            value={endpoint}
-            placeholder={t('settings:cloud.endpoint_placeholder')}
-            onChange={(e) => setEndpoint(e.target.value)}
-          />
-          <p className="text-xs opacity-70">{t('settings:cloud.endpoint_hint')}</p>
-        </div>
-
-        {/* 更新源 */}
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="cloud-feed">
-            {t('settings:cloud.feed_label')}
-          </label>
-          <Input
-            id="cloud-feed"
-            value={updateFeedUrl}
-            placeholder={t('settings:cloud.feed_placeholder')}
-            onChange={(e) => setUpdateFeedUrl(e.target.value)}
-          />
-          <p className="text-xs opacity-70">{t('settings:cloud.feed_hint')}</p>
         </div>
 
         {/* 匿名反馈开关 */}

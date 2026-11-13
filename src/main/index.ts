@@ -577,9 +577,10 @@ ipcMain.handle('install-update', (_event, params?: { toVersion?: string }) => {
  * IPC 处理器：保存云端配置（地址 / 反馈开关 / 更新源）
  */
 ipcMain.handle('update-cloud-config', (_event, params: {
-  endpoint?: string;
+  // endpoint / updateFeedUrl 不在可写字段里 —— 由后台常量固定
+  // （见 config/manager.ts 的 CLOUD_ENDPOINT / UPDATE_FEED_URL）
+  clientId?: string;
   feedbackEnabled?: boolean;
-  updateFeedUrl?: string;
   checkIntervalHours?: number;
 }) => {
   try {

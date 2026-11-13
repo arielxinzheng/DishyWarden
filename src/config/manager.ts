@@ -99,6 +99,29 @@ export interface CloudConfig {
   checkIntervalHours: number;
 }
 
+/**
+ * 云端服务端点 —— **由后台固定，设置页不再暴露**。
+ *
+ * 云端已部署在 cloud.dishywarden.com（见 CloudServer/DEPLOYMENT-STATUS.md）。
+ * 不交给用户配置的理由：
+ * 1. 填错一个字符 ⇒ 上报静默全失败（上报本身刻意不抛错，用户永远发现不了）
+ * 2. 旧版本把「留空」当作关闭上传的开关，留着旧值会让上报永久失效
+ * 3. 可被诱导指向第三方 ⇒ 数据外流
+ * 4. 部署事实只有一个，没有"让用户自己填"的必要
+ */
+export const CLOUD_ENDPOINT = 'https://cloud.dishywarden.com';
+
+/**
+ * 更新源 feed —— 同样后台固定。
+ *
+ * 目前**留空**：云端只提供 /healthz 与 /api/feedback，还没有发布通道；
+ * 空串 = 不检查更新（Updater 进入 disabled，界面显示「更新通道未开放」）。
+ * 等 GitHub Releases 通道就位后把这里换成
+ * https://github.com/<owner>/dishywarden/releases/latest/download/latest.yml
+ * 即可，设置页无需任何改动。
+ */
+export const UPDATE_FEED_URL = '';
+
 export interface AppConfig {
   collector: CollectorConfig;
   prometheus: PrometheusConfig;
@@ -210,12 +233,12 @@ const DEFAULT_CONFIG: AppConfig = {
     ],
   },
   cloud: {
-    // 默认全部留空 ⇒ 客户端完全不触云。
-    // 云端服务上线后在设置页填 endpoint / updateFeedUrl 即可，无需改代码。
-    endpoint: '',
+    // endpoint / updateFeedUrl 由后台常量固定，设置页不再暴露（见文件上方注释）。
+    // feedbackEnabled 默认 false —— 隐私红线：误报上报必须 opt-in。
+    endpoint: CLOUD_ENDPOINT,
     clientId: '',
     feedbackEnabled: false,
-    updateFeedUrl: '',
+    updateFeedUrl: UPDATE_FEED_URL,
     checkIntervalHours: 12,
   },
   version: '0.1.0',
@@ -296,7 +319,16 @@ export class ConfigManager {
       },
       // 云端配置: 老配置文件里没有这一段 ⇒ 必须用默认值兜底,
       // 否则 loaded.cloud 是 undefined, 读 .cloud.endpoint 直接抛。
-      cloud: { ...defaults.cloud, ...loaded.cloud },
+      //
+      // ⚠️ endpoint / updateFeedUrl 是后台常量，**不采纳**本地存的值：
+      //    老用户库里可能存着空串（当时靠"留空"关闭上传）或填错的地址，
+      //    沿用旧值会让上报永久失效。放在 spread 之后强制覆盖 = 自愈。
+      cloud: {
+        ...defaults.cloud,
+        ...loaded.cloud,
+        endpoint: CLOUD_ENDPOINT,
+        updateFeedUrl: UPDATE_FEED_URL,
+      },
       version: loaded.version || defaults.version,
     };
   }
@@ -374,8 +406,21 @@ export class ConfigManager {
   /**
    * 更新云端配置(地址 / 反馈开关 / 更新源)
    */
+  /**
+   * 更新云端配置。
+   *
+   * ⚠️ 只接受 clientId / feedbackEnabled / checkIntervalHours 三个字段。
+   * endpoint 与 updateFeedUrl 由后台常量固定（CLOUD_ENDPOINT / UPDATE_FEED_URL），
+   * 渲染层传什么都不采纳 —— 否则一个被篡改的渲染层就能把上报指向第三方。
+   */
   updateCloudConfig(config: Partial<CloudConfig>): void {
-    this.config.cloud = { ...this.config.cloud, ...config };
+    const { clientId, feedbackEnabled, checkIntervalHours } = config;
+    this.config.cloud = {
+      ...this.config.cloud,
+      ...(clientId !== undefined ? { clientId } : {}),
+      ...(feedbackEnabled !== undefined ? { feedbackEnabled } : {}),
+      ...(checkIntervalHours !== undefined ? { checkIntervalHours } : {}),
+    };
     this.save(this.config);
   }
 

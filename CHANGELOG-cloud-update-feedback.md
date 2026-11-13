@@ -100,3 +100,40 @@ npm run electron:build                      # esbuild 通过，electron-updater 
 
 铁律：**必须在 `app.isPackaged` 判断之后才加载 electron-updater**；
 开发态直接判定 `disabled`（理由 `dev_mode`），不抛异常、不影响监控主职。
+
+---
+
+## 7. 变更：云端地址与更新源改为后台固定（2026-11-13）
+
+### 为什么
+
+设置页原来把 `endpoint`（云端地址）和 `updateFeedUrl`（更新源）交给用户填。问题：
+
+1. **填错一个字符 ⇒ 上报静默全失败** —— `CloudClient.report()` 刻意不抛错、不记日志
+   （上报失败绝不能影响监控主职），用户永远发现不了自己填错了
+2. **旧值会永久污染** —— 老版本用「留空」表示关闭上传，配置文件里存着 `endpoint: ""`，
+   云端上线后这个空串会让上报一直失效
+3. **可被诱导指向第三方** —— 这是数据外流口子
+4. 这两个地址本来只有「部署事实」一个正确答案
+
+### 改了什么
+
+| 位置 | 改动 |
+|---|---|
+| `src/config/manager.ts` | 新增导出常量 `CLOUD_ENDPOINT = 'https://cloud.dishywarden.com'`、`UPDATE_FEED_URL = ''`（云端暂无发布通道）；`DEFAULT_CONFIG.cloud` 用它们 |
+| `mergeConfig()` | `endpoint` / `updateFeedUrl` 放在 spread **之后**强制覆盖 ⇒ 老配置存着空串或错地址也能自愈 |
+| `updateCloudConfig()` | 只接受 `clientId` / `feedbackEnabled` / `checkIntervalHours`；渲染层传 endpoint 一律不采纳（防篡改渲染层） |
+| `src/main/index.ts` | IPC `update-cloud-config` 参数类型同步收窄 |
+| `UpdateFeedbackCard.tsx` | 删掉两个输入框 + 相关本地状态；保存只送 `{ feedbackEnabled }` |
+| `locales/*/settings.json` | 删 6 个键（`endpoint_*` / `feed_*`）；`status_disabled` 措辞从「未配置更新源」改为「更新通道未开放」（现在不是"用户没配"，是后台还没有发布通道） |
+
+隐私口径**不变**：`feedbackEnabled` 默认 `false`，误报上报仍需用户显式开启且首次弹确认框。
+
+### 验证
+
+- 单测：配置 6 例（含「老配置空 endpoint 自愈」「updateCloudConfig 不采纳 endpoint」）
+- 全量 35 文件 485 测试全过；tsc 双配置 0 错误
+- 真机：重启后 `config.json` 的 `endpoint` 从 `""` 自动变成
+  `https://cloud.dishywarden.com`，`clientId` 保留、`feedbackEnabled` 仍为 `false`；
+  `https://cloud.dishywarden.com/healthz` 实测 HTTP 200
+- 设置页实测：卡片只剩「版本 / 状态 / 检查更新 / 上报开关 / 保存」，不再有云端地址与更新源两个输入框
