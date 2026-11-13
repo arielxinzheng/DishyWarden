@@ -1264,18 +1264,25 @@ function RouteTraceCard({
                     <span className="w-5 text-right font-mono text-slate-500 shrink-0">
                       {hop.hop}
                     </span>
-                    {/* 6.5rem 能容纳 15 字符的 IPv4（11px 等宽约 6.6px/字符），
-                        用 w-24(96px) 会把 "162.245.124.201" 截成 "…24.2…" */}
-                    <span
-                      className="w-[6.5rem] font-mono text-slate-200 truncate shrink-0"
-                      title={hop.ip ?? undefined}
-                    >
-                      {hop.ip || '*'}
-                    </span>
-                    {/* 反查失败时 hostname 就是 IP 本身，不重复显示 */}
-                    <span className="flex-1 min-w-0 truncate text-slate-400" title={hop.hostname}>
-                      {hop.hostname === hop.ip ? '' : hop.hostname}
-                    </span>
+                    {/* IP 与主机名放在**同一列的上下两行**：
+                        卡片行宽只有 ~280px，四列平铺时主机名列只分到 ~47px，
+                        "xe-0-1-0.gw8.sjc7.alter.net" 会被截成 "xe-0-1…"（等于没显示）。
+                        上下两行后两者各得 ~150px，IP 完整、主机名可读；
+                        只有「有名字的跳」才多占一行，无名字/超时跳仍是单行。 */}
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className="font-mono text-slate-200 truncate"
+                        title={hop.ip ?? undefined}
+                      >
+                        {hop.ip || '*'}
+                      </div>
+                      {/* 反查失败时 hostname 就是 IP 本身；超时跳的第二行与右侧超时标记重复，都不显示 */}
+                      {hop.ip !== null && hop.hostname !== hop.ip && (
+                        <div className="text-slate-400 truncate" title={hop.hostname}>
+                          {hop.hostname}
+                        </div>
+                      )}
+                    </div>
                     <span
                       className={`w-14 text-right font-mono shrink-0 ${
                         hop.rtt === null

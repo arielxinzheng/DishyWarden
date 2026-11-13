@@ -19,6 +19,7 @@
  */
 
 import { exec } from 'child_process';
+import { promises as dnsPromises } from 'dns';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -57,10 +58,15 @@ export function buildTraceCommand(
 ): string {
   if (platform === 'win32') {
     // Windows 的 tracert **没有**探测次数参数，固定 3 次 —— 降不下来
-    return `tracert -h ${opts.maxHops} -w ${opts.hopTimeout * 1000} ${target}`;
+    // -d: 不做反向 DNS 解析（理由同 Unix 的 -n）
+    return `tracert -h ${opts.maxHops} -w ${opts.hopTimeout * 1000} -d ${target}`;
   }
-  // macOS/Linux: -m 最大跳数, -q 每跳探测次数, -w 单跳超时(秒)
-  return `traceroute -m ${opts.maxHops} -q ${opts.probes} -w ${opts.hopTimeout} ${target}`;
+  // macOS/Linux: -m 最大跳数, -q 每跳探测次数, -w 单跳超时(秒), -n 不做反向 DNS
+  //
+  // ⚠️ -n 是刻意的：系统自带的逐跳反查在应用进程里实测每跳约 2.4s
+  //   （15 跳就是 30s+，必然撞总超时，只拿到半截路径）。
+  //   反查改由应用侧并发做，见 enrichHopHostnames。
+  return `traceroute -m ${opts.maxHops} -q ${opts.probes} -w ${opts.hopTimeout} -n ${target}`;
 }
 
 /**
@@ -95,9 +101,12 @@ export async function traceroute(
       maxBuffer: 1024 * 1024, // 1MB
     });
 
-    const hops = platform === 'win32'
+    const rawHops = platform === 'win32'
       ? parseWindowsTraceroute(stdout)
       : parseUnixTraceroute(stdout);
+
+    // 补主机名：命令用 -n 跳过了系统反查，这里并发补一次（总预算 1.5s）
+    const hops = await enrichHopHostnames(rawHops, { timeoutMs: 1500 });
 
     // 「是否到达目的地」不能只看最后一跳有没有 IP。
     // 每跳只探 1 次时，目的地之前的跳丢一个包就是 "*"，把结论误判成"未到达"。
@@ -188,6 +197,80 @@ function extractPartialOutput(error: any): string | null {
  * slice(1) 会把唯一的数据行当标题丢掉, 结果 0 hops。
  * 标题行本来就能被 hopMatch 过滤掉, 所以不过滤。
  */
+/**
+ * 反查单个 IP 的 PTR 记录；超时或失败返回 null。
+ *
+ * 用 Promise.race 套一层超时 —— 系统解析器没有超时参数，遇到慢 DNS 会一直挂着。
+ */
+async function reverseOne(
+  reverse: (ip: string) => Promise<string>,
+  ip: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+
+  try {
+    const settled = await Promise.race([reverse(ip).catch(() => null), timeout]);
+    if (!settled) return null;
+    const name = settled.trim();
+    // 有的解析器失败时会把 IP 原样返回，那不是主机名
+    return name && name !== ip ? name : null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 默认反查实现 */
+async function defaultReverse(ip: string): Promise<string> {
+  const names = await dnsPromises.reverse(ip);
+  return names[0] ?? ip;
+}
+
+export interface HostnameEnrichOptions {
+  /** 每个反查等待多久（并发执行，总耗时≈这个值），默认 1500ms */
+  timeoutMs?: number;
+  /** 注入用：默认 dns.promises.reverse */
+  reverse?: (ip: string) => Promise<string>;
+}
+
+/**
+ * 给跳补主机名（应用侧反查）。
+ *
+ * 背景：traceroute 命令用 `-n` 不做反查（系统逐跳反查在应用进程里太慢，
+ * 15 跳能干到 30s+）。这里对**有响应且还没名字**的跳并发查一次 PTR，
+ * 总预算 timeoutMs 一到就收手：查到填主机名，查不到保持 IP。
+ */
+export async function enrichHopHostnames(
+  hops: TraceHop[],
+  options: HostnameEnrichOptions = {},
+): Promise<TraceHop[]> {
+  const timeoutMs = options.timeoutMs ?? 1500;
+  const reverse = options.reverse ?? defaultReverse;
+
+  // 只查有 IP 但还没名字的跳（超时跳的 hostname 是 '* (超时)'，跳过）
+  const pending = hops.filter((h) => h.ip !== null && h.hostname === h.ip);
+  if (pending.length === 0) return hops;
+
+  const names = await Promise.all(
+    pending.map((h) => reverseOne(reverse, h.ip as string, timeoutMs)),
+  );
+
+  const resolved = new Map<number, string>();
+  pending.forEach((h, index) => {
+    const name = names[index];
+    if (name) resolved.set(h.hop, name);
+  });
+  if (resolved.size === 0) return hops;
+
+  return hops.map((h) => {
+    const name = resolved.get(h.hop);
+    return name ? { ...h, hostname: name } : h;
+  });
+}
+
 /** 从输出头部解析目标 IP —— 判断「是否真的到达目的地」的唯一可靠依据 */
 export function parseTargetIpFromHeader(output: string): string | null {
   // Unix:  traceroute to example.com (203.0.113.5), 15 hops max, 40 byte packets

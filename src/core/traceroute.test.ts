@@ -10,6 +10,7 @@ import {
   parseWindowsTraceroute,
   parseTargetIpFromHeader,
   buildTraceCommand,
+  enrichHopHostnames,
 } from './traceroute';
 
 describe('traceroute.ts - Unix 输出解析', () => {
@@ -253,7 +254,7 @@ describe('traceroute.ts - 命令构造', () => {
       hopTimeout: 2,
       probes: 1,
     });
-    expect(cmd).toBe('traceroute -m 15 -q 1 -w 2 example.com');
+    expect(cmd).toBe('traceroute -m 15 -q 1 -w 2 -n example.com');
   });
 
   it('Linux 同样是 traceroute 语法', () => {
@@ -262,7 +263,7 @@ describe('traceroute.ts - 命令构造', () => {
       hopTimeout: 3,
       probes: 2,
     });
-    expect(cmd).toBe('traceroute -m 10 -q 2 -w 3 10.0.0.1');
+    expect(cmd).toBe('traceroute -m 10 -q 2 -w 3 -n 10.0.0.1');
   });
 
   it('Windows 用 tracert，没有探测次数参数', () => {
@@ -271,7 +272,7 @@ describe('traceroute.ts - 命令构造', () => {
       hopTimeout: 2,
       probes: 1,
     });
-    expect(cmd).toBe('tracert -h 15 -w 2000 example.com');
+    expect(cmd).toBe('tracert -h 15 -w 2000 -d example.com');
     expect(cmd).not.toContain('-q');
   });
 });
@@ -321,5 +322,65 @@ describe('traceroute.ts - 单探测的超时跳（-q 1）', () => {
     expect(hops).toHaveLength(3);
     expect(hops.map((h) => h.hop)).toEqual([1, 2, 3]);
     expect(hops[1]).toEqual({ hop: 2, ip: null, hostname: '* (超时)', rtt: null });
+  });
+});
+
+
+describe('traceroute.ts - 应用侧反查补全主机名', () => {
+  const hops = () => [
+    { hop: 1, ip: null, hostname: '* (超时)', rtt: null },
+    { hop: 2, ip: '10.11.80.1', hostname: '10.11.80.1', rtt: 5.2 },
+    { hop: 3, ip: '203.0.113.9', hostname: '203.0.113.9', rtt: 30.1 },
+    { hop: 4, ip: '198.51.100.4', hostname: '198.51.100.4', rtt: 40.2 },
+  ];
+
+  it('查到的填主机名，查不到的保持 IP', async () => {
+    const reverse = async (ip: string) => {
+      if (ip === '10.11.80.1') return 'gw.local';
+      throw new Error('SERVFAIL');
+    };
+    const out = await enrichHopHostnames(hops(), { reverse, timeoutMs: 200 });
+
+    expect(out[1].hostname).toBe('gw.local');
+    expect(out[2].hostname).toBe('203.0.113.9'); // 查不到 ⇒ 还是 IP
+    expect(out[3].hostname).toBe('198.51.100.4');
+  });
+
+  it('超时跳不参与反查', async () => {
+    const calls: string[] = [];
+    const reverse = async (ip: string) => {
+      calls.push(ip);
+      return `name-${ip}`;
+    };
+    const out = await enrichHopHostnames(hops(), { reverse, timeoutMs: 200 });
+
+    // 第 1 跳没有 IP（超时），不该被查
+    expect(calls).toEqual(['10.11.80.1', '203.0.113.9', '198.51.100.4']);
+    expect(out[0].hostname).toBe('* (超时)');
+  });
+
+  it('反查挂住时按超时收手，不影响其它跳', async () => {
+    const reverse = (ip: string) =>
+      ip === '10.11.80.1' ? new Promise<string>(() => {}) : Promise.resolve('slow-ok');
+    const started = Date.now();
+    const out = await enrichHopHostnames(hops(), { reverse, timeoutMs: 50 });
+
+    expect(Date.now() - started).toBeLessThan(500); // 没有干等
+    expect(out[1].hostname).toBe('10.11.80.1');      // 挂住的那个保持 IP
+    expect(out[2].hostname).toBe('slow-ok');         // 其它照常补上
+  });
+
+  it('解析器把 IP 原样返回时不当作主机名', async () => {
+    const reverse = async (ip: string) => ip;
+    const out = await enrichHopHostnames(hops(), { reverse, timeoutMs: 200 });
+    expect(out[1].hostname).toBe('10.11.80.1');
+  });
+
+  it('没有可查的跳时原样返回（不发起查询）', async () => {
+    const reverse = async () => {
+      throw new Error('不该被调用');
+    };
+    const input = [{ hop: 1, ip: null, hostname: '* (超时)', rtt: null }];
+    expect(await enrichHopHostnames(input, { reverse })).toEqual(input);
   });
 });

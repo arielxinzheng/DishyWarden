@@ -874,7 +874,10 @@ ipcMain.handle('run-traceroute', async (_event, target?: string) => {
   return traceroute(target?.trim() || fallback, {
     maxHops: 15,        // 限制跳数，Starlink 通常 5-10 跳
     timeout: 30000,     // 30s 总超时
-    hopTimeout: 2,      // 2s 单跳超时
+    // 单跳等待 1s（原来 2s）。实测本链路 RTT 最大 360ms，1s 足够；
+    // 而无响应的跳每跳要白等一个 hopTimeout，是总耗时的大头（关掉反查 DNS 后
+    // 15 跳从 20-23s 降到 7-10s，反查本身另占约 13s）。
+    hopTimeout: 1,
     // 每跳只探 1 次（系统默认 3 次）。高延迟链路（200-300ms/跳）上 3 次探测
     // 串行跑完再叠加无响应跳的 3×2s 等待，10-15 跳必然撞 30s 总超时，
     // 界面永远只有半截路径、结论永远是「未到达」。降到 1 次后几秒即可跑完。
