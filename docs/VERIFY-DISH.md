@@ -1,0 +1,135 @@
+# 在（远程）Windows 上验证星链 Dish 地址与端口
+
+**目标**：确认 `192.168.100.1:9200`（Dish 的 gRPC）在那台 Windows 机器上真的通。
+**脚本**：[`scripts/verify-dish.ps1`](../scripts/verify-dish.ps1)（纯 ASCII，PowerShell 5.1 可用）。
+
+---
+
+## 0. 先记住三条判据
+
+| # | 判据 | 为什么 |
+|---|---|---|
+| 1 | **TCP 能连上 9200** | 端口层通了。但**这不算证据**，见下条 |
+| 2 | **控制端口必须被拒**（如 `45999`） | TUN 代理（Clash/Surge/Verge/V2Ray）、VPN、AV 网页防护会**接受任意地址任意端口**。控制端口也"通" ⇒ 前面全是假象 |
+| 3 | **HTTP/2 握手下发 SETTINGS 帧** | 真 gRPC 服务收到 HTTP/2 preface 会回 `SETTINGS`（帧类型 `0x04`）。代理/假服务只会沉默或重置 |
+
+只有 1+2+3 同时成立，才能说"这个端口是星链的 gRPC"。
+
+> 我们真实踩过：本机 Mac 装了 TUN 模式代理，`192.168.100.1` 被 fake-IP 段（`198.18.0.1`）劫持，
+> 在没有星链的环境里 `Test-NetConnection` 也返回 `True`。所以脚本里那个控制端口检测是必须的。
+
+---
+
+## 1. 在远程 Windows 上放脚本（四选一）
+
+### A. RDP + 剪贴板（最快）
+1. 本地打开 `scripts/verify-dish.ps1`，全选复制（RDP 默认开着剪贴板重定向）
+2. 远程 Windows 的 PowerShell 里：
+```powershell
+notepad C:\Users\Public\verify-dish.ps1     # 粘贴 → 保存 → 关掉
+powershell -ExecutionPolicy Bypass -File C:\Users\Public\verify-dish.ps1
+Tee-Object 结果：加 | Tee-Object -FilePath C:\Users\Public\dish-check.txt
+```
+> 别放在 `\\tsclient\`（RDP 驱动器重定向）里直接跑 —— 执行策略/杀软常拦网络路径上的脚本。
+
+### B. WinRM（管理员 PowerShell，一次搞定 + 结果自动回传）
+```powershell
+Invoke-Command -ComputerName {{HOSTNAME_ih2q0ict}} -Credential (Get-Credential) `
+  -FilePath .\scripts\verify-dish.ps1 | Tee-Object -FilePath .\dish-check.txt
+```
+（远程需已启用 WinRM：`Enable-PSRemoting -Force`）
+
+### C. SSH（远程装了 OpenSSH Server）
+```bash
+scp scripts/verify-dish.ps1 {{USER_nr8rho6r}}@{{HOSTNAME_isx9vimd}}:C:/Users/Public/
+ssh {{USER_nr8rho6r}}@{{HOSTNAME_isx9vimd}} powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Public/verify-dish.ps1
+```
+
+### D. 一行版（不想传文件，直接粘进远程 PowerShell）
+```powershell
+$ip='192.168.100.1'
+"9200  : " + (Test-NetConnection $ip -Port 9200  -WarningAction SilentlyContinue).TcpTestSucceeded
+"45999 : " + (Test-NetConnection $ip -Port 45999 -WarningAction SilentlyContinue).TcpTestSucceeded
+```
+读法：`9200=True 且 45999=False` ⇒ 端口层通过（还需 §2 协议/应用确认）；
+`两个都 True` ⇒ 代理在接管，先解决代理。
+
+---
+
+## 2. 结论怎么读
+
+| 脚本输出 | 含义 | 下一步 |
+|---|---|---|
+| `VALID: TCP open + HTTP/2 answers` | 就是星链的 gRPC | 设置页把设备地址改成 `192.168.100.1`、端口 `9200`，保存后点「重试连接」 |
+| `INVALID: proxy/tunnel is intercepting` | 代理/TUN 劫持 | 退出代理客户端，或给 `192.168.100.0/24` 加直连规则（Clash: `IP-CIDR,192.168.100.0/24,DIRECT`），再重跑 |
+| `SUSPICIOUS: TCP open but no HTTP/2` | 端口上有东西但不是 gRPC | 确认端口号是否被改过；确认不是别的服务占着；用 §3 应用自证 |
+| `NOT REACHABLE` | 到不了 | 看 §4 拓扑，或防火墙/AV/终端没上电 |
+
+---
+
+## 3. 最强验证：让应用自己作证（推荐作为最终判据）
+
+脚本只能证明"端口/协议对"，**只有应用能证明"数据真的采到了"**：
+
+```powershell
+cd "C:\Program Files\DishyWarden"
+.\DishyWarden.exe --enable-logging
+```
+
+（从 cmd/PowerShell 启动会保留控制台，日志直接打在窗口里）
+
+| 日志 | 含义 |
+|---|---|
+| `[Collector] 历史库已就绪: …\data\telemetry.db` | 本地库正常（与 Dish 无关） |
+| `[Main] All background services started successfully` | 服务起来了 |
+| `[Main] Page loaded successfully` | 界面加载（**黑屏会是这行之后没有 DOM**，与本问题无关） |
+| **没有** `Dish 采集失败` 且仪表盘出现延迟/丢包/吞吐数字 | ✅ **Dish 连通成功** |
+| `Dish 采集失败: … ECONNREFUSED 127.0.0.1:9200` | ⚠️ **还在用默认 `127.0.0.1`**（给 DishyMock 用的），去设置页改成 `192.168.100.1` |
+| `Dish 采集失败: … 14 UNAVAILABLE … 192.168.100.1:9200` | 地址对但连不上 ⇒ 回看 §1 的 TCP/h2c 结论 |
+
+界面里也有自证：「未找到 Starlink 设备」引导页底部会写 **「当前目标 127.0.0.1:9200」**，
+点「重试连接」后如果变成仪表盘有数据，就是通了。
+
+---
+
+## 4. 网络拓扑前提（最常见的"不是 bug"的情况）
+
+| 设备 | 默认地址 | 说明 |
+|---|---|---|
+| Dish（终端）gRPC | `192.168.100.1:9200` | 内部链路 `192.168.100.0/24` |
+| Starlink 路由器 LAN 网关 | `192.168.1.1` | Gen2/Gen3 出厂默认 |
+
+- **PC 挂在 Starlink 路由器后面（`192.168.1.x`）**：默认情况下 **到不了** `192.168.100.1`
+  （路由器不为这条内部链路做转发）。这不是软件问题。
+- 能通的做法：① PC 用 PoE 注入器**直连终端**（会拿到 `192.168.100.x` 租约）；
+  ② 路由器切**旁路/桥接模式**（你自己的路由器 WAN 落在 `192.168.100.x`）；
+  ③ 在你自己的路由器上加静态路由（多数消费级路由器不转发，实测常失败）。
+
+判据：`ipconfig` 里有没有 `192.168.100.x` 的地址、`route print` 里到 `192.168.100.1`
+是不是走默认网关（走默认网关 = 大概率不通）。
+
+---
+
+## 5. 远程机专属注意事项
+
+- **测的是那台机器的网络栈**：RDP/SSH 进去跑，结果就是它自己的连通性，可信。
+  不要在本机测完推断远程结果。
+- 若远程机通过**跳板机/VPN**接入，注意它的默认路由可能被 VPN 改写
+  （脚本 §0 会打出 WinHTTP/IE 代理与隧道网卡，§6 会打出路由）。
+- **杀软/EDM**：360/火绒/奇安信可能拦 `nc`/`curl`/PowerShell 的原始 TCP。
+  脚本用 .NET `TcpClient`，被拦时表现为"无响应" ⇒ 临时给 PowerShell 放行再测。
+- **结果取回**：`Invoke-Command` 的输出会随管道回本地；RDP 里跑就加
+  `| Tee-Object -FilePath C:\Users\Public\dish-check.txt`，再用剪贴板/`scp` 拿回来。
+  贴日志给我时，把 §0/§3b/§4 三段和 `VERDICT` 一起贴就够了。
+
+---
+
+## 6. 一句话流程
+
+```text
+远程机上跑 verify-dish.ps1
+  → 若 INVALID：先关代理/TUN，重跑
+  → 若 NOT REACHABLE：先看是否在 192.168.100.x 网段（拓扑问题）
+  → 若 VALID/SUSPICIOUS：改设置页地址为 192.168.100.1:9200
+  → 用 --enable-logging 启动，仪表盘有数据 = 最终确认
+```
