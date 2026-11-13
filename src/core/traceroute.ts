@@ -38,6 +38,32 @@ export interface TracerouteResult {
 }
 
 /**
+ * 构造平台对应的 traceroute 命令。
+ *
+ * 单独抽出来是为了可测 —— 参数写错（比如把 -q 写成 -Q）不会报错，
+ * 只会在运行时静默走默认值，靠肉眼看日志很难发现。
+ */
+export interface TraceCommandOptions {
+  maxHops: number;
+  hopTimeout: number;
+  /** 每跳探测次数 */
+  probes: number;
+}
+
+export function buildTraceCommand(
+  platform: NodeJS.Platform,
+  target: string,
+  opts: TraceCommandOptions,
+): string {
+  if (platform === 'win32') {
+    // Windows 的 tracert **没有**探测次数参数，固定 3 次 —— 降不下来
+    return `tracert -h ${opts.maxHops} -w ${opts.hopTimeout * 1000} ${target}`;
+  }
+  // macOS/Linux: -m 最大跳数, -q 每跳探测次数, -w 单跳超时(秒)
+  return `traceroute -m ${opts.maxHops} -q ${opts.probes} -w ${opts.hopTimeout} ${target}`;
+}
+
+/**
  * 执行 traceroute
  */
 export async function traceroute(
@@ -46,23 +72,22 @@ export async function traceroute(
     maxHops?: number;
     timeout?: number;      // 总超时(ms)
     hopTimeout?: number;   // 单跳超时(s)
+    probes?: number;       // 每跳探测次数, 默认 1
   } = {}
 ): Promise<TracerouteResult> {
   const startTime = Date.now();
   const maxHops = options.maxHops ?? 20;
   const timeout = options.timeout ?? 45000;
   const hopTimeout = options.hopTimeout ?? 2;
+  // 每跳只探一次。系统 traceroute 默认 3 次：
+  //   · 无响应的跳要等 3×hopTimeout（2s 超时下就是 6s/跳）
+  //   · 三个探测本身也要串行跑完
+  // 星链这类高延迟链路（每跳 200–300ms）走 10–15 跳时，3 次探测必然撞上总超时，
+  // 结果只有半截路径、结论永远是「未到达」。降到 1 次后几秒就能跑完。
+  const probes = Math.max(1, Math.floor(options.probes ?? 1));
 
   const platform = process.platform;
-
-  let command: string;
-  if (platform === 'win32') {
-    // Windows: tracert -h maxHops -w timeout_ms target
-    command = `tracert -h ${maxHops} -w ${hopTimeout * 1000} ${target}`;
-  } else {
-    // macOS/Linux: traceroute -m maxHops -w timeout_sec target
-    command = `traceroute -m ${maxHops} -w ${hopTimeout} ${target}`;
-  }
+  const command = buildTraceCommand(platform, target, { maxHops, hopTimeout, probes });
 
   try {
     const { stdout } = await execAsync(command, {
@@ -74,7 +99,13 @@ export async function traceroute(
       ? parseWindowsTraceroute(stdout)
       : parseUnixTraceroute(stdout);
 
-    const completed = hops.length > 0 && hops[hops.length - 1].ip !== null;
+    // 「是否到达目的地」不能只看最后一跳有没有 IP。
+    // 每跳只探 1 次时，目的地之前的跳丢一个包就是 "*"，把结论误判成"未到达"。
+    // 输出头部写着目标 IP，只要**任何一跳命中它**就是真的到达了。
+    const targetIp = parseTargetIpFromHeader(stdout);
+    const completed = targetIp
+      ? hops.some((h) => h.ip === targetIp)
+      : hops.length > 0 && hops[hops.length - 1].ip !== null;
     const duration = Date.now() - startTime;
 
     return {
@@ -157,6 +188,16 @@ function extractPartialOutput(error: any): string | null {
  * slice(1) 会把唯一的数据行当标题丢掉, 结果 0 hops。
  * 标题行本来就能被 hopMatch 过滤掉, 所以不过滤。
  */
+/** 从输出头部解析目标 IP —— 判断「是否真的到达目的地」的唯一可靠依据 */
+export function parseTargetIpFromHeader(output: string): string | null {
+  // Unix:  traceroute to example.com (203.0.113.5), 15 hops max, 40 byte packets
+  const unix = output.match(/traceroute to .*?\(([\d.]+)\)/);
+  if (unix?.[1]) return unix[1];
+  // Windows: Tracing route to example.com [203.0.113.5]
+  const win = output.match(/[Tt]racing route to .*?\[([\d.]+)\]/);
+  return win?.[1] ?? null;
+}
+
 export function parseUnixTraceroute(output: string): TraceHop[] {
   const lines = output.split('\n');
   const hops: TraceHop[] = [];
@@ -220,6 +261,15 @@ export function parseUnixTraceroute(output: string): TraceHop[] {
         ip,
         hostname,
         rtt,
+      });
+    } else {
+      // -q 1 时完全无响应的跳只输出一个 "*"（不是 "* * *"），
+      // 也要记成超时跳 —— 直接丢弃会让跳号出现空洞（1,2,4,5…）
+      hops.push({
+        hop: hopNum,
+        ip: null,
+        hostname: '* (超时)',
+        rtt: null,
       });
     }
   }

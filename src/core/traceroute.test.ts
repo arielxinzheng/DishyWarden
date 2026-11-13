@@ -5,7 +5,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseUnixTraceroute, parseWindowsTraceroute } from './traceroute';
+import {
+  parseUnixTraceroute,
+  parseWindowsTraceroute,
+  parseTargetIpFromHeader,
+  buildTraceCommand,
+} from './traceroute';
 
 describe('traceroute.ts - Unix 输出解析', () => {
   describe('parseUnixTraceroute', () => {
@@ -13,7 +18,7 @@ describe('traceroute.ts - Unix 输出解析', () => {
       const output = `
  1  192.168.100.1 (192.168.100.1)  1.234 ms  1.456 ms  1.789 ms
  2  10.0.0.1 (10.0.0.1)  5.678 ms  5.789 ms  5.890 ms
- 3  example.com (93.184.216.34)  12.345 ms  12.456 ms  12.567 ms
+ 3  example.com (198.51.100.7)  12.345 ms  12.456 ms  12.567 ms
 `;
       const hops = parseUnixTraceroute(output);
       
@@ -26,7 +31,7 @@ describe('traceroute.ts - Unix 输出解析', () => {
       });
       expect(hops[2]).toEqual({
         hop: 3,
-        ip: '93.184.216.34',
+        ip: '198.51.100.7',
         hostname: 'example.com',
         rtt: 12.345,
       });
@@ -36,7 +41,7 @@ describe('traceroute.ts - Unix 输出解析', () => {
       const output = `
  1  192.168.100.1 (192.168.100.1)  1.234 ms
  2  * * *
- 3  example.com (93.184.216.34)  12.345 ms
+ 3  example.com (198.51.100.7)  12.345 ms
 `;
       const hops = parseUnixTraceroute(output);
       
@@ -72,11 +77,11 @@ describe('traceroute.ts - Unix 输出解析', () => {
 
     it('忽略标题行和空行', () => {
       const output = `
-traceroute to example.com (93.184.216.34), 20 hops max, 60 byte packets
+traceroute to example.com (198.51.100.7), 20 hops max, 60 byte packets
 
  1  192.168.100.1 (192.168.100.1)  1.234 ms
 
- 2  example.com (93.184.216.34)  12.345 ms
+ 2  example.com (198.51.100.7)  12.345 ms
 `;
       const hops = parseUnixTraceroute(output);
       
@@ -88,7 +93,7 @@ traceroute to example.com (93.184.216.34), 20 hops max, 60 byte packets
     it('处理跳号不连续的情况', () => {
       const output = `
  1  192.168.1.1 (192.168.1.1)  1.234 ms
- 5  example.com (93.184.216.34)  12.345 ms
+ 5  example.com (198.51.100.7)  12.345 ms
 `;
       const hops = parseUnixTraceroute(output);
       
@@ -151,12 +156,12 @@ describe('traceroute.ts - Windows 输出解析', () => {
   describe('parseWindowsTraceroute', () => {
     it('正常输出解析', () => {
       const output = `
-Tracing route to example.com [93.184.216.34]
+Tracing route to example.com [198.51.100.7]
 over a maximum of 20 hops:
 
   1    <1 ms    <1 ms    <1 ms  192.168.100.1
   2     5 ms     5 ms     5 ms  10.0.0.1
-  3    12 ms    12 ms    12 ms  example.com [93.184.216.34]
+  3    12 ms    12 ms    12 ms  example.com [198.51.100.7]
 
 Trace complete.
 `;
@@ -170,14 +175,14 @@ Trace complete.
         rtt: 1, // <1 ms 被解析为 1
       });
       expect(hops[2].hostname).toBe('example.com');
-      expect(hops[2].ip).toBe('93.184.216.34');
+      expect(hops[2].ip).toBe('198.51.100.7');
     });
 
     it('超时跳解析', () => {
       const output = `
   1    <1 ms    <1 ms    <1 ms  192.168.100.1
   2     *        *        *     请求超时。
-  3    12 ms    12 ms    12 ms  example.com [93.184.216.34]
+  3    12 ms    12 ms    12 ms  example.com [198.51.100.7]
 `;
       const hops = parseWindowsTraceroute(output);
       
@@ -194,7 +199,7 @@ Trace complete.
       const output = `
   1    <1 ms    <1 ms    <1 ms  192.168.100.1
   2     *        *        *     Request timed out.
-  3    12 ms    12 ms    12 ms  93.184.216.34
+  3    12 ms    12 ms    12 ms  198.51.100.7
 `;
       const hops = parseWindowsTraceroute(output);
       
@@ -203,17 +208,17 @@ Trace complete.
     });
 
     it('IP 在方括号中', () => {
-      const output = `  3    12 ms    12 ms    12 ms  example.com [93.184.216.34]`;
+      const output = `  3    12 ms    12 ms    12 ms  example.com [198.51.100.7]`;
       const hops = parseWindowsTraceroute(output);
       
       expect(hops).toHaveLength(1);
-      expect(hops[0].ip).toBe('93.184.216.34');
+      expect(hops[0].ip).toBe('198.51.100.7');
       expect(hops[0].hostname).toBe('example.com');
     });
 
     it('忽略标题和尾部统计', () => {
       const output = `
-Tracing route to example.com [93.184.216.34]
+Tracing route to example.com [198.51.100.7]
 over a maximum of 20 hops:
 
   1    <1 ms    <1 ms    <1 ms  192.168.100.1
@@ -236,5 +241,85 @@ Trace complete.
       expect(parseWindowsTraceroute('')).toEqual([]);
       expect(parseWindowsTraceroute('\n\n\n')).toEqual([]);
     });
+  });
+});
+
+describe('traceroute.ts - 命令构造', () => {
+  // -q 参数写错（例如写成 -Q/--queries）不会报错，只会静默走系统默认的 3 次探测，
+  // 高延迟链路上必然撞总超时 —— 所以这里把命令串住。
+  it('macOS/Linux 带 -q 每跳探测次数', () => {
+    const cmd = buildTraceCommand('darwin', 'example.com', {
+      maxHops: 15,
+      hopTimeout: 2,
+      probes: 1,
+    });
+    expect(cmd).toBe('traceroute -m 15 -q 1 -w 2 example.com');
+  });
+
+  it('Linux 同样是 traceroute 语法', () => {
+    const cmd = buildTraceCommand('linux', '10.0.0.1', {
+      maxHops: 10,
+      hopTimeout: 3,
+      probes: 2,
+    });
+    expect(cmd).toBe('traceroute -m 10 -q 2 -w 3 10.0.0.1');
+  });
+
+  it('Windows 用 tracert，没有探测次数参数', () => {
+    const cmd = buildTraceCommand('win32', 'example.com', {
+      maxHops: 15,
+      hopTimeout: 2,
+      probes: 1,
+    });
+    expect(cmd).toBe('tracert -h 15 -w 2000 example.com');
+    expect(cmd).not.toContain('-q');
+  });
+});
+
+describe('traceroute.ts - 目标 IP 与到达判定', () => {
+  it('从 Unix 头部解析目标 IP', () => {
+    const output = `traceroute to example.com (203.0.113.5), 15 hops max, 40 byte packets
+ 1  *`;
+    expect(parseTargetIpFromHeader(output)).toBe('203.0.113.5');
+  });
+
+  it('从 Windows 头部解析目标 IP', () => {
+    const output = `Tracing route to example.com [203.0.113.5]
+over a maximum of 20 hops:`;
+    expect(parseTargetIpFromHeader(output)).toBe('203.0.113.5');
+  });
+
+  it('头部没有 IP 时返回 null', () => {
+    expect(parseTargetIpFromHeader('traceroute to example.com, 15 hops max')).toBeNull();
+    expect(parseTargetIpFromHeader('')).toBeNull();
+  });
+
+  // -q 1 下目的地之前的跳丢单个包就是 "*"，用「最后一跳有没有 IP」判到达会误判
+  it('任何一跳命中目标 IP 即判定到达（即使后面还有 * 跳）', () => {
+    const output = `traceroute to example.com (198.51.100.7), 15 hops max, 40 byte packets
+ 12  example.com (198.51.100.7)  250.5 ms
+ 13  *
+ 14  *
+`;
+    const hops = parseUnixTraceroute(output);
+    expect(hops).toHaveLength(3);
+    expect(parseTargetIpFromHeader(output)).toBe('198.51.100.7');
+    // 目标 IP 出现在第 12 跳 ⇒ 已到达（页面逻辑用这个判据）
+    expect(hops.some((h) => h.ip === '198.51.100.7')).toBe(true);
+  });
+});
+
+describe('traceroute.ts - 单探测的超时跳（-q 1）', () => {
+  it('只有一个 "*" 的跳也要记成超时跳，不能丢（否则跳号出空洞）', () => {
+    const output = `
+ 1  10.0.0.1 (10.0.0.1)  2.1 ms
+ 2  *
+ 3  example.com (198.51.100.7)  12.3 ms
+`;
+    const hops = parseUnixTraceroute(output);
+
+    expect(hops).toHaveLength(3);
+    expect(hops.map((h) => h.hop)).toEqual([1, 2, 3]);
+    expect(hops[1]).toEqual({ hop: 2, ip: null, hostname: '* (超时)', rtt: null });
   });
 });
