@@ -139,6 +139,35 @@ electron-builder 在 macOS 上给 `SLMonitor.exe` 写图标与版本信息需要
 
 ---
 
+## 打包版「黑屏／白屏」（无报错）—— 路由用错 Router
+
+**症状**：双击启动后窗口只有深色底（或白底），没有导航、没有内容；
+控制台**没有任何报错**，i18n 全部命名空间 `hasLoadedNamespace === true`，
+React 容器（`__reactContainer$…`）存在但 `#root.children.length === 0`。
+
+**根因**：`BrowserRouter` 拿 `window.location.pathname` 当当前路由：
+
+| 加载方式 | `location.pathname` | `<Route path="/">` |
+|---|---|---|
+| 开发态 `http://localhost:5173/` | `/` | 匹配 ✓ |
+| 打包态 `file:///…/app.asar/dist/index.html` | `/Users/…/dist/index.html`（Win 上是 `C:/…/index.html`） | **全不匹配 ✗** |
+
+`<Routes>` 匹配不到任何路由就返回 `null` → `Layout` 不渲染 → 只剩窗口背景色。
+因为「不匹配」不是错误，所以不会触发 ErrorBoundary，也不会有任何日志。
+
+**正确做法**：桌面应用（`file://` 加载）必须用 `HashRouter`（路由放在 `#` 里，
+与文件路径无关）。已在 `src/renderer/main.tsx` 改好；导航高亮用的
+`useLocation().pathname` 在 HashRouter 下行为一致，无需改动。
+
+**快速自检**：打包后开远程调试，读渲染进程 DOM：
+
+```bash
+SLMonitor.exe --remote-debugging-port=9222
+# 然后 GET http://127.0.0.1:9222/json/list 拿到 webSocketDebuggerUrl，
+# 用 Runtime.evaluate 取 document.getElementById('root').children.length
+# 正常应 > 0；黑屏时是 0
+```
+
 ## NSIS 安装器在部分 Win10 上崩溃（c0000005 / 应用程序错误 1000）
 
 ### 现象

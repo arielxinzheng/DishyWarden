@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { HashRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 // ⚠️ 必须在使用任何 t() 之前导入：它会注册实例并启动语言包加载
@@ -17,11 +17,16 @@ document.documentElement.classList.add('dark');
  * 其余语言在切换时才按需异步加载。
  */
 void i18nReady.then(() => {
-  ReactDOM.createRoot(document.getElementById('root')!).render(
+  ReactDOM.createRoot(document.getElementById('root')!, {
+    // Suspense 重试失败这类「可恢复错误」默认会被静默吞掉，这里至少留下痕迹
+    onRecoverableError: (error) => {
+      console.error('[React] recoverable error:', error);
+    },
+  }).render(
     <React.StrictMode>
-      <BrowserRouter>
+      <HashRouter>
         <App />
-      </BrowserRouter>
+      </HashRouter>
     </React.StrictMode>,
   );
 });
