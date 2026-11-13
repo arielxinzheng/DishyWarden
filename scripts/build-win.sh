@@ -24,7 +24,12 @@ npm run electron:build
 export ELECTRON_CACHE="$PWD/release/.cache/electron"
 export ELECTRON_BUILDER_CACHE="$PWD/release/.cache/builder"
 
-npx electron-builder --win nsis --x64 --publish never \
+# 两种产物：
+#   nsis —— 安装器（部分 Win10 环境里 NSIS 的 System 插件会崩，见 docs/WINDOWS-BUILD.md）
+#   zip  —— 免安装版，解压即用，完全绕开 NSIS
+npx electron-builder --win nsis zip --x64 --publish never \
   --config.win.signAndEditExecutable=false
 
-echo "[build-win] 产物: release/SLMonitor Setup 0.1.0.exe"
+echo "[build-win] 产物:"
+echo "  release/SLMonitor Setup 0.1.0.exe   （NSIS 安装器）"
+echo "  release/SLMonitor-0.1.0-win.zip     （免安装版，推荐优先试这个）"
