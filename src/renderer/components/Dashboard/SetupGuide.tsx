@@ -37,7 +37,7 @@ export interface SetupGuideProps {
   error: string | null;
   /** 重试中(控制按钮禁用与雷达动画文案) */
   isRetrying: boolean;
-  /** 当前尝试连接的地址, 形如 127.0.0.1:9200 */
+  /** 当前尝试连接的地址, 形如 192.168.100.1:9200 */
   connectTarget: string;
   /** 点击重试 */
   onRetry: () => void;

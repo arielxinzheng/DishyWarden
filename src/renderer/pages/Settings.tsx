@@ -81,8 +81,9 @@ export default function Settings() {
       webhookFormSynced.current = false;
       setConfig({
         collector: {
-          dishAddress: '127.0.0.1',
+          dishAddress: '192.168.100.1',
           dishPort: 9200,
+          dishWebPort: 9201,
           routerAddress: '192.168.100.1',
           interval: 30000,
           bufferSize: 2880,

@@ -107,3 +107,23 @@ dishylink 的实测结论：**`dish_get_status` 的数值字段在某些固件�
 - [ ] 路由器 API（192.168.1.1:9001）：`wifi_get_clients` / `get_radio_stats` /
       `wifi_get_history` 是**客户端级**吞吐、温度、事件日志的唯一来源
 - [ ] 固件升级后重新核对本文件（dishylink 的做法：重跑 grpcurl describe）
+
+## 8. 我们的默认配置（已改成 Starlink 真机默认）
+
+之前默认是 **DishyMock 的 `127.0.0.1`**，现在按 dishylink 的真机实测改成：
+
+| 配置项 | 旧默认 | 新默认 | 依据 |
+|---|---|---|---|
+| `collector.dishAddress` | `127.0.0.1` | **`192.168.100.1`** | dishylink `core/dishClient.ts`：`DISH_LAN_ADDRESS` |
+| `collector.dishPort` | 9200 | 9200（不变） | 原生 gRPC(HTTP/2)，reflection 在这里 |
+| `collector.dishWebPort` | —（新增） | **9201** | grpc-web(HTTP/1.1)，原生回 UNIMPLEMENTED 时的兜底 |
+| `collector.routerAddress` | `192.168.100.1` | **`192.168.1.1`** | dishylink `core/routerEndpoint.ts`：`ROUTER_LAN_ADDRESS` |
+| 探针 `local-gateway` 目标 | `192.168.100.1` | **`192.168.1.1`** | 同上（实际 ping 走自动探测到的默认网关） |
+
+路由器的 gRPC 端口是 **9001**（`ROUTER_PORT`），我们还没接路由器 API，
+所以暂时没有对应的配置项（见 §7 待办）。
+
+⚠️ **老安装不会被自动改**：默认值只对**新装**生效；已有 `config.json` 里
+如果还留着 `127.0.0.1`，启动时日志会提醒一次
+（`[dishClient] 配置里的设备地址还是 DishyMock 的 127.0.0.1 …`），
+但**不做破坏性迁移** —— 有人在用本地 mock 时不该被改掉。

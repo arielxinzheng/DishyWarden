@@ -115,7 +115,7 @@ cd "C:\Program Files\DishyWarden"
 | `[Main] All background services started successfully` | 服务起来了 |
 | `[Main] Page loaded successfully` | 界面加载（**黑屏会是这行之后没有 DOM**，与本问题无关） |
 | **没有** `Dish 采集失败` 且仪表盘出现延迟/丢包/吞吐数字 | ✅ **Dish 连通成功** |
-| `Dish 采集失败: … ECONNREFUSED 127.0.0.1:9200` | ⚠️ **还在用默认 `127.0.0.1`**（给 DishyMock 用的），去设置页改成 `192.168.100.1` |
+| `Dish 采集失败: … ECONNREFUSED 127.0.0.1:9200` | ⚠️ 配置里还是 **DishyMock 的 `127.0.0.1`**（默认值已改成真机的 `192.168.100.1`，但老配置的 config.json 不会被自动改），去设置页改成 `192.168.100.1` |
 | `Dish 采集失败: … 14 UNAVAILABLE … 192.168.100.1:9200` | 地址对但连不上 ⇒ 回看 §1 的 TCP/h2c 结论 |
 
 界面里也有自证：「未找到 Starlink 设备」引导页底部会写 **「当前目标 127.0.0.1:9200」**，

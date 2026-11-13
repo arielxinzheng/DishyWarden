@@ -24,9 +24,10 @@ import type { Outage } from '../core/outageTypes';
 export interface CollectorConfig {
   interval: number;           // 采集间隔（毫秒）
   bufferSize: number;         // 内存缓冲区大小（数据点数量）
-  dishAddress?: string;       // Dish 地址
-  dishPort?: number;          // Dish gRPC 端口
-  routerAddress?: string;     // Router 地址（用于 ICMP Ping 探测）
+  dishAddress?: string;       // Dish 地址（真机默认 192.168.100.1）
+  dishPort?: number;          // Dish 原生 gRPC 端口（9200）
+  dishWebPort?: number;       // Dish grpc-web 端口（9201，原生不通时的兜底）
+  routerAddress?: string;     // Router 地址（真机默认 192.168.1.1，用于 ICMP Ping 探测）
   enablePersistence?: boolean; // 是否持久化到磁盘
   dataDir?: string;           // 自定义数据目录（留空则用 app.getPath('userData')/data）
   probeNodes?: ProbeNodeConfig[]; // 探针节点配置列表
@@ -79,9 +80,10 @@ export class DataCollector extends EventEmitter {
     this.config = {
       interval: config.interval || 30000, // 30秒
       bufferSize: config.bufferSize || 2880, // 24小时数据 (86400/30)
-      dishAddress: config.dishAddress || '127.0.0.1',
+      dishAddress: config.dishAddress || '192.168.100.1',
       dishPort: config.dishPort || 9200,
-      routerAddress: config.routerAddress || '192.168.100.1',
+      dishWebPort: config.dishWebPort || 9201,
+      routerAddress: config.routerAddress || '192.168.1.1',
       enablePersistence: config.enablePersistence ?? true,
       dataDir: config.dataDir || '', // 空 = 使用 app.getPath('userData')/data
       probeNodes: config.probeNodes || [],
@@ -90,6 +92,7 @@ export class DataCollector extends EventEmitter {
     this.client = new DishClient({
       address: this.config.dishAddress,
       grpcPort: this.config.dishPort,
+      grpcWebPort: this.config.dishWebPort,
       fallbackToMock: false,  // 禁用 mock 回退，连接失败时直接报错
     });
 
@@ -459,10 +462,11 @@ export class DataCollector extends EventEmitter {
     this.config = { ...this.config, ...config };
     
     // 更新 dish 客户端配置
-    if (config.dishAddress || config.dishPort) {
+    if (config.dishAddress || config.dishPort || config.dishWebPort) {
       this.client.updateConfig({
         address: this.config.dishAddress,
         grpcPort: this.config.dishPort,
+        grpcWebPort: this.config.dishWebPort,
       });
     }
     

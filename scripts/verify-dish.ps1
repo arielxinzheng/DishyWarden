@@ -163,7 +163,7 @@ Write-Output ''
 Write-Output 'STRONGEST CHECK: skip this script and let the app testify --'
 Write-Output '  "C:\Program Files\DishyWarden\DishyWarden.exe" --enable-logging'
 Write-Output '  success looks like: [Collector] ... and the dashboard showing telemetry,'
-Write-Output '  failure logs: "Dish collect failed: ... ECONNREFUSED 127.0.0.1:9200" (still the mock address)'
+Write-Output '  failure logs: "Dish collect failed: ... ECONNREFUSED 127.0.0.1:9200" (config still points at the mock address)'
 Write-Output '                or "14 UNAVAILABLE ... 192.168.100.1:9200"'
 
 if ($ReportPath) {

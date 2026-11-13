@@ -132,7 +132,11 @@ electron-builder 在 macOS 上给 `DishyWarden.exe` 写图标与版本信息需�
    配置文件在 `%APPDATA%\DishyWarden\config\config.json`，
    遥测/告警库在 `%APPDATA%\DishyWarden\data\`。
    实测（Parallels Windows 11）：`C:\Users\<user>\AppData\Roaming\DishyWarden\data\telemetry.db` ✓
-4. **默认配置指向本机 dish**：`collector.dishAddress=127.0.0.1:9200`，
+4. **默认配置已改成 Starlink 真机默认**：`collector.dishAddress=192.168.100.1`、
+   `dishPort=9200`（原生 gRPC）、`dishWebPort=9201`（grpc-web 兜底）、
+   `routerAddress=192.168.1.1`（Starlink 路由器）。
+   ⚠️ **旧安装的 config.json 里可能还留着 DishyMock 的 `127.0.0.1`** —— 默认值只对
+   新装生效，老配置要手动改（设置页 → 采集器 → 设备地址）。
    测试机上没有 dish ⇒ 采集器连不上 ⇒ 约 3 分钟后会报"采集心跳丢失"告警（属预期行为）。
 5. **首次启动没有位置向导**：卫星方位/仰角需要手工去设置页填经纬度。
 6. **未签名的自动更新**：更新源 `UPDATE_FEED_URL` 目前为空 ⇒ 检查更新功能处于

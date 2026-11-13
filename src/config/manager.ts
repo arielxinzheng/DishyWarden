@@ -12,9 +12,19 @@ import { DEFAULT_WEBHOOK_TEMPLATE } from '../alerting/webhookTemplate';
 export interface CollectorConfig {
   interval: number; // 采集间隔(毫秒)
   bufferSize: number; // 历史数据缓冲大小
-  dishAddress: string; // Starlink 设备地址
-  dishPort: number; // Dish gRPC 端口
-  routerAddress: string; // 路由器地址（用于 ICMP Ping 探测）
+  /** Starlink 终端地址（真机默认 192.168.100.1） */
+  dishAddress: string;
+  /** Dish 原生 gRPC 端口（HTTP/2，反射服务在这里） */
+  dishPort: number;
+  /**
+   * Dish grpc-web 端口（HTTP/1.1）。
+   *
+   * 真机在 9200 的原生 gRPC 上可能对 Handle 回 `12 UNIMPLEMENTED`，
+   * 而 9201 的 grpc-web 正常 ⇒ 原生失败时自动改走这个端口。
+   */
+  dishWebPort: number;
+  /** Starlink 路由器地址（真机默认 192.168.1.1，用于 ICMP 探测） */
+  routerAddress: string;
 }
 
 export interface AlertThresholds {
@@ -137,9 +147,13 @@ const DEFAULT_CONFIG: AppConfig = {
   collector: {
     interval: 30000,
     bufferSize: 2880,
-    dishAddress: '127.0.0.1',
+    // ↓ 真机默认值（依据 dishylink 的真机实测：README + core/routerEndpoint.ts）
+    //   dish  : 192.168.100.1  9200=原生 gRPC(HTTP/2, 有反射) / 9201=grpc-web(HTTP/1.1)
+    //   router: 192.168.1.1    9001=路由器 gRPC
+    dishAddress: '192.168.100.1',
     dishPort: 9200,
-    routerAddress: '192.168.100.1', // 默认 Starlink 网关地址
+    dishWebPort: 9201,
+    routerAddress: '192.168.1.1', // Starlink 路由器 LAN 地址
   },
   prometheus: {
     port: 9090,
@@ -188,7 +202,9 @@ const DEFAULT_CONFIG: AppConfig = {
       {
         id: 'local-gateway',
         name: '本地网关',
-        target: '192.168.100.1',
+        // Starlink 路由器默认 192.168.1.1（dishylink core/routerEndpoint.ts 同款）
+        // 实际 ping 走的是自动探测到的默认网关，这个字段是展示与兜底目标
+        target: '192.168.1.1',
         type: 'icmp',
         intervalSec: 30,
         timeoutSec: 10,

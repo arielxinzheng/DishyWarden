@@ -33,7 +33,8 @@ export function parseFiniteNumber(v: unknown): number | undefined {
 
 export interface DishConfig {
   address: string;      // dish 地址，默认 192.168.100.1
-  grpcPort: number;     // gRPC 端口，默认 9200
+  grpcPort: number;     // 原生 gRPC 端口，默认 9200
+  grpcWebPort?: number; // grpc-web 兜底端口，默认 9201（9200 不吃请求时用）
   timeout?: number;     // 请求超时（毫秒），默认 10000
   useProxy?: boolean;   // 是否使用代理绕过 CORS
   proxyUrl?: string;    // 代理服务器地址
@@ -231,13 +232,17 @@ export class DishClient {
   /** 遥测里没有的字段, 保留上一帧的值, 避免指标跳成 0 */
   private lastTelemetry: TelemetryData | null = null;
 
+  /** 只提醒一次的 mock 地址标记（配置里还留着 127.0.0.1 时提醒一次） */
+  private warnedMockAddress = false;
+
   /** WiFi mock 周期计数器（用于模拟信号强度周期性变化） */
   private wifiMockCycle = 0;
 
   constructor(config: Partial<DishConfig> = {}) {
     this.config = {
-      address: config.address || '127.0.0.1',
+      address: config.address || '192.168.100.1',
       grpcPort: config.grpcPort || 9200,
+      grpcWebPort: config.grpcWebPort || 9201,
       timeout: config.timeout || 10000,
       useProxy: config.useProxy || false,
       proxyUrl: config.proxyUrl || 'http://localhost:8080',
@@ -255,7 +260,11 @@ export class DishClient {
     // 真实 gRPC 通道探活 —— 比 /healthz 更贴近实际数据通路
     // (dish 的 9200 端口只讲 gRPC, 拿 HTTP 打过去必然失败)
     if (!this.grpc) {
-      this.grpc = new DishGrpcClient(this.config.address, this.config.grpcPort);
+      this.grpc = new DishGrpcClient(
+        this.config.address,
+        this.config.grpcPort,
+        this.config.grpcWebPort,
+      );
     }
     try {
       await this.grpc.getStatus(this.config.timeout);
@@ -274,7 +283,21 @@ export class DishClient {
    */
   async getTelemetry(): Promise<TelemetryData> {
     if (!this.grpc) {
-      this.grpc = new DishGrpcClient(this.config.address, this.config.grpcPort);
+      this.grpc = new DishGrpcClient(
+        this.config.address,
+        this.config.grpcPort,
+        this.config.grpcWebPort,
+      );
+    }
+
+    // 旧安装的配置里可能还留着 DishyMock 的 127.0.0.1。
+    // **不做破坏性迁移**（有人可能真在用本地 mock），只提醒一次。
+    if (this.config.address === '127.0.0.1' && !this.warnedMockAddress) {
+      this.warnedMockAddress = true;
+      console.warn(
+        '[dishClient] 配置里的设备地址还是 DishyMock 的 127.0.0.1；' +
+        '接真机请改成 192.168.100.1（端口 9200，必要时用 grpc-web 9201）',
+      );
     }
 
     try {
@@ -727,7 +750,11 @@ export class DishClient {
   updateConfig(config: Partial<DishConfig>) {
     this.config = { ...this.config, ...config };
     // 地址或端口变了, 旧连接作废
-    if (config.address !== undefined || config.grpcPort !== undefined) {
+    if (
+      config.address !== undefined ||
+      config.grpcPort !== undefined ||
+      config.grpcWebPort !== undefined
+    ) {
       this.grpc?.close();
       this.grpc = null;
     }
