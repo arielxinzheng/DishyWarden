@@ -305,6 +305,8 @@
     "avg_latency": "平均遅延: {{value}} ms",
     "reached": "到達済み",
     "not_reached": "未到達",
+    "expand_all": "すべて表示",
+    "collapse": "折りたたむ",
     "no_info": "経路情報を取得できません"
   },
   "direction": {

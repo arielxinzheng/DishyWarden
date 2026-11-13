@@ -101,6 +101,49 @@ traceroute to example.com (93.184.216.34), 20 hops max, 60 byte packets
       expect(parseUnixTraceroute('')).toEqual([]);
       expect(parseUnixTraceroute('\n\n\n')).toEqual([]);
     });
+
+    // 多地址跳：macOS 会把第 2、3 个探测的响应换行成以 IP 开头的续行。
+    // 旧正则把这些续行当成新跳，跳号取到 IP 首段（199/219），界面上就出现
+    // 「序号 219」和「IP 显示成 13335.」这类错位。
+    it('多地址跳的续行不应产生伪跳', () => {
+      const output = `
+ 1  * * *
+ 2  10.11.80.1 (10.11.80.1)  14.258 ms
+    10.11.80.2 (10.11.80.2)  7.841 ms
+ 3  xe-0-1-0.gw8.sjc7.alter.net (219.158.103.34)  296.760 ms
+    219.158.103.35 (219.158.103.35)  308.265 ms
+    * * *
+`;
+      const hops = parseUnixTraceroute(output);
+
+      // 只有 3 跳，不是 6 跳
+      expect(hops).toHaveLength(3);
+      expect(hops.map((h) => h.hop)).toEqual([1, 2, 3]);
+      // 续行里的 IP 首段不该变成跳号
+      expect(hops.some((h) => h.hop > 3)).toBe(false);
+    });
+
+    it('同一跳号重复出现只保留首次响应', () => {
+      const output = `
+ 4  124.65.194.101 (124.65.194.101)  38.8 ms
+ 4  124.65.194.89 (124.65.194.89)  34.1 ms
+`;
+      const hops = parseUnixTraceroute(output);
+
+      expect(hops).toHaveLength(1);
+      expect(hops[0].hop).toBe(4);
+      expect(hops[0].ip).toBe('124.65.194.101');
+    });
+
+    it('首探测超时、后续有响应时主机名回退为 IP（不显示 "*"）', () => {
+      const output = ` 6  * 124.65.194.156 (124.65.194.156)  28.753 ms`;
+      const hops = parseUnixTraceroute(output);
+
+      expect(hops).toHaveLength(1);
+      expect(hops[0].ip).toBe('124.65.194.156');
+      expect(hops[0].hostname).toBe('124.65.194.156');
+      expect(hops[0].rtt).toBe(28.753);
+    });
   });
 });
 

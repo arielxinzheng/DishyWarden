@@ -160,15 +160,32 @@ function extractPartialOutput(error: any): string | null {
 export function parseUnixTraceroute(output: string): TraceHop[] {
   const lines = output.split('\n');
   const hops: TraceHop[] = [];
+  /** 已见过的跳号 —— 多地址跳的续行要去重, 见下面的注释 */
+  const seen = new Set<number>();
 
   for (const line of lines) {
     if (!line.trim()) continue;
 
-    // 匹配跳数 (标题行没有开头的数字, 会被这里过滤掉)
-    const hopMatch = line.match(/^\s*(\d+)/);
+    // ⚠️ 跳行必须以「跳号 + 空白」开头，不能只写 /^\s*(\d+)/。
+    //
+    // macOS 的 traceroute 在**多地址跳**（一个跳有多个应答设备）上会把
+    // 第 2、3 个探测的响应换行成续行：
+    //
+    //     6  aaa (203.0.113.7)  28.753 ms
+    //         bbb (198.51.100.3)  25.444 ms
+    //
+    // 续行以 IP/主机名开头。旧正则会把 IP 的首段当成跳号（"219.158.3.22"
+    // ⇒ 跳号 219），产出一堆伪跳记录，界面上表现为「序号 219」「IP 显示成
+    // 13335.」这种错位。加上 \s 之后：跳号后面必须是空白，而 IP 首段后面
+    // 是 "."，续行自然被排除。
+    const hopMatch = line.match(/^\s*(\d+)\s+/);
     if (!hopMatch) continue;
 
     const hopNum = parseInt(hopMatch[1], 10);
+
+    // 同一跳号重复出现只保留首次响应（续行若被错误识别时的兜底）
+    if (seen.has(hopNum)) continue;
+    seen.add(hopNum);
 
     // 检查是否超时 (* * *)
     if (line.includes('* * *')) {
@@ -193,7 +210,9 @@ export function parseUnixTraceroute(output: string): TraceHop[] {
 
     if (ipMatch) {
       const ip = ipMatch[1] ?? ipMatch[2];
-      const hostname = hostnameMatch?.[1] !== ip ? (hostnameMatch?.[1] ?? ip) : ip;
+      const rawHost = hostnameMatch?.[1];
+      // 首个探测超时、后续探测有响应时，行首 token 是 "*" —— 别把它当主机名
+      const hostname = rawHost && rawHost !== '*' && rawHost !== ip ? rawHost : ip;
       const rtt = timeMatch ? parseFloat(timeMatch[1]) : null;
 
       hops.push({

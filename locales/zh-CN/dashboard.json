@@ -305,6 +305,8 @@
     "avg_latency": "平均延迟: {{value}} ms",
     "reached": "已到达",
     "not_reached": "未到达",
+    "expand_all": "展开全部",
+    "collapse": "收起",
     "no_info": "无法获取路由信息"
   },
   "direction": {

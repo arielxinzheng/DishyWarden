@@ -305,6 +305,8 @@
     "avg_latency": "Avg latency: {{value}} ms",
     "reached": "Reached",
     "not_reached": "Not reached",
+    "expand_all": "Show all",
+    "collapse": "Collapse",
     "no_info": "Unable to get route information"
   },
   "direction": {

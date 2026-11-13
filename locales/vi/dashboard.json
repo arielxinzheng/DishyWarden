@@ -305,6 +305,8 @@
     "avg_latency": "Độ trễ trung bình: {{value}} ms",
     "reached": "Đã tới",
     "not_reached": "Chưa tới",
+    "expand_all": "Hiện tất cả",
+    "collapse": "Thu gọn",
     "no_info": "Không lấy được thông tin tuyến"
   },
   "direction": {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -107,6 +107,9 @@ export default function Dashboard() {
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
   const summary24h = useHistorySummary(86400);
   const [timeRange, setTimeRange] = useState<TimeRange>('1h');
+  // 路由跟踪卡片的折叠/展开 —— 提升到外层：折叠时右列整体要与
+  // 左侧「吞吐量」卡片等高，这个约束在下面的 grid 容器上。
+  const [traceExpanded, setTraceExpanded] = useState(false);
   // 图表数据在这里取一次, 两个图表共用 —— 避免各自发起 IPC 查询
   const { history, isLoading: historyLoading } = useDishHistory(TIME_RANGE_SECONDS[timeRange]);
   // 卫星切换事件(★ 标记点) —— 来自 dishGetHistory 的 outages, 与 history 同一个时间窗
@@ -846,7 +849,12 @@ export default function Dashboard() {
       </div>
 
       {/* 第二行：吞吐量和路由跟踪 */}
-      <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
+      {/*
+        右列高度收敛到与左「吞吐量」卡片一致（lg:items-stretch + 右列 lg:h-[378px]）。
+        378 = ThroughputChart 的 height(280) + 卡片标题栏与内边距(98)，实测值；
+        ⚠️ 改 ThroughputChart 的 height 时要同步这里，否则两卡底边会错开。
+      */}
+      <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 lg:items-stretch">
         {/* 左侧：吞吐量 - 占 7/10 宽度 */}
         <div className="lg:col-span-7">
           <Card>
@@ -866,10 +874,21 @@ export default function Dashboard() {
         </div>
         
         {/* 右侧：路由器状态 + 路由跟踪 - 占 3/10 宽度 */}
-        <div className="lg:col-span-3 space-y-3">
+        {/* 折叠态固定 378px（= 左卡），路由跟踪卡片吃掉剩余高度并在内部滚动；
+            展开态去掉高度上限，让它自然撑开、由页面滚动。 */}
+        <div
+          className={`lg:col-span-3 flex flex-col gap-3 min-h-0 ${
+            traceExpanded ? '' : 'lg:h-[378px]'
+          }`}
+        >
           {/* 路由器状态行 —— 需求文档 2.1.2 的数据出口, 放在路由跟踪上方 */}
-          <RouterStatusRow />
-          <RouteTraceCard />
+          <div className="shrink-0">
+            <RouterStatusRow />
+          </div>
+          <RouteTraceCard
+            expanded={traceExpanded}
+            onToggle={() => setTraceExpanded((v) => !v)}
+          />
         </div>
       </div>
     </div>
@@ -1060,7 +1079,17 @@ function ObstructionInsightCard({ telemetry, obstruction }: ObstructionInsightCa
 }
 
 // 路由跟踪卡片
-function RouteTraceCard() {
+//
+// 高度策略：折叠态与左侧「吞吐量」卡片等高（见上方 grid 注释），hop 列表内部
+// 滚动 + 底部渐变遮罩提示「还有更多」；展开态自然撑开，由页面滚动。
+// 折叠/展开状态由 Dashboard 持有 —— 外层容器的等高约束依赖它。
+function RouteTraceCard({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<{
@@ -1073,6 +1102,14 @@ function RouteTraceCard() {
   // 追踪目标来自设置页的「探针节点管理」(默认 example.com)。
   // 这里只读不改 —— 要改去设置页, 避免同一个配置有两个入口。
   const [target, setTarget] = useState<string>('');
+
+  // 折叠时 hop 列表在内部滚动 —— 要知道"是否还有内容没露出来"，才能决定
+  // 是否显示底部渐变遮罩、是否给「展开全部」按钮。
+  const hopsRef = useRef<HTMLDivElement>(null);
+  const [overflowState, setOverflowState] = useState({
+    hasMore: false,
+    atBottom: false,
+  });
 
   // 组件挂载时执行一次 traceroute
   useEffect(() => {
@@ -1123,12 +1160,31 @@ function RouteTraceCard() {
     }
   };
 
-  const getLatencyColor = (ms: number | null) => {
-    if (ms === null) return '#64748b'; // slate-500 (超时)
-    if (ms > 30) return '#f59e0b'; // warning
-    if (ms > 10) return '#38bdf8'; // sky-blue
-    return '#4ade80'; // accent-green
-  };
+  // 溢出检测 —— 折叠态才需要：内容超出可视区时显示底部渐变遮罩。
+  // ResizeObserver 一起监听：窗口缩放 / 展开收起都会改变可视高度。
+  useEffect(() => {
+    const el = hopsRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const hasMore = el.scrollHeight - el.clientHeight > 2;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+      setOverflowState((prev) =>
+        prev.hasMore === hasMore && prev.atBottom === atBottom
+          ? prev
+          : { hasMore, atBottom },
+      );
+    };
+
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(el);
+    return () => {
+      el.removeEventListener('scroll', measure);
+      resizeObserver.disconnect();
+    };
+  }, [data, expanded]);
 
   const avgLatency = data?.hops && data.hops.length > 0
     ? data.hops
@@ -1137,10 +1193,17 @@ function RouteTraceCard() {
         (data.hops.filter(h => h.rtt !== null).length || 1)
     : 0;
 
+  // 折叠态、且确实还有 hop 没露出来、且没滚到底 —— 才盖渐变遮罩
+  const showFade = !expanded && overflowState.hasMore && !overflowState.atBottom;
+  // 有内容被藏住才给「展开全部」；已展开则给「收起」
+  const canToggle = expanded || overflowState.hasMore;
+
+  // 卡片用 flex-1 而不是 h-full：父容器里还有「路由器状态行 + gap」，
+  // h-full(100%) 会让卡片超出行高把父容器撑破；flex-1 吃掉剩余高度才对。
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-3 gap-2">
+    <Card className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <CardContent className="flex-1 flex flex-col min-h-0 p-4">
+        <div className="flex items-center justify-between mb-2 gap-2 shrink-0">
           <h3 className="text-sm font-semibold text-slate-300 shrink-0">
             <Activity className="w-4 h-4 inline mr-2 text-accent-green" />
             {t('dashboard:route.title')}
@@ -1178,53 +1241,78 @@ function RouteTraceCard() {
 
         {data && data.hops.length > 0 && (
           <>
-            <div className="space-y-0">
-              {data.hops.map((hop, i) => (
-                <div key={i} className="flex items-center gap-3 py-1.5">
-                  <div className="relative flex flex-col items-center shrink-0" style={{ width: '14px' }}>
-                    <span className="w-2.5 h-2.5 rounded-full bg-accent-green shadow-[0_0_8px_rgba(74,222,128,0.4)] z-10" />
-                    {i < data.hops.length - 1 && (
-                      <span className="absolute top-2.5 w-px h-full bg-accent-green/40" />
-                    )}
-                  </div>
-                  <div className="w-6 text-[11px] font-mono text-slate-500 shrink-0">{hop.hop}</div>
-                  <div className="w-28 shrink-0">
-                    <div className="font-mono text-xs text-slate-200 truncate">
-                      {hop.ip || '*'}
+            {/* hop 列表：折叠态内部滚动（可视高度由右列 378px 约束决定），
+                展开态去掉滚动、自然撑开 */}
+            <div className="relative flex-1 min-h-0 flex flex-col">
+              <div
+                ref={hopsRef}
+                className={`min-h-0 flex-1 pr-1 ${
+                  expanded ? 'overflow-visible' : 'overflow-y-auto'
+                }`}
+              >
+                {data.hops.map((hop, i) => (
+                  // 单行式：序号 | IP | 主机名 | RTT
+                  // 原来每跳两行（主机名 + 迷你延迟条）占 36px，同样高度只能看 5 跳；
+                  // 压成单行 24px 后能看 8 跳，颜色已经由 RTT 文字承担。
+                  <div key={i} className="flex items-center gap-2 py-1 text-[11px]">
+                    <div className="relative flex items-center shrink-0" style={{ width: '10px' }}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-accent-green shrink-0" />
+                      {i < data.hops.length - 1 && (
+                        <span className="absolute top-1 left-0 w-px h-[15px] bg-accent-green/40" />
+                      )}
                     </div>
+                    <span className="w-5 text-right font-mono text-slate-500 shrink-0">
+                      {hop.hop}
+                    </span>
+                    {/* 6.5rem 能容纳 15 字符的 IPv4（11px 等宽约 6.6px/字符），
+                        用 w-24(96px) 会把 "162.245.124.201" 截成 "…24.2…" */}
+                    <span
+                      className="w-[6.5rem] font-mono text-slate-200 truncate shrink-0"
+                      title={hop.ip ?? undefined}
+                    >
+                      {hop.ip || '*'}
+                    </span>
+                    {/* 反查失败时 hostname 就是 IP 本身，不重复显示 */}
+                    <span className="flex-1 min-w-0 truncate text-slate-400" title={hop.hostname}>
+                      {hop.hostname === hop.ip ? '' : hop.hostname}
+                    </span>
+                    <span
+                      className={`w-14 text-right font-mono shrink-0 ${
+                        hop.rtt === null
+                          ? 'text-slate-500'
+                          : hop.rtt > 30
+                            ? 'text-warning-orange'
+                            : 'text-slate-300'
+                      }`}
+                    >
+                      {hop.rtt !== null ? `${hop.rtt.toFixed(1)}ms` : '* * *'}
+                    </span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-slate-400 truncate">{hop.hostname}</div>
-                    {hop.rtt !== null && (
-                      <div className="mt-1 h-1 rounded-full bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${Math.min(100, (hop.rtt / 40) * 100)}%`,
-                            background: getLatencyColor(hop.rtt)
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <div
-                    className={`w-16 text-right font-mono text-xs shrink-0 ${
-                      hop.rtt === null ? 'text-slate-500' : hop.rtt > 30 ? 'text-warning-orange' : 'text-slate-300'
-                    }`}
-                  >
-                    {hop.rtt !== null ? `${hop.rtt.toFixed(1)} ms` : '* * *'}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+              {/* 底部渐变遮罩：暗示下方还有 hop 没露出来（滚到底自动收掉） */}
+              {showFade && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-card to-transparent" />
+              )}
             </div>
 
-            <div className="mt-3 border-t border-slate-700/40 pt-2 text-[11px] text-slate-500 font-mono flex flex-wrap gap-x-4 gap-y-1">
+            {/* 汇总 + 展开/收起 */}
+            <div className="shrink-0 mt-auto border-t border-slate-700/40 pt-2 text-[11px] text-slate-500 font-mono flex flex-wrap items-center gap-x-3 gap-y-1">
               <span>{t('dashboard:route.target', { target: data.target })}</span>
               <span>{t('dashboard:route.hops', { count: data.hops.length })}</span>
               <span>{t('dashboard:route.avg_latency', { value: avgLatency.toFixed(1) })}</span>
               <span className={data.completed ? 'text-accent-green' : 'text-warning-orange'}>
                 {data.completed ? t('dashboard:route.reached') : t('dashboard:route.not_reached')}
               </span>
+              {canToggle && (
+                <button
+                  onClick={onToggle}
+                  aria-expanded={expanded}
+                  className="ml-auto text-accent-green hover:text-accent-green/80 shrink-0"
+                >
+                  {expanded ? t('dashboard:route.collapse') : t('dashboard:route.expand_all')}
+                </button>
+              )}
             </div>
           </>
         )}
