@@ -27,10 +27,18 @@ import { promises as dns } from 'dns';
 import tls from 'tls';
 import { EventEmitter } from 'events';
 import type { ProbeConfig, ProbeNodeConfig } from '../config/manager';
+import { parsePingStats as parsePingStatsFromHelper } from './pingParse';
+
+const parsePingRttFromStats = (output: string): number | null =>
+  parsePingStatsFromHelper(output).rttMs;
+const parsePingLossRatio = (output: string): number | null =>
+  parsePingStatsFromHelper(output).lossRatio;
 
 const execAsync = (cmd: string, timeoutMs: number) =>
   new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
-    exec(cmd, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    // windowsHide: Windows 上不设的话, GUI 应用每次执行命令都会闪一个黑色控制台窗口
+    // (本进程每 30s 就要 ping 一轮, 不设等于每隔 30s 闪一次)
+    exec(cmd, { timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       // exec 的错误 code 可能是退出码(number), 也可能是 errno 字符串(如 'ENOENT')
       const raw = error?.code;
       const code = typeof raw === 'number' ? raw : error ? 1 : 0;
@@ -134,19 +142,9 @@ function buildPingCommand(target: string, count: number, timeoutSec: number): st
   return `ping -c ${count} -W ${timeoutSec} ${target}`;
 }
 
-/** 从 ping 输出里解析平均延迟 */
-function parsePingRtt(output: string): number | null {
-  // macOS: "round-trip min/avg/max/stddev = 0.043/0.052/0.062/0.008 ms"
-  const mac = output.match(/=\s*[\d.]+\/([\d.]+)\/[\d.]+\/[\d.]+\s*ms/);
-  if (mac) return parseFloat(mac[1]);
-  // Linux: "rtt min/avg/max/mdev = 0.043/0.052/0.062/0.008 ms"
-  const linux = output.match(/=\s*[\d.]+\/([\d.]+)\/[\d.]+\/[\d.]+\s*ms/);
-  if (linux) return parseFloat(linux[1]);
-  // Windows: "Average = 12ms" / "平均 = 12ms"
-  const win = output.match(/(?:Average|平均)\s*=\s*(\d+)\s*ms/i);
-  if (win) return parseInt(win[1], 10);
-  return null;
-}
+// ping 输出解析统一走 pingParse —— 三平台 + 中文 Windows + GBK 乱码都认,
+// 单测见 pingParse.test.ts
+const parsePingRtt = parsePingRttFromStats;
 
 /**
  * 执行一次 ICMP 探测。
@@ -170,9 +168,9 @@ async function probeIcmp(node: ProbeNodeConfig): Promise<ProbeResult> {
   }
 
   const rttMs = parsePingRtt(stdout);
-  // 100% 丢包时 ping 退出码非 0 但仍可能有输出
-  const lossMatch = stdout.match(/([\d.]+)%\s*packet loss/);
-  const loss = lossMatch ? parseFloat(lossMatch[1]) : 0;
+  // 100% 丢包时 ping 退出码非 0 但仍可能有输出。
+  // Unix 是 "0% packet loss", Windows 是 "(0% loss)"/"(0% 丢失)", 见 pingParse。
+  const loss = parsePingLossRatio(stdout) ?? 0;
 
   if (loss >= 100) {
     return {

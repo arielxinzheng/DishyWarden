@@ -99,6 +99,8 @@ export async function traceroute(
     const { stdout } = await execAsync(command, {
       timeout,
       maxBuffer: 1024 * 1024, // 1MB
+      // windowsHide: Windows 上 GUI 应用执行 tracert 会闪黑色控制台窗口
+      windowsHide: true,
     });
 
     const rawHops = platform === 'win32'

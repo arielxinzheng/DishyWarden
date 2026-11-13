@@ -15,6 +15,7 @@ import type {
   RouterProbeConfig,
   RouterProbeResult,
 } from './routerProbeTypes';
+import { parsePingStats } from './pingParse';
 
 export type { RouterProbeConfig, RouterProbeResult } from './routerProbeTypes';
 
@@ -125,23 +126,35 @@ export class RouterProbe {
     try {
       const timeoutSec = Math.ceil(timeoutMs / 1000);
 
-      // macOS/Linux ping 命令格式不同
-      const isMac = process.platform === 'darwin';
-      const cmd = isMac
-        ? `ping -c ${count} -W ${timeoutSec * 1000} ${address}`
-        : `ping -c ${count} -W ${timeoutSec} ${address}`;
+      // 三平台命令各不相同:
+      //   macOS:   ping -c N -W <ms>   (-W 是毫秒)
+      //   Linux:   ping -c N -W <sec>  (-W 是秒)
+      //   Windows: ping -n N -w <ms>   (次数用 -n, 超时用 -w 毫秒)
+      // 之前没有 win32 分支 —— Windows 上跑 `ping -c ...` 直接参数错误,
+      // 路由器状态永远"不可达"(probeRunner 的 buildPingCommand 有分支, 这里漏了)。
+      let cmd: string;
+      if (process.platform === 'win32') {
+        cmd = `ping -n ${count} -w ${timeoutMs} ${address}`;
+      } else if (process.platform === 'darwin') {
+        cmd = `ping -c ${count} -W ${timeoutSec * 1000} ${address}`;
+      } else {
+        cmd = `ping -c ${count} -W ${timeoutSec} ${address}`;
+      }
 
-      const { stdout } = await execAsync(cmd, { timeout: timeoutMs + 1000 });
+      // windowsHide: GUI 应用里不设会闪黑色控制台窗口
+      const { stdout } = await execAsync(cmd, {
+        timeout: timeoutMs + 1000,
+        windowsHide: true,
+      });
 
-      // 解析 ping 输出
-      // macOS: "round-trip min/avg/max/stddev = 1.234/2.345/3.456/0.789 ms"
-      // Linux: "rtt min/avg/max/mdev = 1.234/2.345/3.456/0.789 ms"
-      const rttMatch = stdout.match(/min\/avg\/max\/[^=]+=\s*([\d.]+)\/([\d.]+)\/([\d.]+)\/([\d.]+)/);
-      const avgRtt = rttMatch ? parseFloat(rttMatch[2]) : null;
+      // 解析统一走 pingParse —— Windows 输出是本地化的(中文系统打"丢失/平均"),
+      // 且 GBK→UTF8 解码后中文变乱码, 只锚定 ASCII 结构的正则才能三平台通吃。
+      const { rttMs: avgRtt, lossRatio } = parsePingStats(stdout);
 
-      // 解析丢包率："3 packets transmitted, 3 received, 0% packet loss"
-      const lossMatch = stdout.match(/([\d.]+)%\s+packet loss/);
-      const packetLoss = lossMatch ? parseFloat(lossMatch[1]) / 100 : 0;
+      // 解析不出来按 100% 丢包算 —— 宁可显示"不可达", 也不能像旧代码那样
+      // 兜底成 0(旧代码在 Windows 上丢包正则永远失配 ⇒ packetLoss=0 ⇒
+      // 目标明明不通也显示"可达", 是把"不知道"谎报成"一切正常")。
+      const packetLoss = lossRatio ?? 1;
 
       return {
         reachable: packetLoss < 1, // 丢包率 < 100% 视为可达

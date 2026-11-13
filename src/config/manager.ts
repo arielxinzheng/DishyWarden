@@ -264,19 +264,31 @@ export class ConfigManager {
    * 加载配置
    */
   private load(): AppConfig {
-    try {
-      if (fs.existsSync(this.configPath)) {
+    if (fs.existsSync(this.configPath)) {
+      try {
         const data = fs.readFileSync(this.configPath, 'utf-8');
         const loaded = JSON.parse(data) as AppConfig;
 
         // 合并默认配置(处理新增字段)
         return this.mergeConfig(DEFAULT_CONFIG, loaded);
+      } catch (error) {
+        // 解析失败(半截 JSON / 编码坏了) —— **绝不能直接覆盖用户的文件**:
+        // 旧实现会走到下面 save(DEFAULT_CONFIG), 把用户配置整个抹掉且不留证据。
+        // 这里把坏文件改名留证, 然后用默认值启动(应用仍可用)。
+        const corruptPath = `${this.configPath}.corrupt`;
+        try {
+          fs.renameSync(this.configPath, corruptPath);
+          console.error(
+            `[ConfigManager] 配置文件解析失败, 已备份为 ${corruptPath}: `,
+            error,
+          );
+        } catch (renameError) {
+          console.error('[ConfigManager] 备份损坏配置文件失败:', renameError);
+        }
       }
-    } catch (error) {
-      console.error('[ConfigManager] Failed to load config:', error);
     }
 
-    // 首次运行,使用默认配置
+    // 首次运行(或配置损坏) —— 用默认值
     this.save(DEFAULT_CONFIG);
     return DEFAULT_CONFIG;
   }
@@ -336,12 +348,41 @@ export class ConfigManager {
   /**
    * 保存配置
    */
+  /**
+   * 落盘配置。
+   *
+   * 原子写: 先写 .tmp 再 rename —— 同一文件系统上的 rename 是原子操作,
+   * 所以**永远看不到半截 JSON**。直接 writeFileSync 覆盖写时, 进程在写一半
+   * 被杀/断电就会留下截断文件, 下次启动解析失败 ⇒ 用户配置全丢。
+   *
+   * 同时保留上一份好配置为 .bak: 出问题时能手工捞回来。
+   */
   private save(config: AppConfig): void {
+    const tmpPath = `${this.configPath}.tmp`;
+    const payload = JSON.stringify(config, null, 2);
+
     try {
-      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
+      fs.writeFileSync(tmpPath, payload, 'utf-8');
+
+      // 覆盖前先留一份上一版(只在已有有效配置时留, 避免 .bak 是刚写的同一份)
+      if (fs.existsSync(this.configPath)) {
+        try {
+          fs.copyFileSync(this.configPath, `${this.configPath}.bak`);
+        } catch (backupError) {
+          console.warn('[ConfigManager] 备份上一版配置失败(不阻断保存):', backupError);
+        }
+      }
+
+      fs.renameSync(tmpPath, this.configPath);
       console.log('[ConfigManager] Config saved');
     } catch (error) {
       console.error('[ConfigManager] Failed to save config:', error);
+      // 清掉半截临时文件, 免得留在目录里让人误会
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {
+        /* 清理失败不影响主流程 */
+      }
       throw error;
     }
   }

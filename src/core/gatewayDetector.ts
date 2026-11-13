@@ -22,7 +22,8 @@ import type { ProbeNodeConfig } from '../config/manager';
 
 const execAsync = (cmd: string, timeoutMs: number = 5000) =>
   new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
-    exec(cmd, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    // windowsHide: GUI 应用里不设会闪黑色控制台窗口
+    exec(cmd, { timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       const raw = error?.code;
       const code = typeof raw === 'number' ? raw : error ? 1 : 0;
       resolve({ stdout: String(stdout), stderr: String(stderr), code });

@@ -124,3 +124,38 @@ describe('ConfigManager · cloud 段落兼容', () => {
     expect(cloud.feedbackEnabled).toBe(true);
   });
 });
+
+describe('配置落盘健壮性', () => {
+  // ConfigManager 的路径 = <userData>/config/config.json，
+  // 测试里 userData 被 mock 成 tmpDir（见文件头的 vi.mock）
+  const configPath = () => path.join(tmpDir, 'config', 'config.json');
+
+  it('保存后目录里应有 .bak（上一次的好配置）', () => {
+    const manager = new ConfigManager();
+    manager.updateCloudConfig({ feedbackEnabled: true });
+    manager.updateCloudConfig({ feedbackEnabled: false });
+
+    expect(fs.existsSync(`${configPath()}.bak`)).toBe(true);
+  });
+
+  it('配置文件损坏时不覆盖原文件 —— 改名留证后用默认值启动', () => {
+    // 半截 JSON（模拟写盘途中进程被杀）
+    fs.mkdirSync(path.join(tmpDir, 'config'), { recursive: true });
+    fs.writeFileSync(configPath(), '{"collector": {"interval": 30000', 'utf-8');
+
+    const manager = new ConfigManager();
+    // 应用仍能起来（默认值）
+    expect(manager.getConfig().collector.interval).toBe(30000);
+    // 坏文件被改名留证 —— 原始内容还在，没被抹掉
+    expect(fs.existsSync(`${configPath()}.corrupt`)).toBe(true);
+    expect(fs.readFileSync(`${configPath()}.corrupt`, 'utf-8')).toContain('"collector"');
+    // 同名位置现在是一份可用的默认配置
+    expect(() => JSON.parse(fs.readFileSync(configPath(), 'utf-8'))).not.toThrow();
+  });
+
+  it('保存过程中不留 .tmp 残留', () => {
+    const manager = new ConfigManager();
+    manager.updateCloudConfig({ feedbackEnabled: true });
+    expect(fs.existsSync(`${configPath()}.tmp`)).toBe(false);
+  });
+});
