@@ -133,3 +133,63 @@ cd "C:\Program Files\DishyWarden"
   → 若 VALID/SUSPICIOUS：改设置页地址为 192.168.100.1:9200
   → 用 --enable-logging 启动，仪表盘有数据 = 最终确认
 ```
+
+---
+
+## 7. 直接用 PowerShell 启动（比双击更适合排查）
+
+`.exe` 不受 `ExecutionPolicy` 限制（那条只管 `.ps1`），路径含空格记得引号；
+安装在 `Program Files` 但应用只读、只写 `%APPDATA%\DishyWarden` ⇒ **不需要管理员**。
+
+### A. 要日志落文件（推荐，已实测）
+
+```powershell
+$exe = 'C:\Program Files\DishyWarden\DishyWarden.exe'
+$log = "$env:TEMP\dw-launch.log"
+Start-Process cmd.exe -WindowStyle Hidden -PassThru `
+  -ArgumentList ('/c ""' + $exe + '" --enable-logging > "' + $log + '" 2>&1"') | Out-Null
+Start-Sleep 15
+Get-Content $log -TotalCount 10          # 看启动日志
+Select-String -Path $log -Pattern 'Collector|采集失败|UNAVAILABLE|Page loaded'
+```
+
+实测（Parallels Windows 11，装到 `Program Files`）：进程 4 个存活、日志正常生成 ✓。
+
+> ⚠️ 实测坑：PowerShell 的 `Start-Process -RedirectStandardError/-RedirectStandardOutput`
+> 对 Electron **抓不到任何内容（0 字节）**，而且进程会很快退出。
+> `--enable-logging` 是写 stderr，但只有“重定向到**文件**”（cmd 的 `>`）才拿得到。
+
+### B. 日志直接打在窗口里（会阻塞）
+
+```powershell
+& "C:\Program Files\DishyWarden\DishyWarden.exe" --enable-logging
+```
+交互式控制台里能看到实时日志；这个命令会一直占着窗口，关窗即退出。
+
+### C. 只要跑起来，不占窗口（无日志）
+
+```powershell
+Start-Process "C:\Program Files\DishyWarden\DishyWarden.exe"
+```
+
+### D. 带调试端口（可用 CDP 检查界面/状态）
+
+```powershell
+Start-Process "C:\Program Files\DishyWarden\DishyWarden.exe" -ArgumentList '--remote-debugging-port=9222'
+# 然后 GET http://127.0.0.1:9222/json/list 拿 webSocketDebuggerUrl
+```
+
+### E. 想拿退出码（例如“闪退”排查）
+
+```powershell
+& "C:\Program Files\DishyWarden\DishyWarden.exe"
+"exit code = $LASTEXITCODE"
+```
+GUI 程序正常是不会自己退出的；**能立刻返回 exit code 就说明它在启动阶段就死了**
+（历史上两种情况：缺 `@grpc/reflection` 的 .proto、`BrowserRouter` 在 `file://` 下路由不匹配）。
+
+### F. 远程机的 GUI 前提
+
+- 通过 **RDP 保持在登录会话**里跑，窗口才会显示、渲染进程才正常；
+  纯 SSH（无交互桌面）跑 GUI 程序，窗口可能不出现、甚至渲染层起不来。
+- 只要验证网络/端口，用 `verify-dish.ps1` 就够了（**不需要 GUI**，SSH 也能跑）。
