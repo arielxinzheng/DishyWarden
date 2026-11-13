@@ -22,18 +22,18 @@
     "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
-    "better-sqlite3": "12.11.1",
-    "electron-updater": "^6.3.9",
-    "sql.js": "^1.12.0",
-    "ssh2": "^1.16.0"
-  },
-  "devDependencies": {
     "@bufbuild/protobuf": "^2.16.0",
     "@connectrpc/connect": "^2.2.0",
     "@connectrpc/connect-web": "^2.2.0",
     "@grpc/grpc-js": "^1.14.6",
     "@grpc/proto-loader": "^0.8.1",
     "@grpc/reflection": "^1.0.4",
+    "better-sqlite3": "12.11.1",
+    "electron-updater": "^6.3.9",
+    "sql.js": "^1.12.0",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@react-three/drei": "^9.119.1",
     "@react-three/fiber": "^8.17.10",

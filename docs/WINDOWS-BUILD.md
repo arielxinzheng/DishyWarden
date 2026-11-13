@@ -124,8 +124,12 @@ electron-builder 在 macOS 上给 `SLMonitor.exe` 写图标与版本信息需要
    → 「更多信息」→「仍要运行」。
 2. **防火墙弹窗**：Prometheus exporter 监听 9817，首次启动会弹网络访问询问。
    不需要 Prometheus 可以忽略（缺失二进制时主进程会打 warn 并跳过 ✓）。
-3. **数据目录**：打包版的 userData 是 `%APPDATA%\SLMonitor\`
-   （开发态是 `%APPDATA%\Electron\`，**两套数据互不相通**）。
+3. **数据目录**：打包版的 userData 是 **`%APPDATA%\slmonitor\`**
+   （取自 package.json 的 `name`，全小写；`productName` 只影响 exe/安装器名字）
+   —— 开发态是 `%APPDATA%\Electron\`，**两套数据互不相通**。
+   配置文件在 `%APPDATA%\slmonitor\config\config.json`，
+   遥测/告警库在 `%APPDATA%\slmonitor\data\`。
+   实测（Parallels Windows 11）：`C:\Users\<user>\AppData\Roaming\slmonitor\data\telemetry.db` ✓
 4. **默认配置指向本机 dish**：`collector.dishAddress=127.0.0.1:9200`，
    测试机上没有 dish ⇒ 采集器连不上 ⇒ 约 3 分钟后会报"采集心跳丢失"告警（属预期行为）。
 5. **首次启动没有位置向导**：卫星方位/仰角需要手工去设置页填经纬度。
