@@ -17,6 +17,7 @@ param(
     [int]   $DishPort = 9200,
     [string]$RouterIp = '192.168.1.1',
     [int]   $ControlPort = 45999,
+    [int]   $WebPort = 9201,
     [switch]$NoPause,
     [string]$ReportPath = ''
 )
@@ -40,6 +41,60 @@ if (-not $ReportPath) {
 try { Start-Transcript -Path $ReportPath -Force | Out-Null } catch { $ReportPath = '' }
 
 function Section($t) { Write-Output ''; Write-Output ("== " + $t + " ==") }
+
+# grpc-web unary probe: POST /SpaceX.API.Device.Device/Handle
+# body = 0x00 flag + 4-byte big-endian length + protobuf payload ({id:1} => 08 01)
+function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $iar = $client.BeginConnect($Ip, $Port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutSec * 1000)) {
+            $client.Close()
+            return 'timeout (port not answering)'
+        }
+        $client.EndConnect($iar)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutSec * 1000
+        $stream.WriteTimeout = $TimeoutSec * 1000
+
+        $payload = [byte[]](0x08, 0x01)
+        $lenBytes = [System.BitConverter]::GetBytes([UInt32]$payload.Length)
+        [Array]::Reverse($lenBytes)
+        $frame = New-Object byte[] (5 + $payload.Length)
+        $frame[0] = 0x00
+        [Array]::Copy($lenBytes, 0, $frame, 1, 4)
+        [Array]::Copy($payload, 0, $frame, 5, $payload.Length)
+
+        $head = "POST /SpaceX.API.Device.Device/Handle HTTP/1.1`r`n" +
+                "Host: $Ip`:$Port`r`n" +
+                "Content-Type: application/grpc-web+proto`r`n" +
+                "Accept: application/grpc-web+proto`r`n" +
+                "X-Grpc-Web: 1`r`n" +
+                "TE: trailers`r`n" +
+                "Content-Length: $($frame.Length)`r`n" +
+                "Connection: close`r`n`r`n"
+        $headBytes = [System.Text.Encoding]::ASCII.GetBytes($head)
+        $stream.Write($headBytes, 0, $headBytes.Length)
+        $stream.Write($frame, 0, $frame.Length)
+        $stream.Flush()
+
+        $buf = New-Object byte[] 1024
+        $n = $stream.Read($buf, 0, $buf.Length)
+        $client.Close()
+        if ($n -le 0) { return 'no-response (connection opened but nothing came back)' }
+        $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $n)
+        $http = ''
+        if ($text -match 'HTTP/1\.[01] (\d+)') { $http = $Matches[1] }
+        $gs = ''
+        if ($text -match 'grpc-status:\s*(\d+)') { $gs = $Matches[1] }
+        $gm = ''
+        if ($text -match 'grpc-message:\s*([^\r\n]+)') { $gm = $Matches[1] }
+        return ("http=$http grpc-status=$gs msg=$gm bytes=$n")
+    } catch {
+        $client.Close()
+        return ('error: ' + $_.Exception.Message)
+    }
+}
 
 Section '0) proxy / VPN check (this is the #1 source of false positives)'
 $winhttpOut = (netsh winhttp show proxy 2>$null | Out-String)
@@ -81,6 +136,21 @@ try { $tcp = Test-NetConnection -ComputerName $DishIp -Port $DishPort -WarningAc
 if ($tcp) {
     Write-Output ('TcpTestSucceeded : ' + $tcp.TcpTestSucceeded)
 } else { Write-Output 'TCP test failed to run' }
+
+Section ("3c) TCP " + $DishIp + ":" + $WebPort + "  (grpc-web port, the app's fallback path)")
+Write-Output 'The dish serves TWO protocols: 9200 = native gRPC (HTTP/2, reflection),'
+Write-Output '9201 = grpc-web (HTTP/1.1). The app falls back to 9201 when 9200 refuses'
+Write-Output 'or answers UNIMPLEMENTED, so check this port too.'
+$webTcp = $null
+try { $webTcp = Test-NetConnection -ComputerName $DishIp -Port $WebPort -WarningAction SilentlyContinue } catch {}
+if ($webTcp) {
+    Write-Output ('TcpTestSucceeded : ' + $webTcp.TcpTestSucceeded)
+} else { Write-Output 'TCP test failed to run' }
+
+Section ("3d) grpc-web probe on " + $DishIp + ":" + $WebPort)
+Write-Output 'Send a grpc-web POST (1-byte flag 0x00 + 4-byte length + payload) and'
+Write-Output 'look for an HTTP status line and/or grpc-status.'
+Write-Output ('grpc-web probe => ' + (Test-GrpcWeb -Ip $DishIp -Port $WebPort -TimeoutSec 6))
 
 Section ("3b) CONTROL PORT " + $DishIp + ":" + $ControlPort + "  <-- false-positive detector")
 Write-Output 'A real host must REFUSE an unused port. If this also "succeeds",'

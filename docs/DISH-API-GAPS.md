@@ -127,3 +127,28 @@ dishylink 的实测结论：**`dish_get_status` 的数值字段在某些固件�
 如果还留着 `127.0.0.1`，启动时日志会提醒一次
 （`[dishClient] 配置里的设备地址还是 DishyMock 的 127.0.0.1 …`），
 但**不做破坏性迁移** —— 有人在用本地 mock 时不该被改掉。
+
+## 9. 一个隐蔽的依赖：reflection 只在 9200 上
+
+`proto` 描述符只能通过 **9200 的 reflection** 取得（9201 是 grpc-web，不提供 reflection）。
+而 grpc-web(9201) 的请求编码和响应解码**都要靠这个描述符** ⇒
+
+> 9200 整个不可达 ⇒ 拿不到描述符 ⇒ grpc-web 兜底也建不起来 ⇒ 两条路一起瘫痪。
+
+真机日志长这样（用户实测）：
+
+```
+ECONNREFUSED 192.168.100.1:9200                 ← 原生 gRPC 连不上
+grpc-web 兜底也失败: reflection 超时 (10s)      ← 兜底也要 reflection ⇒ 也超时
+Starlink 设备连接超时 (10s)                     ← 整个采集周期被判超时
+```
+
+**已做的两层缓存**（`src/core/dishGrpc.ts`）：
+
+| 层 | 作用域 | 作用 |
+|---|---|---|
+| 模块级 `moduleDescriptorCache` | 主进程生命周期 | 9200 短暂可达一次就记住，后续原生 gRPC 快速失败（<1s），9201 继续工作 |
+| 磁盘缓存 `dish-descriptor.bin` | 跨重启 | `%APPDATA%\DishyWarden\dish-descriptor.bin`；有缓存时 reflection 只给 2.5s 宽限（拿不到就用缓存），固件升级后仍能取到新 proto |
+
+局限：磁盘缓存里的 proto 在固件升级后可能过时（此时 9200 可达时 reflection 会在 2.5s 内
+拿到新的并覆盖缓存 ✓）。

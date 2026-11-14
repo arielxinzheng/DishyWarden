@@ -258,6 +258,8 @@ async function startBackgroundServices() {
     collector = createCollector({
       ...config.collector,
       probeNodes: config.probe.nodes, // 传递探针节点配置
+      // proto 描述符落盘：9200 不可达时 grpc-web(9201) 仍需要它才能编解码
+      descriptorCachePath: path.join(app.getPath('userData'), 'dish-descriptor.bin'),
     });
     
     console.log('[Main] 探针节点配置:', config.probe.nodes.map(n => `${n.id}(${n.type},enabled=${n.enabled})`).join(', '));

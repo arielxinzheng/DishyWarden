@@ -35,6 +35,13 @@ export interface DishConfig {
   address: string;      // dish 地址，默认 192.168.100.1
   grpcPort: number;     // 原生 gRPC 端口，默认 9200
   grpcWebPort?: number; // grpc-web 兜底端口，默认 9201（9200 不吃请求时用）
+  /**
+   * proto 描述符的磁盘缓存路径。
+   *
+   * reflection 只在 9200 上有，而 grpc-web(9201) 兜底需要描述符才能编解码。
+   * 9200 不可达时没有缓存就彻底瘫痪 ⇒ 描述符要落盘，跨重启也能用。
+   */
+  descriptorCachePath?: string;
   timeout?: number;     // 请求超时（毫秒），默认 10000
   useProxy?: boolean;   // 是否使用代理绕过 CORS
   proxyUrl?: string;    // 代理服务器地址
@@ -243,6 +250,7 @@ export class DishClient {
       address: config.address || '192.168.100.1',
       grpcPort: config.grpcPort || 9200,
       grpcWebPort: config.grpcWebPort || 9201,
+      descriptorCachePath: config.descriptorCachePath ?? '',
       timeout: config.timeout || 10000,
       useProxy: config.useProxy || false,
       proxyUrl: config.proxyUrl || 'http://localhost:8080',
@@ -264,6 +272,7 @@ export class DishClient {
         this.config.address,
         this.config.grpcPort,
         this.config.grpcWebPort,
+        this.config.descriptorCachePath,
       );
     }
     try {
@@ -287,6 +296,7 @@ export class DishClient {
         this.config.address,
         this.config.grpcPort,
         this.config.grpcWebPort,
+        this.config.descriptorCachePath,
       );
     }
 

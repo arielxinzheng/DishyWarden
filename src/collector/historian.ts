@@ -27,6 +27,7 @@ export interface CollectorConfig {
   dishAddress?: string;       // Dish 地址（真机默认 192.168.100.1）
   dishPort?: number;          // Dish 原生 gRPC 端口（9200）
   dishWebPort?: number;       // Dish grpc-web 端口（9201，原生不通时的兜底）
+  descriptorCachePath?: string; // proto 描述符磁盘缓存路径（跨重启保留）
   routerAddress?: string;     // Router 地址（真机默认 192.168.1.1，用于 ICMP Ping 探测）
   enablePersistence?: boolean; // 是否持久化到磁盘
   dataDir?: string;           // 自定义数据目录（留空则用 app.getPath('userData')/data）
@@ -83,6 +84,7 @@ export class DataCollector extends EventEmitter {
       dishAddress: config.dishAddress || '192.168.100.1',
       dishPort: config.dishPort || 9200,
       dishWebPort: config.dishWebPort || 9201,
+      descriptorCachePath: config.descriptorCachePath || '',
       routerAddress: config.routerAddress || '192.168.1.1',
       enablePersistence: config.enablePersistence ?? true,
       dataDir: config.dataDir || '', // 空 = 使用 app.getPath('userData')/data
@@ -93,6 +95,7 @@ export class DataCollector extends EventEmitter {
       address: this.config.dishAddress,
       grpcPort: this.config.dishPort,
       grpcWebPort: this.config.dishWebPort,
+      descriptorCachePath: this.config.descriptorCachePath,
       fallbackToMock: false,  // 禁用 mock 回退，连接失败时直接报错
     });
 
@@ -467,6 +470,7 @@ export class DataCollector extends EventEmitter {
         address: this.config.dishAddress,
         grpcPort: this.config.dishPort,
         grpcWebPort: this.config.dishWebPort,
+      descriptorCachePath: this.config.descriptorCachePath,
       });
     }
     

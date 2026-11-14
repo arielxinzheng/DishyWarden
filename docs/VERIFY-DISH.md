@@ -53,6 +53,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Public\verify-dish.
 报告文件是 **UTF-8 with BOM**，记事本直接打开不乱码；若在 cmd 里 `type` 出现乱码，
 用 `Get-Content -Encoding UTF8` 读即可。
 
+### 1.1 必须同时看 9200 和 9201（dish 有两套协议）
+
+| 端口 | 协议 | 作用 |
+|---|---|---|
+| **9200** | 原生 gRPC (HTTP/2) | reflection（拿 proto 描述符）+ 部分 Handle 调用 |
+| **9201** | **grpc-web (HTTP/1.1)** | Handle 调用的主力路径（应用在 9200 不通时自动切这里） |
+
+`verify-dish.ps1` 现在会测两个端口：
+
+- **§3 / §4**：9200 的 TCP + HTTP/2 SETTINGS 握手
+- **§3c / §3d**：9201 的 TCP + grpc-web POST 探测（看 `http=` 与 `grpc-status=`）
+
+⚠️ **一个隐蔽的依赖**：proto 描述符只能通过 **9200 上的 reflection** 取得，
+而 grpc-web(9201) 的请求/响应都要靠它编解码 ⇒ **9200 整个挂掉时，
+9201 也会跟着瘫痪**（日志里表现为 `grpc-web 兜底也失败: reflection 超时 (10s)`）。
+应用为此做了两层缓存：进程内缓存 + 磁盘缓存（`%APPDATA%\DishyWarden\dish-descriptor.bin`），
+所以只要 9200 成功过一次，之后它挂了也不影响 9201 工作。
+
 ### A. RDP + 剪贴板（最快）
 1. 本地打开 `scripts/verify-dish.ps1`，全选复制（RDP 默认开着剪贴板重定向）
 2. 远程 Windows 的 PowerShell 里：

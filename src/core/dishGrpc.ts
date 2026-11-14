@@ -22,6 +22,8 @@ import { createFileRegistry, fromBinary, toBinary, toJson } from '@bufbuild/prot
 import { FileDescriptorSetSchema, FileDescriptorProtoSchema } from '@bufbuild/protobuf/wkt';
 import { grpcWebUnary } from './grpcWeb';
 import { createRequire } from 'node:module';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 const require = createRequire(import.meta.url);
 
@@ -121,10 +123,19 @@ export class DishGrpcClient {
   private descriptorBytes: Uint8Array[] | null = null;
   private registry: ReturnType<typeof createFileRegistry> | null = null;
 
-  constructor(host: string, port: number, webPort: number = DEFAULT_WEB_PORT) {
+  /** 描述符磁盘缓存路径（可空 = 不做磁盘缓存） */
+  private descriptorCachePath: string | null;
+
+  constructor(
+    host: string,
+    port: number,
+    webPort: number = DEFAULT_WEB_PORT,
+    descriptorCachePath?: string | null,
+  ) {
     this.host = host;
     this.port = port;
     this.webPort = webPort;
+    this.descriptorCachePath = descriptorCachePath ?? null;
   }
 
   /**
@@ -142,11 +153,7 @@ export class DishGrpcClient {
       return this.buildClient(moduleDescriptorCache);
     }
 
-    const address = `${this.host}:${this.port}`;
-    const probe = new grpc.Client(address, grpc.credentials.createInsecure());
-
-    const descriptor = await this.reflectFileContainingSymbol(probe, SYMBOL);
-    moduleDescriptorCache = descriptor; // 成功后写入模块缓存
+    const descriptor = await this.resolveDescriptor();
     return this.buildClient(descriptor);
   }
 
@@ -186,7 +193,8 @@ export class DishGrpcClient {
    */
   private async reflectFileContainingSymbol(
     client: grpc.Client,
-    symbol: string
+    symbol: string,
+    timeoutMs = 10000,
   ): Promise<Uint8Array[]> {
     const reflectionDef = protoLoader.loadSync(REFLECTION_PROTO_PATH, PROTO_OPTS);
     const reflectionPkg = grpc.loadPackageDefinition(reflectionDef) as unknown as {
@@ -227,7 +235,10 @@ export class DishGrpcClient {
         else reject(new Error(`reflection 未返回 ${symbol} 的描述符`));
       };
 
-      const timer = setTimeout(() => finish(new Error('reflection 超时 (10s)')), 10000);
+      const timer = setTimeout(
+        () => finish(new Error(`reflection 超时 (${Math.round(timeoutMs / 1000)}s)`)),
+        timeoutMs,
+      );
 
       // 收集一个文件引用的**类型名**（bufbuild 解析单个文件不校验引用 ✓）。
       //
@@ -394,6 +405,75 @@ export class DishGrpcClient {
     return [...names].sort();
   }
 
+  /**
+   * 解析描述符：模块缓存 → 磁盘缓存 → reflection。
+   *
+   * 为什么需要磁盘缓存：reflection 只在 9200 上有，而 grpc-web(9201) 兜底
+   * 需要描述符才能编解码。9200 一旦不可达，连"取描述符"都做不到 ⇒
+   * 整个 grpc-web 通道瘫痪。
+   *
+   * 有磁盘缓存时先给 reflection 一个**短超时**（2.5s）：9200 活着就取新鲜的
+   * （固件升级后 proto 可能变），不活就直接用缓存，不白等 10s。
+   */
+  private async resolveDescriptor(): Promise<Uint8Array[]> {
+    if (moduleDescriptorCache) return moduleDescriptorCache;
+
+    const disk = this.readDescriptorFromDisk();
+    const timeoutMs = disk ? 2500 : 10000;
+    const address = `${this.host}:${this.port}`;
+    const probe = new grpc.Client(address, grpc.credentials.createInsecure());
+    try {
+      const fresh = await this.reflectFileContainingSymbol(probe, SYMBOL, timeoutMs);
+      moduleDescriptorCache = fresh;
+      this.writeDescriptorToDisk(fresh);
+      return fresh;
+    } catch (err) {
+      if (disk) {
+        console.warn(
+          '[DishGrpc] reflection 不可用, 改用磁盘缓存的描述符:',
+          err instanceof Error ? err.message : err,
+        );
+        moduleDescriptorCache = disk;
+        return disk;
+      }
+      throw err;
+    } finally {
+      probe.close();
+    }
+  }
+
+  /** 读磁盘上的描述符缓存（FileDescriptorSet 字节流） */
+  private readDescriptorFromDisk(): Uint8Array[] | null {
+    if (!this.descriptorCachePath) return null;
+    try {
+      if (!fs.existsSync(this.descriptorCachePath)) return null;
+      const buf = fs.readFileSync(this.descriptorCachePath);
+      if (buf.length === 0) return null;
+      const set = fromBinary(FileDescriptorSetSchema, buf);
+      return set.file.map((f) => toBinary(FileDescriptorProtoSchema, f));
+    } catch (err) {
+      console.warn(
+        '[DishGrpc] 读描述符缓存失败:',
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }
+  }
+
+  /** 写磁盘上的描述符缓存（FileDescriptorSet 字节流） */
+  private writeDescriptorToDisk(descriptor: Uint8Array[]): void {
+    if (!this.descriptorCachePath) return;
+    try {
+      fs.mkdirSync(path.dirname(this.descriptorCachePath), { recursive: true });
+      fs.writeFileSync(this.descriptorCachePath, packFileDescriptorSet(descriptor));
+    } catch (err) {
+      console.warn(
+        '[DishGrpc] 写描述符缓存失败:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   /** 取 reflection 返回的原始描述符字节（诊断用） */
   private async rawDescriptorBytes(): Promise<Uint8Array[]> {
     const address = `${this.host}:${this.port}`;
@@ -551,19 +631,8 @@ export class DishGrpcClient {
    */
   private async ensureRegistry(): Promise<ReturnType<typeof createFileRegistry>> {
     if (this.registry) return this.registry;
-    // 优先用模块级缓存（9200 不可达时跳过 reflection）
-    if (!this.descriptorBytes && moduleDescriptorCache) {
-      this.descriptorBytes = moduleDescriptorCache;
-    }
     if (!this.descriptorBytes) {
-      const address = `${this.host}:${this.port}`;
-      const probe = new grpc.Client(address, grpc.credentials.createInsecure());
-      try {
-        this.descriptorBytes = await this.reflectFileContainingSymbol(probe, SYMBOL);
-        moduleDescriptorCache = this.descriptorBytes; // 成功后写入模块缓存
-      } finally {
-        probe.close();
-      }
+      this.descriptorBytes = await this.resolveDescriptor();
     }
     try {
       // v2 的 createFileRegistry 收一个 FileDescriptorSet
