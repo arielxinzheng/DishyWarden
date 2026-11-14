@@ -93,18 +93,27 @@ function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5, $FieldNumber = 0) {
         $stream.Write($frame, 0, $frame.Length)
         $stream.Flush()
 
-        $buf = New-Object byte[] 1024
-        $n = $stream.Read($buf, 0, $buf.Length)
+        # Read the WHOLE response: grpc-status lives in the trailers frame
+        # (flag 0x80), which usually comes AFTER the message frame.
+        # A single Read() often misses it.
+        $buf = New-Object byte[] 8192
+        $total = 0
+        while ($true) {
+            $n = $stream.Read($buf, $total, $buf.Length - $total)
+            if ($n -le 0) { break }
+            $total += $n
+            if ($total -ge $buf.Length) { break }
+        }
         $client.Close()
-        if ($n -le 0) { return 'no-response (connection opened but nothing came back)' }
-        $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $n)
+        if ($total -le 0) { return 'no-response (connection opened but nothing came back)' }
+        $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $total)
         $http = ''
         if ($text -match 'HTTP/1\.[01] (\d+)') { $http = $Matches[1] }
         $gs = ''
         if ($text -match 'grpc-status:\s*(\d+)') { $gs = $Matches[1] }
         $gm = ''
         if ($text -match 'grpc-message:\s*([^\r\n]+)') { $gm = $Matches[1] }
-        return ("http=$http grpc-status=$gs msg=$gm bytes=$n")
+        return ("http=$http grpc-status=$gs msg=$gm bytes=$total")
     } catch {
         $client.Close()
         return ('error: ' + $_.Exception.Message)
@@ -178,15 +187,27 @@ foreach ($fn in 1004, 1007, 2006, 2008, 1008) {
     Write-Output ('  branch field ' + $fn + '       => ' + $r)
     $branchResults += [pscustomobject]@{ field = $fn; result = $r }
 }
-$working = $branchResults | Where-Object { $_.result -match 'grpc-status=0' }
+$working = $branchResults | Where-Object { $_.result -match 'grpc-status=0(\s|$)' }
 if ($working) {
     Write-Output ''
-    Write-Output '  ==> WORKING BRANCHES: ' + (($working | ForEach-Object { $_.field }) -join ', ')
+    Write-Output ('  ==> WORKING BRANCHES: ' + (($working | ForEach-Object { $_.field }) -join ', '))
     Write-Output '      The app already tries getHistory then dishGetHistory; if one of the'
     Write-Output '      above is 1007 or 2006, the app should pick it up automatically.'
 } else {
     Write-Output ''
-    Write-Output '  ==> no branch returned grpc-status=0 (all UNIMPLEMENTED or unreachable)'
+    $unimpl = $branchResults | Where-Object { $_.result -match 'grpc-status=12' }
+    $other = $branchResults | Where-Object { $_.result -notmatch 'grpc-status=12' -and $_.result -notmatch 'grpc-status=0' }
+    Write-Output '  ==> no branch returned grpc-status=0'
+    if ($unimpl) {
+        Write-Output ('      UNIMPLEMENTED (branch absent on this firmware): ' +
+            (($unimpl | ForEach-Object { $_.field }) -join ', '))
+    }
+    if ($other) {
+        Write-Output ('      answered but no grpc-status seen (trailers may be truncated): ' +
+            (($other | ForEach-Object { $_.field }) -join ', '))
+        Write-Output '      -> these DID return a body; compare the byte counts:'
+        Write-Output '         a body much larger than the empty request means the branch EXISTS.'
+    }
 }
 
 Section ("3b) CONTROL PORT " + $DishIp + ":" + $ControlPort + "  <-- false-positive detector")
