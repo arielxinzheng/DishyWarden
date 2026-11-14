@@ -68,11 +68,37 @@ export interface HistorySample {
   uplinkBps?: number;
 }
 
-/** 从 history 响应里取最新样本（数组末尾 = 最新） */
+/**
+ * 从 history 响应里取**最新**样本。
+ *
+ * ⚠️ history 的数组是**环形缓冲**，最新样本**不在末尾**！
+ * dishylink 的 decodeHistoryWindow 写得很清楚：
+ *   "each array holds the last `arrayLength` samples at one sample per second,
+ *    where absolute sample counter `c` lives at index `c % arrayLength`"
+ * ⇒ 最新样本的绝对计数器是 `current - 1` ⇒ 下标 `(current - 1) % arrayLength`。
+ *
+ * 取末尾元素在缓冲**绕回之后**（current > 数组长度）会拿到旧样本 ⇒ 指标错乱。
+ * 没有 `current`（刚启动/字段缺失）时退回末尾取法。
+ */
 export function latestHistorySample(history: Record<string, unknown>): HistorySample | undefined {
+  // 绝对样本计数器（自启动以来写入的样本数）
+  const currentRaw = history.current;
+  const current =
+    typeof currentRaw === 'number' && Number.isFinite(currentRaw)
+      ? currentRaw
+      : typeof currentRaw === 'string' && currentRaw.trim() !== ''
+        ? Number(currentRaw)
+        : 0;
+
+  // 用 latency 数组的长度作为环形缓冲的基准（各数组是平行的）
+  const latencies = history.popPingLatencyMs;
+  const arrayLength = Array.isArray(latencies) ? latencies.length : 0;
+  const ringIndex = arrayLength > 0 && current > 0 ? (current - 1) % arrayLength : -1;
+
   const last = (v: unknown): number | undefined => {
     if (!Array.isArray(v) || v.length === 0) return undefined;
-    const lastVal = v[v.length - 1];
+    const idx = ringIndex >= 0 && ringIndex < v.length ? ringIndex : v.length - 1;
+    const lastVal = v[idx];
     if (typeof lastVal === 'number' && Number.isFinite(lastVal)) return lastVal;
     if (typeof lastVal === 'string' && lastVal.trim() !== '') {
       const n = Number(lastVal);

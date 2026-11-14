@@ -261,3 +261,39 @@ describe('latestHistorySample', () => {
     expect(sample?.latencyMs).toBe(34);
   });
 });
+
+// ── history 是环形缓冲：最新样本不在末尾 ─────────────────────────────────
+describe('latestHistorySample 环形缓冲索引', () => {
+  it('按 current 计数器定位最新样本（不是取末尾）', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    // 数组长度 3，current=5 ⇒ 最新样本在 (5-1)%3 = 1
+    const sample = latestHistorySample({
+      current: 5,
+      popPingLatencyMs: [10, 20, 30],
+      popPingDropRate: [0.1, 0.2, 0.3],
+      downlinkThroughputBps: [100, 200, 300],
+      uplinkThroughputBps: [1, 2, 3],
+    });
+    expect(sample).toEqual({
+      dropRate: 0.2,
+      latencyMs: 20,
+      downlinkBps: 200,
+      uplinkBps: 2,
+    });
+  });
+
+  it('缓冲绕回后仍取到真正的最新样本', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    // 长度 900，current=1000 ⇒ 最新样本在 (1000-1)%900 = 99
+    const latencies = new Array(900).fill(0);
+    latencies[99] = 42;
+    const sample = latestHistorySample({ current: 1000, popPingLatencyMs: latencies });
+    expect(sample?.latencyMs).toBe(42);
+  });
+
+  it('没有 current 时退回取末尾', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    const sample = latestHistorySample({ popPingLatencyMs: [10, 20, 30] });
+    expect(sample?.latencyMs).toBe(30);
+  });
+});

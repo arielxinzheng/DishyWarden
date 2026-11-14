@@ -96,7 +96,10 @@ function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5, $FieldNumber = 0) {
         # Read the WHOLE response: grpc-status lives in the trailers frame
         # (flag 0x80), which usually comes AFTER the message frame.
         # A single Read() often misses it.
-        $buf = New-Object byte[] 8192
+        # 64 KB: the dish's history response is ~18 KB (dishylink measured
+        # 18128 B), so an 8 KB buffer truncates it and the trailers frame
+        # (which carries grpc-status) never gets read.
+        $buf = New-Object byte[] 65536
         $total = 0
         while ($true) {
             $n = $stream.Read($buf, $total, $buf.Length - $total)
@@ -113,7 +116,13 @@ function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5, $FieldNumber = 0) {
         if ($text -match 'grpc-status:\s*(\d+)') { $gs = $Matches[1] }
         $gm = ''
         if ($text -match 'grpc-message:\s*([^\r\n]+)') { $gm = $Matches[1] }
-        return ("http=$http grpc-status=$gs msg=$gm bytes=$total")
+        $trunc = ''
+        if ($total -ge $buf.Length) {
+            $trunc = ' TRUNCATED(response bigger than 64KB, trailers not read)'
+        } elseif ($gs -eq '' -and $http -eq '200') {
+            $trunc = ' NO-GRPC-STATUS(trailers not found)'
+        }
+        return ("http=$http grpc-status=$gs msg=$gm bytes=$total" + $trunc)
     } catch {
         $client.Close()
         return ('error: ' + $_.Exception.Message)
@@ -203,10 +212,11 @@ if ($working) {
             (($unimpl | ForEach-Object { $_.field }) -join ', '))
     }
     if ($other) {
-        Write-Output ('      answered but no grpc-status seen (trailers may be truncated): ' +
+        Write-Output ('      answered but no grpc-status seen: ' +
             (($other | ForEach-Object { $_.field }) -join ', '))
-        Write-Output '      -> these DID return a body; compare the byte counts:'
-        Write-Output '         a body much larger than the empty request means the branch EXISTS.'
+        Write-Output '      -> these DID return a body. If the line says TRUNCATED,'
+        Write-Output '         the response was bigger than the 64 KB buffer, so the'
+        Write-Output '         trailers frame was never read => the branch is probably FINE.'
     }
 }
 

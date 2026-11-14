@@ -177,3 +177,26 @@ http=200 grpc-status=12 msg=Unimplemented: <nil> bytes=286
    这是判断分支名的最直接证据；
 3. `verify-dish.ps1` 的 §3d 依次试已知字段号（1004 / 1007 / 2006 / 2008 / 1008），
    看哪个回 `grpc-status=0`。
+
+## 11. history 的数组是**环形缓冲**，最新样本不在末尾 ⚠️
+
+dishylink 的 `decodeHistoryWindow` 讲得很清楚：
+
+> "each array holds the last `arrayLength` samples at one sample per second,
+>  where **absolute sample counter `c` lives at index `c % arrayLength`**.
+>  The newest sample is pinned to `nowMs`."
+
+⇒ 最新样本的绝对计数器是 `current - 1` ⇒ 下标 **`(current - 1) % arrayLength`**。
+⇒ **直接取数组末尾是错的**：缓冲绕回（`current > 数组长度`，900 个样本 15 分钟后就会发生）
+之后末尾是最**旧**的样本 ⇒ 指标会悄悄变成 15 分钟前的值。
+
+**已修**：`latestHistorySample()` 改成按 `current` 计数器定位
+（拿不到 `current` 时才退回末尾取法），并补了 3 个单测
+（未绕回 / 已绕回 / 无 current）。
+
+另外 `history.current` 是自启动以来的样本计数，**每次调用都在涨** ⇒
+它是判断"样本是否新鲜"的另一个依据。
+
+响应体大小：dishylink 实测 history 响应约 **18,128 字节**（900 个样本 × 4 个数组），
+⇒ 验证脚本的读取缓冲区从 8 KB 提到 **64 KB**，否则 trailers 帧（带 grpc-status）
+读不到 ⇒ 会把"响应被截断"误判成"分支不存在"。
