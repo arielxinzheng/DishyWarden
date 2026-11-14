@@ -76,7 +76,15 @@ dishylink 的实测结论：**`dish_get_status` 的数值字段在某些固件�
 是**设备自己报告的中断事件**（含卫星切换 `did_switch`），比"靠丢包推断中断"可靠得多。
 
 ⚠️ 两个坑：
-1. `start_timestamp_ns` 是 **GPS epoch**（比 Unix 快 **18 秒**），dishylink 专门做了换算；
+1. `start_timestamp_ns` 的**时间基准存疑**（2026-11-15 更正）：
+   - 说法 A：**GPS epoch**（1980-01-06）⇒ 与 Unix epoch 差 **315,964,800 秒**（约 10 年）
+   - 说法 B：Unix epoch，但用 **GPS 时标**（闰秒累计差 18 秒）
+   两种说法差 10 年，**必须拿一份真机 `get_history` 原始样本判定**
+   （判据：把 ns 值换算后与本机 Unix 时间比较，看差 18 秒还是差 10 年）；
+   在此之前**不要**写死任何换算常数。
+   另外：字段名/单位也可能不同（真机可能是 `*_ns` 纳秒，我们代码读的是
+   `startTimestamp`/`durationMs` 毫秒）⇒ 纳秒当毫秒会让所有事件掉出时间窗、
+   时长读成 0 会让短中断全被误判成卫星切换 —— 这比"差 18 秒"严重得多。
 2. `duration_ns` / `start_timestamp_ns` 是 int64 ⇒ protobuf 里是 **string**，要转数字。
 
 我们目前完全没用这个字段 ⇒ 中断判定只能靠丢包推断，而丢包又受缺口二影响 ⇒ 双重失效。
@@ -102,7 +110,7 @@ dishylink 的实测结论：**`dish_get_status` 的数值字段在某些固件�
 
 ## 7. 待办
 
-- [ ] 解析 `outages[]` 并接进中断判定（含 GPS epoch +18s 换算）
+- [ ] 解析 `outages[]` 并接进中断判定（**先判定时间基准与字段单位**，别先写换算常数）
 - [ ] LAN 写操作的明确错误提示（PERMISSION_DENIED ≠ 网络故障）
 - [ ] 路由器 API（192.168.1.1:9001）：`wifi_get_clients` / `get_radio_stats` /
       `wifi_get_history` 是**客户端级**吞吐、温度、事件日志的唯一来源

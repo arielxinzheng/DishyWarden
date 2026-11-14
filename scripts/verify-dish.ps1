@@ -96,10 +96,11 @@ function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5, $FieldNumber = 0) {
         # Read the WHOLE response: grpc-status lives in the trailers frame
         # (flag 0x80), which usually comes AFTER the message frame.
         # A single Read() often misses it.
-        # 64 KB: the dish's history response is ~18 KB (dishylink measured
-        # 18128 B), so an 8 KB buffer truncates it and the trailers frame
-        # (which carries grpc-status) never gets read.
-        $buf = New-Object byte[] 65536
+        # 256 KB: the biggest real response is the obstruction map
+        # (60803 B measured on the user's dish) plus the history response
+        # (22446 B). A 64 KB buffer leaves too little room for the trailers
+        # frame, and an 8 KB buffer truncated the response outright.
+        $buf = New-Object byte[] 262144
         $total = 0
         while ($true) {
             $n = $stream.Read($buf, $total, $buf.Length - $total)
@@ -118,7 +119,7 @@ function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5, $FieldNumber = 0) {
         if ($text -match 'grpc-message:\s*([^\r\n]+)') { $gm = $Matches[1] }
         $trunc = ''
         if ($total -ge $buf.Length) {
-            $trunc = ' TRUNCATED(response bigger than 64KB, trailers not read)'
+            $trunc = ' TRUNCATED(response bigger than 256KB, trailers not read)'
         } elseif ($gs -eq '' -and $http -eq '200') {
             $trunc = ' NO-GRPC-STATUS(trailers not found)'
         }
@@ -277,6 +278,11 @@ if ($rt) { Write-Output ($rt -join "`n") } else { Write-Output 'no explicit rout
 Section '7) router (LAN gateway) sanity'
 Write-Output ('router ' + $RouterIp + ':80 reachable = ' + [bool](Test-NetConnection -ComputerName $RouterIp -Port 80 -WarningAction SilentlyContinue).TcpTestSucceeded)
 
+Write-Output 'NOTE: this script does NOT verify the gRPC reflection service.'
+Write-Output '      Reflection is what lets the app decode responses; run'
+Write-Output '      DishyWarden.exe --dump-dish-api and look for'
+Write-Output '      "[DishGrpc] reflection success" (port 9200).'
+Write-Output ''
 Section 'VERDICT'
 if ($proxyFake) {
     Write-Output 'INVALID: proxy/tunnel is intercepting the traffic. Fix that first.'

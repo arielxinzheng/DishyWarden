@@ -228,6 +228,7 @@ npx vitest run                                # 519 个用例（2026-11-15 评�
 | 9 | `--dump-dish-api` 不传 webPort（总打 9201）；`rawDescriptorBytes()` 绕过端口回落和缓存，配置 9201 时诊断的 [1] 段必失败 | 代码路径 | 传 webPort；诊断走与采集相同的 `resolveDescriptor()` |
 | 10 | registry 构建失败后每次 RPC 都重建并刷一条告警日志 | 本地 mock 跑一帧出现 5 条相同告警 | 失败一次后记住 |
 | 11 | `latestHistorySample` 用 `popPingLatencyMs` 的长度做环形基准，该数组缺失时其它数组退回取末尾 | 代码路径 | 每个数组按自身长度取模 |
+| 12 | **grpc-web 请求带了 `sec-fetch-mode: cors`**：Node 的 `fetch`（undici）会自动加这个浏览器头；而 dish 有 "Referer guard"（带 Referer/Origin 的请求回空 200）。⇒ **裸 TCP 探针（不带这些头）能通，应用的 fetch 请求却被挡** —— 探针与应用的请求不等价，排查时极具误导性 | 本地实测：Node fetch 收到的头含 `sec-fetch-mode: cors`；`grpcWeb.ts` 注释记录了 dish 的 Referer guard | 主进程改用 `node:http`（`src/core/grpcWebNode.ts`），请求头完全可控、不带任何 `sec-fetch-*`；加回归测试断言这些头不存在 |
 
 **对用户四个已修根因的复核结论**：
 * 根因 1（描述符缓存）：方向对，但有缺陷 2、3、4、6

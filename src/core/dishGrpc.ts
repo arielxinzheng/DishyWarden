@@ -20,7 +20,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { createFileRegistry, fromBinary, toBinary, toJson } from '@bufbuild/protobuf';
 import { FileDescriptorSetSchema, FileDescriptorProtoSchema } from '@bufbuild/protobuf/wkt';
-import { grpcWebUnary } from './grpcWeb';
+import { grpcWebUnaryNode } from './grpcWebNode';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -790,7 +790,9 @@ export class DishGrpcClient {
     const url = `http://${this.host}:${this.webPort}/SpaceX.API.Device.Device/Handle`;
     let result;
     try {
-      result = await grpcWebUnary(url, payload, timeoutMs);
+      // 主进程用 node:http 版本 —— fetch 会自动带 sec-fetch-mode，
+      // dish 的 Referer guard 可能因此回空 200（探针不带这些头却能通）。
+      result = await grpcWebUnaryNode(url, payload, timeoutMs);
     } catch (err) {
       // 统一成和原生 gRPC 一样的错误格式，便于上层/日志区分
       const status = (err as { grpcStatus?: number }).grpcStatus;
