@@ -437,12 +437,13 @@ export class DishGrpcClient {
     timeoutMs: number,
   ): Promise<Record<string, unknown>> {
     const registry = await this.ensureRegistry();
-    const responseType = registry ? registry.getMessage(RESPONSE_SYMBOL) : null;
+    const responseType = registry ? (registry.getMessage(RESPONSE_SYMBOL) ?? null) : null;
 
     let payload: Uint8Array;
     try {
       if (!registry) throw new Error('registry 不可用');
       const requestType = registry.getMessage(SYMBOL);
+      if (!requestType) throw new Error('描述符里没有 Request 消息类型');
       // camelCase 分支名 → proto 字段名（snake_case）
       const branch = Object.keys(request).find((k) => k !== 'id');
       const field = branch
