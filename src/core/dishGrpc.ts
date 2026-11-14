@@ -63,6 +63,18 @@ const DEFAULT_WEB_PORT = 9201;
  * 这时 protobufjs 查不到 Request 类型 ⇒ 退化成手工编码
  * （tag = 字段号<<3|2，length=0；外加 id 字段）。
  */
+/**
+ * 模块级描述符缓存。
+ *
+ * 为什么需要它：grpc-web(9201) 兜底依赖 reflection 拿 proto 描述符，
+ * 而 **reflection 只在 9200 上有**。如果 9200 完全不可达（ECONNREFUSED），
+ * reflection 也做不了 ⇒ grpc-web 兜底建不起来 ⇒ 循环依赖 ⇒ 全部超时。
+ *
+ * 缓存后：首次 reflection 成功（9200 短暂可达时）⇒ 描述符记住 ⇒
+ * 后续即使 9200 挂了，原生 gRPC 快速失败（<1s），grpc-web 用缓存继续工作。
+ */
+let moduleDescriptorCache: Uint8Array[] | null = null;
+
 const KNOWN_FIELD_NUMBERS: Record<string, number> = {
   getStatus: 1004,
   getHistory: 1007,
@@ -124,10 +136,23 @@ export class DishGrpcClient {
   private async connect(): Promise<DeviceClient> {
     if (this.client) return this.client;
 
+    // 优先用模块级缓存 —— 9200 不可达时跳过 reflection（省 10s 超时）。
+    // proto-loader 客户端的连接是 lazy 的，真正的网络 I/O 发生在 Handle 调用时。
+    if (moduleDescriptorCache) {
+      return this.buildClient(moduleDescriptorCache);
+    }
+
     const address = `${this.host}:${this.port}`;
     const probe = new grpc.Client(address, grpc.credentials.createInsecure());
 
     const descriptor = await this.reflectFileContainingSymbol(probe, SYMBOL);
+    moduleDescriptorCache = descriptor; // 成功后写入模块缓存
+    return this.buildClient(descriptor);
+  }
+
+  /** 从描述符字节构建 proto-loader 客户端（connect 的后半段，可被缓存路径复用） */
+  private buildClient(descriptor: Uint8Array[]): DeviceClient {
+    const address = `${this.host}:${this.port}`;
     // loadFileDescriptorSetFromBuffer 专门吃打包好的 FileDescriptorSet 字节流
     const pkgDef = protoLoader.loadFileDescriptorSetFromBuffer(
       packFileDescriptorSet(descriptor),
@@ -139,13 +164,11 @@ export class DishGrpcClient {
 
     const DeviceCtor = loaded.SpaceX?.API?.Device?.Device;
     if (!DeviceCtor) {
-      probe.close();
       throw new Error(`reflection 返回的 proto 里没有 ${SERVICE_NAME} 服务`);
     }
 
     const real = new DeviceCtor(address, grpc.credentials.createInsecure());
     this.client = real as unknown as DeviceClient;
-    probe.close();
     return this.client;
   }
 
@@ -528,11 +551,16 @@ export class DishGrpcClient {
    */
   private async ensureRegistry(): Promise<ReturnType<typeof createFileRegistry>> {
     if (this.registry) return this.registry;
+    // 优先用模块级缓存（9200 不可达时跳过 reflection）
+    if (!this.descriptorBytes && moduleDescriptorCache) {
+      this.descriptorBytes = moduleDescriptorCache;
+    }
     if (!this.descriptorBytes) {
       const address = `${this.host}:${this.port}`;
       const probe = new grpc.Client(address, grpc.credentials.createInsecure());
       try {
         this.descriptorBytes = await this.reflectFileContainingSymbol(probe, SYMBOL);
+        moduleDescriptorCache = this.descriptorBytes; // 成功后写入模块缓存
       } finally {
         probe.close();
       }
