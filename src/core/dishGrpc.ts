@@ -324,6 +324,77 @@ export class DishGrpcClient {
   }
 
   /**
+   * 按**设备自己的描述符**推导候选分支名。
+   *
+   * 为什么需要：不同固件给同一语义起的分支名可能不同 —— 实测有固件把
+   * history 的请求分支叫 `dish_get_history`(#2006) 而不是 `get_history`(#1007)
+   * （响应键则相反）。硬编码只能覆盖已知的几种，靠描述符推导才通用。
+   *
+   * 做法：从 Request 消息的字段里挑出名字含该语义关键字的（如 history），
+   * 插到首选列表后面作为兜底。
+   */
+  private async candidateBranches(preferred: string[], keyword: string): Promise<string[]> {
+    const out = [...preferred];
+    try {
+      const registry = await this.ensureRegistry();
+      const requestType = registry.getMessage(SYMBOL);
+      if (!requestType) return out;
+      for (const field of requestType.fields.values()) {
+        const camel = field.name.replace(/_(\w)/g, (_, c: string) => c.toUpperCase());
+        if (camel.toLowerCase().includes(keyword) && !out.includes(camel)) {
+          out.push(camel);
+        }
+      }
+    } catch {
+      /* 描述符不可用时只用首选列表 */
+    }
+    return out;
+  }
+
+  /**
+   * 列出设备 Request 消息的字段（名字 + 字段号 + JSON 名）——诊断用。
+   *
+   * 这是判断「这台固件到底把 history 分支叫啥」最直接的证据。
+   */
+  async describeRequestFields(): Promise<
+    { name: string; number: number; jsonName: string }[]
+  > {
+    // 优先用 registry（最准）
+    try {
+      const registry = await this.ensureRegistry();
+      const requestType = registry.getMessage(SYMBOL);
+      if (requestType) {
+        return [...requestType.fields.values()].map((f) => ({
+          name: f.name,
+          number: f.number,
+          jsonName: f.jsonName,
+        }));
+      }
+    } catch {
+      /* 落到直接解析 */
+    }
+
+    // 兜底：直接解析 FileDescriptorProto（不建 registry ⇒ 不做跨文件校验，
+    // 描述符不完整时也能拿到 Request 的字段清单）
+    const chunks = await this.rawDescriptorBytes();
+    const out: { name: string; number: number; jsonName: string }[] = [];
+    for (const chunk of chunks) {
+      try {
+        const fp = fromBinary(FileDescriptorProtoSchema, chunk);
+        for (const m of fp.messageType) {
+          if (m.name !== 'Request') continue;
+          for (const f of m.field) {
+            out.push({ name: f.name, number: f.number, jsonName: f.jsonName });
+          }
+        }
+      } catch {
+        /* 跳过解析不了的文件 */
+      }
+    }
+    return out;
+  }
+
+  /**
    * 同一个语义在不同固件上可能用不同的 oneof 分支名。
    *
    * 实测：某台真机（Windows 侧 192.168.100.1:9200）对 `getHistory` 返回
@@ -724,7 +795,10 @@ export class DishGrpcClient {
   /** 拉取 dish 状态 */
   async getStatus(timeoutMs = 8000): Promise<Record<string, unknown>> {
     const { res, branch } = await this.callWithFallback(
-      ['getStatus', 'dishGetStatus'], timeoutMs, '拉取 dish 状态');
+      await this.candidateBranches(['getStatus', 'dishGetStatus'], 'status'),
+      timeoutMs,
+      '拉取 dish 状态',
+    );
     const status = (res.dishGetStatus ?? res.getStatus) as Record<string, unknown> | undefined;
     if (!status) {
       throw new Error(
@@ -748,7 +822,10 @@ export class DishGrpcClient {
    */
   async getHistory(timeoutMs = 8000): Promise<Record<string, unknown>> {
     const { res, branch } = await this.callWithFallback(
-      ['getHistory', 'dishGetHistory'], timeoutMs, '拉取历史数据');
+      await this.candidateBranches(['getHistory', 'dishGetHistory'], 'history'),
+      timeoutMs,
+      '拉取历史数据',
+    );
     const history = (res.dishGetHistory ?? res.getHistory) as Record<string, unknown> | undefined;
     if (!history) {
       throw new Error(

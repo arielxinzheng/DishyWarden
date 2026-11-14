@@ -46,6 +46,8 @@ export interface DishApiDumpOptions {
   port: number;
   /** 每个分支的超时（毫秒） */
   timeoutMs?: number;
+  /** 总时间预算（毫秒），超时后不再继续探测 */
+  budgetMs?: number;
 }
 
 /**
@@ -53,7 +55,10 @@ export interface DishApiDumpOptions {
  * 最后由调用方决定退出码。
  */
 export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 6000;
+  const timeoutMs = opts.timeoutMs ?? 5000;
+  // 总预算：诊断必须自己结束，不能让用户干等
+  const budgetMs = opts.budgetMs ?? 90000;
+  const deadline = Date.now() + budgetMs;
   const client = new DishGrpcClient(opts.host, opts.port);
 
   line('=== Dish API 探测 (--dump-dish-api) ===');
@@ -62,9 +67,26 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
 
   line('[1] reflection：取设备自己的 proto 描述符');
   try {
-    const names = await client.describeDeclaredNames();
-    line(`    描述符里出现的分支/字段名 (${names.length}):`);
-    line('    ' + (names.length ? names.join(', ') : '(没扫到候选名)'));
+    const fields = await client.describeRequestFields();
+    if (fields.length) {
+      line(`    Request 消息的字段（这台固件的真实分支名与字段号，共 ${fields.length} 个）:`);
+      // 只打印与我们要用的语义相关的，避免刷屏
+      const interesting = fields.filter(
+        (f) => /history|status|obstruction|device_info|ping/i.test(f.name),
+      );
+      const show = interesting.length ? interesting : fields.slice(0, 20);
+      for (const f of show) {
+        line(`      #${String(f.number).padStart(5)}  ${f.name}  (json: ${f.jsonName})`);
+      }
+      if (!interesting.length) {
+        line('      (没有名字含 history/status/obstruction 的字段 —— ' +
+          '这台固件的分支命名可能完全不同)');
+      }
+    } else {
+      const names = await client.describeDeclaredNames();
+      line(`    描述符里出现的消息名 (${names.length}):`);
+      line('    ' + (names.length ? names.join(', ') : '(没扫到候选名)'));
+    }
   } catch (err) {
     line('    反射失败: ' + (err instanceof Error ? err.message : String(err)));
     line('    ⇒ 设备可能没开 reflection 服务，或 proto 里没有 ' +
@@ -80,7 +102,15 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     line(`[2] 逐个尝试候选分支 —— ${label}`);
     let results: Awaited<ReturnType<DishGrpcClient['probeBranches']>> = [];
     try {
-      results = await client.probeBranches(CANDIDATES, timeoutMs, transport);
+      // 预算吃紧就少试几个候选，别让诊断挂住
+      const remaining = deadline - Date.now();
+      const candidates = remaining < timeoutMs * 2
+        ? CANDIDATES.slice(0, 3)
+        : CANDIDATES;
+      if (candidates.length < CANDIDATES.length) {
+        line('    (时间预算不够，只试前 ' + candidates.length + ' 个候选)');
+      }
+      results = await client.probeBranches(candidates, timeoutMs, transport);
     } catch (err) {
       line('    探测过程失败: ' + (err instanceof Error ? err.message : String(err)));
     }

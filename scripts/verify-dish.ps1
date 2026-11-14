@@ -44,7 +44,7 @@ function Section($t) { Write-Output ''; Write-Output ("== " + $t + " ==") }
 
 # grpc-web unary probe: POST /SpaceX.API.Device.Device/Handle
 # body = 0x00 flag + 4-byte big-endian length + protobuf payload ({id:1} => 08 01)
-function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5) {
+function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5, $FieldNumber = 0) {
     $client = New-Object System.Net.Sockets.TcpClient
     try {
         $iar = $client.BeginConnect($Ip, $Port, $null, $null)
@@ -57,7 +57,22 @@ function Test-GrpcWeb($Ip, $Port, $TimeoutSec = 5) {
         $stream.ReadTimeout = $TimeoutSec * 1000
         $stream.WriteTimeout = $TimeoutSec * 1000
 
-        $payload = [byte[]](0x08, 0x01)
+        # payload = {id:1} + optional branch field (fieldNumber<<3|2, length 0)
+        # fieldNumber 0 => id only (empty request, dish usually answers UNIMPLEMENTED=12)
+        $payload = [System.Collections.Generic.List[byte]]::new()
+        $payload.AddRange([byte[]](0x08, 0x01))
+        if ($FieldNumber -gt 0) {
+            $tag = [UInt32](($FieldNumber -shl 3) -bor 2)
+            $tagBytes = [System.Collections.Generic.List[byte]]::new()
+            while ($tag -gt 0x7f) {
+                $tagBytes.Add([byte](($tag -band 0x7f) -bor 0x80))
+                $tag = $tag -shr 7
+            }
+            $tagBytes.Add([byte]$tag)
+            $payload.AddRange($tagBytes.ToArray())
+            $payload.Add(0x00)
+        }
+        $payload = $payload.ToArray()
         $lenBytes = [System.BitConverter]::GetBytes([UInt32]$payload.Length)
         [Array]::Reverse($lenBytes)
         $frame = New-Object byte[] (5 + $payload.Length)
@@ -150,7 +165,29 @@ if ($webTcp) {
 Section ("3d) grpc-web probe on " + $DishIp + ":" + $WebPort)
 Write-Output 'Send a grpc-web POST (1-byte flag 0x00 + 4-byte length + payload) and'
 Write-Output 'look for an HTTP status line and/or grpc-status.'
-Write-Output ('grpc-web probe => ' + (Test-GrpcWeb -Ip $DishIp -Port $WebPort -TimeoutSec 6))
+Write-Output 'An empty request (no branch field) normally answers UNIMPLEMENTED (12).'
+Write-Output 'That means the endpoint is alive but the branch field is missing or misnamed.'
+Write-Output 'So we then try the known branch field numbers one by one:'
+Write-Output '  1004 get_status | 1007 get_history | 2006 dish_get_history |'
+Write-Output '  2008 dish_get_obstruction_map | 1008 get_device_info'
+Write-Output ''
+$branchResults = @()
+Write-Output ('  empty request          => ' + (Test-GrpcWeb -Ip $DishIp -Port $WebPort -TimeoutSec 6))
+foreach ($fn in 1004, 1007, 2006, 2008, 1008) {
+    $r = Test-GrpcWeb -Ip $DishIp -Port $WebPort -TimeoutSec 6 -FieldNumber $fn
+    Write-Output ('  branch field ' + $fn + '       => ' + $r)
+    $branchResults += [pscustomobject]@{ field = $fn; result = $r }
+}
+$working = $branchResults | Where-Object { $_.result -match 'grpc-status=0' }
+if ($working) {
+    Write-Output ''
+    Write-Output '  ==> WORKING BRANCHES: ' + (($working | ForEach-Object { $_.field }) -join ', ')
+    Write-Output '      The app already tries getHistory then dishGetHistory; if one of the'
+    Write-Output '      above is 1007 or 2006, the app should pick it up automatically.'
+} else {
+    Write-Output ''
+    Write-Output '  ==> no branch returned grpc-status=0 (all UNIMPLEMENTED or unreachable)'
+}
 
 Section ("3b) CONTROL PORT " + $DishIp + ":" + $ControlPort + "  <-- false-positive detector")
 Write-Output 'A real host must REFUSE an unused port. If this also "succeeds",'

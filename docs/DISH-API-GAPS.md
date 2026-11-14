@@ -152,3 +152,28 @@ Starlink 设备连接超时 (10s)                     ← 整个采集周期被�
 
 局限：磁盘缓存里的 proto 在固件升级后可能过时（此时 9200 可达时 reflection 会在 2.5s 内
 拿到新的并覆盖缓存 ✓）。
+
+## 10. UNIMPLEMENTED 的真实含义（2026-11-15 实测更正）
+
+真机上用 grpc-web 探测（9201）发一个**空请求**（只有 `{id:1}`、没有任何分支字段），
+终端回的是：
+
+```
+http=200 grpc-status=12 msg=Unimplemented: <nil> bytes=286
+```
+
+⇒ **UNIMPLEMENTED 不是"这个方法没实现"，而是"请求里没有我认识的分支字段"。**
+（9201 是活的：HTTP 200 + 合法 grpc-status + 286 字节响应。）
+
+所以不同固件给同一语义起的分支名/字段号可能不同（实测 mock 用
+`getStatus`=#1003、`dishGetObstructionMap`=#1015，而真机 protoset 是
+`get_status`=#1004、`dish_get_obstruction_map`=#2008 ⇒ **编号会随固件变**）。
+
+**应对（已实现）**：
+
+1. 应用**按设备自己的描述符推导候选分支**（`candidateBranches()`）：
+   从 Request 消息的字段里挑名字含 `history`/`status` 的，硬编码只是首选顺序；
+2. `--dump-dish-api` 直接打印**这台固件的 Request 字段清单（名字 + 字段号）** ——
+   这是判断分支名的最直接证据；
+3. `verify-dish.ps1` 的 §3d 依次试已知字段号（1004 / 1007 / 2006 / 2008 / 1008），
+   看哪个回 `grpc-status=0`。
