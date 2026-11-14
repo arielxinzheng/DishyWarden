@@ -99,6 +99,11 @@ export class DataCollector extends EventEmitter {
       fallbackToMock: false,  // 禁用 mock 回退，连接失败时直接报错
     });
 
+    console.log(
+      `[Collector] Dish 连接配置: ${this.config.dishAddress}:${this.config.dishPort}` +
+      ` (原生 gRPC / reflection) + :${this.config.dishWebPort} (grpc-web 兜底)`,
+    );
+
     this.routerProbe = new RouterProbe({
       address: this.config.routerAddress,
       timeout: 5000,

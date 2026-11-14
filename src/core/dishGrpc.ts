@@ -56,6 +56,14 @@ const RESPONSE_SYMBOL = 'SpaceX.API.Device.Response';
  */
 const DEFAULT_WEB_PORT = 9201;
 
+/**
+ * dish 的**原生 gRPC** 端口（HTTP/2）。
+ *
+ * reflection 服务只在这个端口上 ⇒ **不管用户把 dishPort 配成什么，
+ * reflection 都要能回落到这里**，否则用户填了 9201 就永远拿不到描述符。
+ */
+const DEFAULT_NATIVE_PORT = 9200;
+
 
 /**
  * 已知分支的**字段号**（来自真机 proto 描述符，dishylink 的 schema/dish.protoset
@@ -126,6 +134,14 @@ export class DishGrpcClient {
   /** 描述符磁盘缓存路径（可空 = 不做磁盘缓存） */
   private descriptorCachePath: string | null;
 
+  /**
+   * 实际拿到描述符的端口（= 原生 gRPC 端口）。
+   *
+   * 用户可能把 dishPort 配成 9201（grpc-web），但 reflection 只在 9200 上
+   * ⇒ 这时 nativePort 会被回落到 9200，原生传输也走 9200 ⇒ 配置不会把应用打死。
+   */
+  private nativePort: number;
+
   constructor(
     host: string,
     port: number,
@@ -135,6 +151,7 @@ export class DishGrpcClient {
     this.host = host;
     this.port = port;
     this.webPort = webPort;
+    this.nativePort = port;
     this.descriptorCachePath = descriptorCachePath ?? null;
   }
 
@@ -159,7 +176,9 @@ export class DishGrpcClient {
 
   /** 从描述符字节构建 proto-loader 客户端（connect 的后半段，可被缓存路径复用） */
   private buildClient(descriptor: Uint8Array[]): DeviceClient {
-    const address = `${this.host}:${this.port}`;
+    // 用实际拿到描述符的端口（nativePort）—— 用户把 dishPort 填成 9201 时
+    // 这里会用 9200，而不是去连一个不提供原生 gRPC 的端口。
+    const address = `${this.host}:${this.nativePort}`;
     // loadFileDescriptorSetFromBuffer 专门吃打包好的 FileDescriptorSet 字节流
     const pkgDef = protoLoader.loadFileDescriptorSetFromBuffer(
       packFileDescriptorSet(descriptor),
@@ -491,26 +510,46 @@ export class DishGrpcClient {
 
     const disk = this.readDescriptorFromDisk();
     const timeoutMs = disk ? 2500 : 10000;
-    const address = `${this.host}:${this.port}`;
-    const probe = new grpc.Client(address, grpc.credentials.createInsecure());
-    try {
-      const fresh = await this.reflectFileContainingSymbol(probe, SYMBOL, timeoutMs);
-      moduleDescriptorCache = fresh;
-      this.writeDescriptorToDisk(fresh);
-      return fresh;
-    } catch (err) {
-      if (disk) {
-        console.warn(
-          '[DishGrpc] reflection 不可用, 改用磁盘缓存的描述符:',
-          err instanceof Error ? err.message : err,
-        );
-        moduleDescriptorCache = disk;
-        return disk;
+
+    // 依次尝试：配置的端口 → 默认原生端口(9200)。
+    // 用户把 dishPort 填成 9201(grpc-web) 时，reflection 拿不到，
+    // 这里自动回落到 9200 ⇒ 配置填错也不会让整个应用瘫掉。
+    const candidates = [this.port];
+    if (this.port !== DEFAULT_NATIVE_PORT) candidates.push(DEFAULT_NATIVE_PORT);
+
+    let lastErr: unknown = null;
+    for (const port of candidates) {
+      const address = `${this.host}:${port}`;
+      const probe = new grpc.Client(address, grpc.credentials.createInsecure());
+      try {
+        const fresh = await this.reflectFileContainingSymbol(probe, SYMBOL, timeoutMs);
+        if (port !== this.port) {
+          console.warn(
+            `[DishGrpc] 配置端口 ${this.port} 上没有 reflection 服务，` +
+            `已自动改用原生 gRPC 端口 ${port}`,
+          );
+        }
+        this.nativePort = port;
+        moduleDescriptorCache = fresh;
+        this.writeDescriptorToDisk(fresh);
+        console.log(`[DishGrpc] reflection 成功（端口 ${port}），描述符已就绪`);
+        return fresh;
+      } catch (err) {
+        lastErr = err;
+      } finally {
+        probe.close();
       }
-      throw err;
-    } finally {
-      probe.close();
     }
+
+    if (disk) {
+      console.warn(
+        '[DishGrpc] reflection 不可用, 改用磁盘缓存的描述符:',
+        lastErr instanceof Error ? lastErr.message : lastErr,
+      );
+      moduleDescriptorCache = disk;
+      return disk;
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('reflection 失败');
   }
 
   /** 读磁盘上的描述符缓存（FileDescriptorSet 字节流） */

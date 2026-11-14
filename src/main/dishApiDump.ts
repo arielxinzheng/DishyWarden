@@ -44,6 +44,8 @@ function line(s = ''): void {
 export interface DishApiDumpOptions {
   host: string;
   port: number;
+  /** grpc-web 兜底端口（默认 9201） */
+  webPort?: number;
   /** 每个分支的超时（毫秒） */
   timeoutMs?: number;
   /** 总时间预算（毫秒），超时后不再继续探测 */
@@ -63,6 +65,11 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
 
   line('=== Dish API 探测 (--dump-dish-api) ===');
   line(`address: ${opts.host}:${opts.port}`);
+  line(
+    'ports: ' + opts.port + ' = 原生 gRPC (HTTP/2, reflection 在这里) | ' +
+    (opts.webPort ?? 9201) + ' = grpc-web (HTTP/1.1, Handle 兜底)',
+  );
+  line('设置页请填 ' + opts.port + '（原生端口）；9201 由应用自动兜底，不需要手填。');
   line('');
 
   line('[1] reflection：取设备自己的 proto 描述符');

@@ -977,7 +977,7 @@ app.whenReady().then(async () => {
     const host = ipIdx >= 0 && argv[ipIdx + 1] ? argv[ipIdx + 1] : cfg.dishAddress;
     const port = portIdx >= 0 && argv[portIdx + 1] ? Number(argv[portIdx + 1]) : cfg.dishPort;
     try {
-      await runDishApiDump({ host, port });
+      await runDishApiDump({ host, port, webPort: configManager.getConfig().collector.dishWebPort });
     } catch (err) {
       console.error('[DishApiDump] 探测失败:', err);
     }
