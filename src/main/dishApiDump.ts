@@ -61,7 +61,8 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   // 总预算：诊断必须自己结束，不能让用户干等
   const budgetMs = opts.budgetMs ?? 90000;
   const deadline = Date.now() + budgetMs;
-  const client = new DishGrpcClient(opts.host, opts.port);
+  // 必须把 webPort 传进去：不传就固定打 9201，设置里改过 grpc-web 端口时诊断测的不是应用实际用的端口
+  const client = new DishGrpcClient(opts.host, opts.port, opts.webPort);
 
   line('=== Dish API 探测 (--dump-dish-api) ===');
   line(`address: ${opts.host}:${opts.port}`);

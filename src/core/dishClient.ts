@@ -31,6 +31,12 @@ export function parseFiniteNumber(v: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * 遮挡图刷新间隔。真机响应约 60KB（实测 60,803 B），而遮挡图是按小时累积的，
+ * 每 30s 拉一次既占采集预算又没信息增量。5 分钟一次足够。
+ */
+const OBSTRUCTION_MAP_REFRESH_MS = 5 * 60 * 1000;
+
 export interface DishConfig {
   address: string;      // dish 地址，默认 192.168.100.1
   grpcPort: number;     // 原生 gRPC 端口，默认 9200
@@ -90,14 +96,13 @@ export function latestHistorySample(history: Record<string, unknown>): HistorySa
         ? Number(currentRaw)
         : 0;
 
-  // 用 latency 数组的长度作为环形缓冲的基准（各数组是平行的）
-  const latencies = history.popPingLatencyMs;
-  const arrayLength = Array.isArray(latencies) ? latencies.length : 0;
-  const ringIndex = arrayLength > 0 && current > 0 ? (current - 1) % arrayLength : -1;
-
   const last = (v: unknown): number | undefined => {
     if (!Array.isArray(v) || v.length === 0) return undefined;
-    const idx = ringIndex >= 0 && ringIndex < v.length ? ringIndex : v.length - 1;
+    // 每个数组按**自己的长度**取模：不依赖 popPingLatencyMs 一定存在
+    // （它缺失时旧写法会退回取末尾 ⇒ 绕回后又拿到旧样本）
+    const idx = Number.isFinite(current) && current > 0
+      ? Math.floor(current - 1) % v.length
+      : v.length - 1;
     const lastVal = v[idx];
     if (typeof lastVal === 'number' && Number.isFinite(lastVal)) return lastVal;
     if (typeof lastVal === 'string' && lastVal.trim() !== '') {
@@ -145,7 +150,7 @@ export interface TelemetryData {
   /**
    * 遮挡图的数据来源标记。
    *
-   * 'real'  —— 来自 dish 的 dishGetObstructionMap(1015) 真实星历
+   * 'real'  —— 来自 dish 的 dishGetObstructionMap(#2008) 真实星历
    * 'mock'  —— 本地模拟生成(径向渐变), 只用于开发演示
    *
    * 存在的意义: mock 图和真实图在视觉上几乎一样, 不标记的话用户无法分辨,
@@ -271,6 +276,9 @@ export class DishClient {
   /** WiFi mock 周期计数器（用于模拟信号强度周期性变化） */
   private wifiMockCycle = 0;
 
+  /** 最近一份遮挡图的平均 SNR（遮挡图按间隔刷新，间隔内沿用） */
+  private lastMapAvgSnr: number | null = null;
+
   constructor(config: Partial<DishConfig> = {}) {
     this.config = {
       address: config.address || '192.168.100.1',
@@ -313,7 +321,7 @@ export class DishClient {
   /**
    * 获取遥测数据
    * 
-   * 走真实 gRPC: dishGetStatus(1000) + dishGetObstructionMap(1015)。
+   * 走真实 gRPC: getStatus(#1004) + getHistory(#1007) + dishGetObstructionMap(#2008)。
    * 遮挡图失败不拖垮整帧 —— 遥测仍然可用, 只是没有遮挡图。
    */
   async getTelemetry(): Promise<TelemetryData> {
@@ -337,20 +345,40 @@ export class DishClient {
     }
 
     try {
-      const status = await this.grpc.getStatus(this.config.timeout);
-
       // 真机实测（dishylink LOCAL-API.md）：dish_get_status 的数值字段在某些固件上
       // **存在但永远不填**（pop_ping_drop_rate / power_in 等），真值在
       // dish_get_history 的 1Hz 数组里。所以再拉一次 history 取最新样本补齐。
+      //
+      // status 与 history **并发**拉：采集器给整帧的预算只有 10s，
+      // 串行时两个 RPC（各自可能先试原生再切 grpc-web）很容易超预算。
+      const [statusResult, historyResult] = await Promise.allSettled([
+        this.grpc.getStatus(this.config.timeout),
+        this.getHistoryResponse(this.config.timeout),
+      ]);
+      if (statusResult.status === 'rejected') throw statusResult.reason;
+      const status = statusResult.value;
+
       let historySample: HistorySample | undefined;
-      try {
-        const history = await this.grpc.getHistory(this.config.timeout);
-        historySample = latestHistorySample(history);
-      } catch (error) {
-        console.warn('[dishClient] history 获取失败, 数值指标可能缺失:', error);
+      if (historyResult.status === 'fulfilled') {
+        historySample = latestHistorySample(historyResult.value);
+      } else {
+        console.warn('[dishClient] history 获取失败, 数值指标可能缺失:', historyResult.reason);
       }
 
       const telemetry = this.parseStatus(status, historySample);
+
+      // 遮挡图 ~60KB 且变化很慢（按小时累积）⇒ 不必每帧都拉，间隔内沿用上一份
+      const prevMapAt = this.lastTelemetry?.obstructionMapTimestamp;
+      if (
+        prevMapAt !== undefined &&
+        this.lastTelemetry?.obstructionMapSource === 'real' &&
+        Date.now() - prevMapAt < OBSTRUCTION_MAP_REFRESH_MS
+      ) {
+        // SNR 来自遮挡图的 avgSnr ⇒ 沿用上一份图时也要沿用它，否则真机上 SNR 掉成 0
+        if (this.lastMapAvgSnr !== null) telemetry.snr = this.lastMapAvgSnr;
+        this.lastTelemetry = telemetry;
+        return telemetry;
+      }
 
       // 遮挡图单独取 —— 失败只丢遮挡图, 不影响其它遥测
       try {
@@ -360,7 +388,9 @@ export class DishClient {
         telemetry.obstructionMapTimestamp = Date.now();
         // SNR 的真实值在遮挡图的 snr 数组里 (dishGetStatus 只给布尔量)
         if (map.avgSnr !== null) telemetry.snr = map.avgSnr;
+        this.lastMapAvgSnr = map.avgSnr;
       } catch (error) {
+        this.lastMapAvgSnr = null;
         console.warn('[dishClient] 遮挡图获取失败, 本帧不带遮挡图:', error);
         telemetry.obstructionMap = undefined;
         telemetry.obstructionMapSource = undefined;
@@ -793,6 +823,8 @@ export class DishClient {
     ) {
       this.grpc?.close();
       this.grpc = null;
+      this.historyInFlight = null;
+      this.lastHistory = null;
     }
   }
   
@@ -808,6 +840,41 @@ export class DishClient {
    */
   getGrpcClient(): DishGrpcClient | null {
     return this.grpc;
+  }
+
+  /** 正在进行的 / 最近一次的 history 响应（一个采集周期内共享） */
+  private historyInFlight: Promise<Record<string, unknown>> | null = null;
+  private lastHistory: { at: number; value: Record<string, unknown> } | null = null;
+
+  /**
+   * 拉 dish 的 history 原始响应，**同一采集周期内只拉一次**。
+   *
+   * 采集器每轮并发调 getTelemetry()（取最新样本）和 analyzeHandoffs()（取 outages），
+   * 两边各拉一次就是 22KB × 2 / 30s，且多一次 RPC 吃 10s 采集预算。
+   * 这里合并并发请求，并在 maxAgeMs 内复用上一次结果。
+   */
+  async getHistoryResponse(
+    timeoutMs = this.config.timeout,
+    maxAgeMs = 5000,
+  ): Promise<Record<string, unknown>> {
+    if (this.lastHistory && Date.now() - this.lastHistory.at < maxAgeMs) {
+      return this.lastHistory.value;
+    }
+    if (!this.historyInFlight) {
+      const grpc = this.grpc;
+      if (!grpc) throw new Error('gRPC 客户端未初始化');
+      this.historyInFlight = grpc
+        .getHistory(timeoutMs)
+        .then((value) => {
+          // 期间配置变了（grpc 被换掉）⇒ 不缓存旧设备的结果
+          if (this.grpc === grpc) this.lastHistory = { at: Date.now(), value };
+          return value;
+        })
+        .finally(() => {
+          this.historyInFlight = null;
+        });
+    }
+    return this.historyInFlight;
   }
 }
 

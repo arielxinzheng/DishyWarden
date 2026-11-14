@@ -82,8 +82,17 @@ const DEFAULT_NATIVE_PORT = 9200;
  *
  * 缓存后：首次 reflection 成功（9200 短暂可达时）⇒ 描述符记住 ⇒
  * 后续即使 9200 挂了，原生 gRPC 快速失败（<1s），grpc-web 用缓存继续工作。
+ *
+ * **按 host 分键**：用户在设置里从 DishyMock(127.0.0.1) 切到真机（或反过来）时，
+ * 不能拿上一台设备的描述符去编解码另一台。同时记下实际拿到描述符的原生端口，
+ * 否则命中缓存的新实例会回到"配置端口"（可能是 9201）。
  */
-let moduleDescriptorCache: Uint8Array[] | null = null;
+const moduleDescriptorCache = new Map<string, { bytes: Uint8Array[]; nativePort: number }>();
+
+/** 测试用：清空模块级描述符缓存 */
+export function clearDescriptorCacheForTest(): void {
+  moduleDescriptorCache.clear();
+}
 
 const KNOWN_FIELD_NUMBERS: Record<string, number> = {
   getStatus: 1004,
@@ -92,6 +101,9 @@ const KNOWN_FIELD_NUMBERS: Record<string, number> = {
   getDeviceInfo: 1008,
   getNetworkInterfaces: 1015,
 };
+
+/** reflection 失败后多久内不再重试（小于采集周期 30s，下一轮会重新尝试） */
+const DESCRIPTOR_RETRY_MS = 15000;
 
 /** 遮挡图的 SNR 参考值: 遮挡度 = 1 - snr/12 */
 const REF_SNR = 12;
@@ -130,6 +142,8 @@ export class DishGrpcClient {
   /** reflection 拿到的描述符（用于请求编码 + 响应解码） */
   private descriptorBytes: Uint8Array[] | null = null;
   private registry: ReturnType<typeof createFileRegistry> | null = null;
+  /** registry 建过一次且失败 ⇒ 不再每次 RPC 都重建 + 刷告警日志 */
+  private registryFailed = false;
 
   /** 描述符磁盘缓存路径（可空 = 不做磁盘缓存） */
   private descriptorCachePath: string | null;
@@ -152,7 +166,9 @@ export class DishGrpcClient {
     this.port = port;
     this.webPort = webPort;
     this.nativePort = port;
-    this.descriptorCachePath = descriptorCachePath ?? null;
+    this.descriptorCachePath = descriptorCachePath
+      ? perHostCachePath(descriptorCachePath, host)
+      : null;
   }
 
   /**
@@ -166,8 +182,10 @@ export class DishGrpcClient {
 
     // 优先用模块级缓存 —— 9200 不可达时跳过 reflection（省 10s 超时）。
     // proto-loader 客户端的连接是 lazy 的，真正的网络 I/O 发生在 Handle 调用时。
-    if (moduleDescriptorCache) {
-      return this.buildClient(moduleDescriptorCache);
+    const cached = moduleDescriptorCache.get(this.host);
+    if (cached) {
+      this.nativePort = cached.nativePort;
+      return this.buildClient(cached.bytes);
     }
 
     const descriptor = await this.resolveDescriptor();
@@ -277,9 +295,19 @@ export class DishGrpcClient {
           };
           const visitMessage = (m: MsgLike): void => {
             for (const f of m.field) {
-              // 只保留全限定名（含点）—— 标量名（double/string…）不是符号
-              if (f.typeName && f.typeName.includes('.')) {
-                refs.add(f.typeName.replace(/^\./, ''));
+              // bufbuild v2 的 FieldDescriptorProto.typeName 对 message/enum 字段才有值；
+              // 格式可能是全限定（".a.b.C"）、带包名（"a.b.C"）或仅类型名（"C"）。
+              // 任何非空值都当成候选符号 —— reflection 服务允许按符号查，没有不扣分。
+              if (!f.typeName) continue;
+              if (f.typeName.startsWith('.')) {
+                refs.add(f.typeName.slice(1));
+                continue;
+              }
+              // 相对名（protobufjs 系 reflection 会发这种）⇒ 按包作用域由内向外都试一遍，
+              // reflection 只认全限定符号；查不到的会回 errorResponse，已容错
+              const parts = fp.package ? fp.package.split('.') : [];
+              for (let i = parts.length; i >= 0; i--) {
+                refs.add([...parts.slice(0, i), f.typeName].join('.'));
               }
             }
             for (const nested of m.nestedType) visitMessage(nested);
@@ -297,10 +325,32 @@ export class DishGrpcClient {
         return [...refs];
       };
 
+      // 已收下的文件名 / 已定义的全限定类型名。
+      //
+      // ⚠️ 标准 reflection（grpc-go / @grpc/reflection）对 fileContainingSymbol
+      // 返回「该文件 + 全部传递依赖」⇒ 按类型名补依赖时同一个文件会回来很多次。
+      // proto-loader 遇到重复文件直接抛 `duplicate name 'X' in Namespace`
+      // ⇒ 原生通道建不起来。所以按文件名去重，且已定义的类型不再去要。
+      const seenFiles = new Set<string>();
+      const definedTypes = new Set<string>();
+      const collectDefined = (fp: { package?: string; messageType: readonly NamedLike[]; enumType: readonly { name?: string }[]; service: readonly { name?: string }[] }) => {
+        const pkg = fp.package ? `${fp.package}.` : '';
+        const visit = (prefix: string, m: NamedLike): void => {
+          const full = `${prefix}${m.name ?? ''}`;
+          definedTypes.add(full);
+          for (const e of m.enumType) definedTypes.add(`${full}.${e.name ?? ''}`);
+          for (const n of m.nestedType) visit(`${full}.`, n);
+        };
+        for (const m of fp.messageType) visit(pkg, m);
+        for (const e of fp.enumType) definedTypes.add(`${pkg}${e.name ?? ''}`);
+        for (const s of fp.service) definedTypes.add(`${pkg}${s.name ?? ''}`);
+      };
+      type NamedLike = { name?: string; nestedType: readonly NamedLike[]; enumType: readonly { name?: string }[] };
+
       const pump = () => {
         while (pendingFiles.length) {
           const file = pendingFiles.shift()!;
-          if (requestedFiles.has(file)) continue;
+          if (requestedFiles.has(file) || definedTypes.has(file)) continue;
           requestedFiles.add(file);
           inFlight += 1;
           stream.write({ fileContainingSymbol: file });
@@ -317,22 +367,35 @@ export class DishGrpcClient {
           fileDescriptorResponse?: { fileDescriptorProto?: Uint8Array[] };
         }).fileDescriptorResponse;
         const errorResponse = (msg as { errorResponse?: { errorMessage?: string } }).errorResponse;
-        if (errorResponse?.errorMessage) {
-          // 某个依赖拉不到 ⇒ 不致命，继续用已有的文件
+        if (errorResponse || !list?.fileDescriptorProto?.length) {
+          // 某个依赖拉不到（或空响应）⇒ 不致命，继续用已有的文件。
+          // 不能只看 errorMessage 非空：空消息的错误响应也要扣 inFlight，否则流永远不 end。
           inFlight = Math.max(0, inFlight - 1);
           pump();
           return;
         }
-        if (list?.fileDescriptorProto?.length) {
-          chunks.push(...list.fileDescriptorProto);
-          for (const b of list.fileDescriptorProto) {
-            for (const ref of collectRefs(b)) {
-              if (!requestedFiles.has(ref)) pendingFiles.push(ref);
-            }
+        const fresh: Uint8Array[] = [];
+        for (const b of list.fileDescriptorProto) {
+          let name = '';
+          try {
+            const fp = fromBinary(FileDescriptorProtoSchema, b);
+            name = fp.name;
+            if (name && seenFiles.has(name)) continue;
+            collectDefined(fp);
+          } catch {
+            /* 解析不了的文件照收，交给下游报错 */
           }
-          inFlight = Math.max(0, inFlight - 1);
-          pump();
+          if (name) seenFiles.add(name);
+          chunks.push(b);
+          fresh.push(b);
         }
+        for (const b of fresh) {
+          for (const ref of collectRefs(b)) {
+            if (!requestedFiles.has(ref) && !definedTypes.has(ref)) pendingFiles.push(ref);
+          }
+        }
+        inFlight = Math.max(0, inFlight - 1);
+        pump();
       });
       stream.on('error', (e: Error) => finish(e));
       stream.on('end', () => finish());
@@ -345,9 +408,10 @@ export class DishGrpcClient {
   /**
    * 按**设备自己的描述符**推导候选分支名。
    *
-   * 为什么需要：不同固件给同一语义起的分支名可能不同 —— 实测有固件把
-   * history 的请求分支叫 `dish_get_history`(#2006) 而不是 `get_history`(#1007)
-   * （响应键则相反）。硬编码只能覆盖已知的几种，靠描述符推导才通用。
+   * 为什么需要：不同固件给同一语义起的分支名可能不同（dishylink 的 protoset 与
+   * DishyMock 就不同）。硬编码只能覆盖已知的几种，靠描述符推导才通用。
+   * 注：2026-11-15 真机实测 `get_history`(#1007) 可用、`dish_get_history`(#2006)
+   * 回 UNIMPLEMENTED（docs/DISH-CONNECTIVITY-ISSUES.md §4）。
    *
    * 做法：从 Request 消息的字段里挑出名字含该语义关键字的（如 history），
    * 插到首选列表后面作为兜底。
@@ -506,7 +570,39 @@ export class DishGrpcClient {
    * （固件升级后 proto 可能变），不活就直接用缓存，不白等 10s。
    */
   private async resolveDescriptor(): Promise<Uint8Array[]> {
-    if (moduleDescriptorCache) return moduleDescriptorCache;
+    const cached = moduleDescriptorCache.get(this.host);
+    if (cached) {
+      this.nativePort = cached.nativePort;
+      return cached.bytes;
+    }
+    // 刚失败过 ⇒ 直接复用那次的错误。一次 getStatus 会经 candidateBranches /
+    // callNative / grpc-web 兜底三处各要一次描述符；9200 黑洞时每次白等 10s ⇒ 一帧 30s。
+    if (this.descriptorFailure && Date.now() - this.descriptorFailure.at < DESCRIPTOR_RETRY_MS) {
+      throw this.descriptorFailure.err;
+    }
+    // 采集器里 getTelemetry 与 analyzeHandoffs 并发进来 ⇒ 只跑一条 reflection 流
+    if (!this.descriptorInFlight) {
+      this.descriptorInFlight = this.resolveDescriptorUncached()
+        .then((bytes) => {
+          this.descriptorFailure = null;
+          return bytes;
+        })
+        .catch((err: unknown) => {
+          const e = err instanceof Error ? err : new Error(String(err));
+          this.descriptorFailure = { at: Date.now(), err: e };
+          throw e;
+        })
+        .finally(() => {
+          this.descriptorInFlight = null;
+        });
+    }
+    return this.descriptorInFlight;
+  }
+
+  private descriptorInFlight: Promise<Uint8Array[]> | null = null;
+  private descriptorFailure: { at: number; err: Error } | null = null;
+
+  private async resolveDescriptorUncached(): Promise<Uint8Array[]> {
 
     const disk = this.readDescriptorFromDisk();
     const timeoutMs = disk ? 2500 : 10000;
@@ -514,8 +610,16 @@ export class DishGrpcClient {
     // 依次尝试：配置的端口 → 默认原生端口(9200)。
     // 用户把 dishPort 填成 9201(grpc-web) 时，reflection 拿不到，
     // 这里自动回落到 9200 ⇒ 配置填错也不会让整个应用瘫掉。
-    const candidates = [this.port];
-    if (this.port !== DEFAULT_NATIVE_PORT) candidates.push(DEFAULT_NATIVE_PORT);
+    //
+    // 只在「配置端口就是 grpc-web 端口」时回落，且**先试 9200**：
+    //  - 对 HTTP/1.1 端口做 HTTP/2 reflection 可能要等满超时，先试它会让首帧
+    //    多等一整个 timeoutMs（超出采集周期 10s 的预算）；
+    //  - 其它自定义端口（如本地 mock 起在 19200）不回落 —— 否则可能静默连上
+    //    同机 9200 上的另一个服务，数据来自错误的对象。
+    const isWebPort = this.port === this.webPort || this.port === DEFAULT_WEB_PORT;
+    const candidates = isWebPort && this.port !== DEFAULT_NATIVE_PORT
+      ? [DEFAULT_NATIVE_PORT]
+      : [this.port];
 
     let lastErr: unknown = null;
     for (const port of candidates) {
@@ -525,12 +629,12 @@ export class DishGrpcClient {
         const fresh = await this.reflectFileContainingSymbol(probe, SYMBOL, timeoutMs);
         if (port !== this.port) {
           console.warn(
-            `[DishGrpc] 配置端口 ${this.port} 上没有 reflection 服务，` +
-            `已自动改用原生 gRPC 端口 ${port}`,
+            `[DishGrpc] 配置端口 ${this.port} 是 grpc-web 端口（不提供 reflection），` +
+            `已改用原生 gRPC 端口 ${port}；设置页请填 ${port}`,
           );
         }
         this.nativePort = port;
-        moduleDescriptorCache = fresh;
+        moduleDescriptorCache.set(this.host, { bytes: fresh, nativePort: port });
         this.writeDescriptorToDisk(fresh);
         console.log(`[DishGrpc] reflection 成功（端口 ${port}），描述符已就绪`);
         return fresh;
@@ -546,7 +650,10 @@ export class DishGrpcClient {
         '[DishGrpc] reflection 不可用, 改用磁盘缓存的描述符:',
         lastErr instanceof Error ? lastErr.message : lastErr,
       );
-      moduleDescriptorCache = disk;
+      // 配置端口填成了 grpc-web 端口 ⇒ 原生通道按 9200 走（reflection 本该在那儿）。
+      // 其它自定义端口（如本地 mock 起在别的端口）保持原样，不擅自改连。
+      if (candidates[0] !== this.port) this.nativePort = DEFAULT_NATIVE_PORT;
+      moduleDescriptorCache.set(this.host, { bytes: disk, nativePort: this.nativePort });
       return disk;
     }
     throw lastErr instanceof Error ? lastErr : new Error('reflection 失败');
@@ -586,13 +693,11 @@ export class DishGrpcClient {
 
   /** 取 reflection 返回的原始描述符字节（诊断用） */
   private async rawDescriptorBytes(): Promise<Uint8Array[]> {
-    const address = `${this.host}:${this.port}`;
-    const probe = new grpc.Client(address, grpc.credentials.createInsecure());
-    try {
-      return await this.reflectFileContainingSymbol(probe, SYMBOL);
-    } finally {
-      probe.close();
+    // 走和正常采集同一条路（含 9200 回落 + 缓存），诊断看到的就是应用实际用的描述符
+    if (!this.descriptorBytes) {
+      this.descriptorBytes = await this.resolveDescriptor();
     }
+    return this.descriptorBytes;
   }
 
   /** 走原生 gRPC(9200) 调用 Handle */
@@ -629,11 +734,11 @@ export class DishGrpcClient {
         console.warn('[DishGrpc] 原生 gRPC 不可用, 已切换到 grpc-web 传输');
         return res;
       } catch (webErr) {
-        console.warn(
-          '[DishGrpc] grpc-web 兜底也失败:',
-          webErr instanceof Error ? webErr.message : webErr,
-        );
-        throw original;
+        const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
+        console.warn('[DishGrpc] grpc-web 兜底也失败:', webMsg);
+        // 两条错误都带上：9200 拒连(code 14) + 9201 回 UNIMPLEMENTED(code 12) 时，
+        // 只抛原生那条会让 callWithFallback 以为是"真错误"而不去试下一个候选分支。
+        throw new Error(`${original.message}；grpc-web: ${webMsg}`);
       }
     }
   }
@@ -665,13 +770,19 @@ export class DishGrpcClient {
           )
         : undefined;
       if (!field || !field.message) throw new Error('描述符里没有对应的 Request 分支字段');
+      // bufbuild v2 的 oneof 成员**不是**顶层属性，而是挂在 oneof 名下的
+      // { case, value } —— 直接写 [field.name] 会让 toBinary 抛
+      // "Cannot read properties of undefined (reading 'case')"，被下面的 catch 吞掉。
+      const branchValue = { $typeName: field.message.typeName };
       payload = toBinary(requestType, {
         $typeName: SYMBOL,
         id: BigInt(typeof request.id === 'number' ? request.id : 0),
-        [field.name]: { $typeName: field.message.typeName },
+        ...(field.oneof
+          ? { [field.oneof.localName]: { case: field.localName, value: branchValue } }
+          : { [field.localName]: branchValue }),
       } as never);
     } catch {
-      // 描述符里没有 Request 类型 ⇒ 按字段号手工编码
+      // 描述符里没有 Request 类型 / 找不到分支 ⇒ 按字段号手工编码
       payload = this.encodeRequestManually(request);
     }
 
@@ -740,7 +851,7 @@ export class DishGrpcClient {
    * ⇒ 这里复用 packFileDescriptorSet() 把它们打包起来。
    */
   private async ensureRegistry(): Promise<ReturnType<typeof createFileRegistry>> {
-    if (this.registry) return this.registry;
+    if (this.registry || this.registryFailed) return this.registry as never;
     if (!this.descriptorBytes) {
       this.descriptorBytes = await this.resolveDescriptor();
     }
@@ -750,6 +861,7 @@ export class DishGrpcClient {
         FileDescriptorSetSchema,
         packFileDescriptorSet(this.descriptorBytes),
       );
+      qualifyTypeNames(set);
       this.registry = createFileRegistry(set);
     } catch (err) {
       // 描述符不完整（缺跨文件类型引用）⇒ registry 建不起来。
@@ -759,6 +871,7 @@ export class DishGrpcClient {
         err instanceof Error ? err.message : err,
       );
       this.registry = null as never;
+      this.registryFailed = true;
     }
     return this.registry;
   }
@@ -766,7 +879,7 @@ export class DishGrpcClient {
   /**
    * 拉取遮挡图。
    *
-   * 走 dishGetObstructionMap 分支 (1015)。按契约, 响应必须挂在顶层
+   * 走 dishGetObstructionMap 分支 (#2008，真机实测)。按契约, 响应必须挂在顶层
    * `dishGetObstructionMap` 键上 —— 服务端如果只挂在 oneof 虚拟字段上,
    * 这里会拿到 undefined, 属于协议实现错误, 直接抛错而不是返回空图。
    */
@@ -878,6 +991,109 @@ export class DishGrpcClient {
     try { this.client?.close(); } catch { /* ignore */ }
     this.client = null;
   }
+}
+
+/**
+ * 把描述符里的**相对**类型名改写成全限定名（`RouterInfo` → `.SpaceX.API.Device.RouterInfo`）。
+ *
+ * 为什么：protobufjs 系的 reflection 服务（`@grpc/reflection`，DishyMock 用的就是它）
+ * 发出的 type_name 是相对名；proto-loader 能按作用域解析，但 bufbuild 的 registry
+ * 只认全限定名 ⇒ 报 `type_name RouterInfo not found` ⇒ grpc-web 解不了码。
+ * 解析规则同 protoc：从字段所在消息的作用域逐层向外找，找到第一个已定义的名字。
+ */
+export function qualifyTypeNames(set: { file: FileDesc[] }): void {
+  // 全限定类型名 → 定义它的文件名
+  const defined = new Map<string, string>();
+  for (const f of set.file) {
+    const collect = (prefix: string, m: MsgDesc): void => {
+      const full = `${prefix}.${m.name}`;
+      defined.set(full, f.name);
+      for (const e of m.enumType) defined.set(`${full}.${e.name}`, f.name);
+      for (const n of m.nestedType) collect(full, n);
+    };
+    const pkg = f.package ? `.${f.package}` : '';
+    for (const m of f.messageType) collect(pkg, m);
+    for (const e of f.enumType) defined.set(`${pkg}.${e.name}`, f.name);
+  }
+  const resolve = (scope: string, name: string): string => {
+    if (!name || name.startsWith('.')) return name;
+    let s = scope;
+    for (;;) {
+      const candidate = `${s}.${name}`;
+      if (defined.has(candidate)) return candidate;
+      if (!s) return name;
+      s = s.slice(0, Math.max(0, s.lastIndexOf('.')));
+    }
+  };
+  for (const f of set.file) {
+    // 同时补 import：@grpc/reflection 发出的文件 dependency 为空，
+    // 而 bufbuild 只在声明过的 import 里找跨文件类型
+    const deps = new Set(f.dependency);
+    const use = (name: string): string => {
+      const owner = defined.get(name);
+      if (owner && owner !== f.name) deps.add(owner);
+      return name;
+    };
+    const fix = (scope: string, m: MsgDesc): void => {
+      const full = `${scope}.${m.name}`;
+      for (const fd of m.field) if (fd.typeName) fd.typeName = use(resolve(full, fd.typeName));
+      for (const n of m.nestedType) fix(full, n);
+    };
+    const pkg = f.package ? `.${f.package}` : '';
+    for (const m of f.messageType) fix(pkg, m);
+    for (const sv of f.service) {
+      for (const md of sv.method) {
+        md.inputType = use(resolve(pkg, md.inputType));
+        md.outputType = use(resolve(pkg, md.outputType));
+      }
+    }
+    for (const d of deps) if (!f.dependency.includes(d)) f.dependency.push(d);
+  }
+
+  // bufbuild 按顺序建 registry：被 import 的文件必须排在前面
+  const byName = new Map(set.file.map((f) => [f.name, f]));
+  const ordered: FileDesc[] = [];
+  const state = new Map<string, 'visiting' | 'done'>();
+  const visit = (f: FileDesc): void => {
+    if (state.get(f.name)) return; // done，或成环（成环交给 registry 报错）
+    state.set(f.name, 'visiting');
+    for (const d of f.dependency) {
+      const dep = byName.get(d);
+      if (dep) visit(dep);
+    }
+    state.set(f.name, 'done');
+    ordered.push(f);
+  };
+  for (const f of set.file) visit(f);
+  set.file.splice(0, set.file.length, ...ordered);
+}
+
+type FileDesc = {
+  name: string;
+  package: string;
+  dependency: string[];
+  messageType: MsgDesc[];
+  enumType: { name: string }[];
+  service: { method: { inputType: string; outputType: string }[] }[];
+};
+
+type MsgDesc = {
+  name: string;
+  field: { typeName: string }[];
+  nestedType: MsgDesc[];
+  enumType: { name: string }[];
+};
+
+/**
+ * 描述符磁盘缓存按 host 分文件：`dish-descriptor.bin` → `dish-descriptor-192.168.100.1.bin`。
+ *
+ * 否则在设置里从 DishyMock(127.0.0.1) 切到真机后，会读到 mock 的描述符
+ * （它缺 RouterInfo，registry 建不起来 ⇒ grpc-web 解不了码）。
+ */
+export function perHostCachePath(basePath: string, host: string): string {
+  const ext = path.extname(basePath);
+  const stem = ext ? basePath.slice(0, -ext.length) : basePath;
+  return `${stem}-${host.replace(/[^A-Za-z0-9._-]/g, '_')}${ext}`;
 }
 
 /** varint 编码 */

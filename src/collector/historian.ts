@@ -475,7 +475,7 @@ export class DataCollector extends EventEmitter {
         address: this.config.dishAddress,
         grpcPort: this.config.dishPort,
         grpcWebPort: this.config.dishWebPort,
-      descriptorCachePath: this.config.descriptorCachePath,
+        descriptorCachePath: this.config.descriptorCachePath,
       });
     }
     
@@ -540,7 +540,8 @@ export class DataCollector extends EventEmitter {
         return [];
       }
 
-      const history = await grpc.getHistory(8000);
+      // 与 getTelemetry() 共享同一次 history 拉取（22KB，避免每轮拉两次）
+      const history = await this.client.getHistoryResponse(8000);
       const outages = Array.isArray(history.outages) ? (history.outages as Outage[]) : [];
 
       // 分析所有 outages

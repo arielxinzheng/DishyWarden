@@ -6,8 +6,16 @@
  * 「向西旋转 135°」这种错误引导，而「无期望值」分支永远走不到。
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as grpc from '@grpc/grpc-js';
+import * as protoLoader from '@grpc/proto-loader';
+import { ReflectionService } from '@grpc/reflection';
 import { DishClient, parseFiniteNumber, type TelemetryData } from './dishClient';
+import { DishGrpcClient, clearDescriptorCacheForTest, perHostCachePath } from './dishGrpc';
 
 /** parseStatus 是 private，但映射逻辑是本文件要锁的东西 —— 用类型断言取出来 */
 function mapper() {
@@ -295,5 +303,218 @@ describe('latestHistorySample 环形缓冲索引', () => {
     const { latestHistorySample } = await import('./dishClient');
     const sample = latestHistorySample({ popPingLatencyMs: [10, 20, 30] });
     expect(sample?.latencyMs).toBe(30);
+  });
+});
+
+// ── dishGrpc 传输层回归（本地起 gRPC + reflection + 假 grpc-web 服务，不依赖真机） ──
+//
+// 放在这个文件里是因为本轮改动的可写范围只含这一个测试文件；
+// 逻辑上属于 dishGrpc.ts，后续可挪到 dishGrpc.test.ts。
+describe('DishGrpcClient 传输层（本地 reflection 服务）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dishgrpc-'));
+  // 跨文件引用 + 同文件内大量互相引用 —— 真机 proto 就是这个形状
+  fs.writeFileSync(path.join(dir, 'common.proto'), `
+syntax = "proto3";
+package SpaceX.API.Common;
+message Tag { string v = 1; }
+`);
+  fs.writeFileSync(path.join(dir, 'device.proto'), `
+syntax = "proto3";
+package SpaceX.API.Device;
+import "common.proto";
+message GetStatusRequest {}
+message GetHistoryRequest {}
+message GetPingRequest {}
+message DishGetStatusResponse { string hardware_version = 1; SpaceX.API.Common.Tag tag = 2; }
+message Request {
+  uint64 id = 1;
+  oneof request {
+    GetStatusRequest get_status = 1004;
+    GetHistoryRequest get_history = 1007;
+    GetPingRequest get_ping = 1009;
+  }
+}
+message Response {
+  uint64 id = 1;
+  oneof response { DishGetStatusResponse dish_get_status = 2004; }
+}
+service Device { rpc Handle(Request) returns (Response); }
+`);
+
+  let server: grpc.Server;
+  let web: http.Server;
+  let nativePort = 0;
+  let webPort = 0;
+  let lastWebBody: Buffer = Buffer.alloc(0);
+
+  beforeAll(async () => {
+    const pkgDef = protoLoader.loadSync(path.join(dir, 'device.proto'), {
+      keepCase: false, longs: String, enums: String, defaults: false, oneofs: true, includeDirs: [dir],
+    });
+    const loaded = grpc.loadPackageDefinition(pkgDef) as unknown as {
+      SpaceX: { API: { Device: { Device: { service: grpc.ServiceDefinition } } } };
+    };
+    server = new grpc.Server();
+    server.addService(loaded.SpaceX.API.Device.Device.service, {
+      Handle: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+        if (call.request.getStatus) cb(null, { id: call.request.id, dishGetStatus: { hardwareVersion: 'rev4' } });
+        else cb({ code: grpc.status.UNIMPLEMENTED, details: 'no branch' } as grpc.ServiceError);
+      },
+    });
+    new ReflectionService(pkgDef).addToServer(server);
+    nativePort = await new Promise<number>((resolve, reject) =>
+      server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? reject(e) : resolve(p))));
+
+    // 假 grpc-web：记下请求体，回一个 Response{dish_get_status:{hardware_version:"web"}} + trailers
+    web = http.createServer((req, res) => {
+      const parts: Buffer[] = [];
+      req.on('data', (c: Buffer) => parts.push(c));
+      req.on('end', () => {
+        lastWebBody = Buffer.concat(parts);
+        const inner = Buffer.from([0x0a, 0x03, ...Buffer.from('web')]);
+        const msg = Buffer.from([0xa2, 0x7d, inner.length, ...inner]); // field 2004, LEN
+        const trailer = Buffer.from('grpc-status: 0\r\n');
+        const frame = (flag: number, b: Buffer) => {
+          const h = Buffer.alloc(5); h[0] = flag; h.writeUInt32BE(b.length, 1); return Buffer.concat([h, b]);
+        };
+        res.writeHead(200, { 'content-type': 'application/grpc-web+proto' });
+        res.end(Buffer.concat([frame(0x00, msg), frame(0x80, trailer)]));
+      });
+    });
+    webPort = await new Promise<number>((resolve) =>
+      web.listen(0, '127.0.0.1', () => resolve((web.address() as { port: number }).port)));
+  });
+
+  afterAll(() => {
+    server?.forceShutdown();
+    web?.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => clearDescriptorCacheForTest());
+
+  it('reflection 去重：传递依赖重复返回时 proto-loader 仍能建客户端（原生通道可用）', async () => {
+    const c = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    const status = await c.getStatus(3000);
+    expect(status.hardwareVersion).toBe('rev4');
+    c.close();
+  });
+
+  it('grpc-web 请求按 oneof 正确编码（不是退化成手工字段号）', async () => {
+    const c = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    // 先让描述符就位，再直接走 grpc-web
+    await c.getStatus(3000);
+    const res = await c.probeBranches(['getPing'], 3000, 'web');
+    expect(res[0].message).toBe('');
+    expect(res[0].ok).toBe(true);
+    // getPing(#1009) 不在 KNOWN_FIELD_NUMBERS 里：只有 registry 编码才发得出 field 1009
+    // 帧 = 5 字节头 + 负载；负载里要有 tag (1009<<3|2) = 0x8a 0x3f
+    const payload = lastWebBody.subarray(5);
+    expect(Buffer.from(payload).includes(Buffer.from([0x8a, 0x3f, 0x00]))).toBe(true);
+    c.close();
+  });
+
+  it('描述符缓存按 host 分键：换设备不会复用上一台的描述符', async () => {
+    const reflections = (c: DishGrpcClient) => {
+      const inner = c as unknown as { reflectFileContainingSymbol: (...a: unknown[]) => Promise<Uint8Array[]> };
+      const orig = inner.reflectFileContainingSymbol.bind(c);
+      let n = 0;
+      inner.reflectFileContainingSymbol = (...a: unknown[]) => { n += 1; return orig(...a); };
+      return () => n;
+    };
+    const a = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    const countA = reflections(a);
+    await a.getStatus(3000);
+    a.close();
+    expect(countA()).toBe(1);
+    // 同一台设备的新实例 ⇒ 命中模块缓存，不再 reflection
+    const a2 = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    const countA2 = reflections(a2);
+    await a2.getStatus(3000);
+    a2.close();
+    expect(countA2()).toBe(0);
+    // 换一个 host 字符串（指向同一个服务）⇒ 必须重新 reflection
+    const b = new DishGrpcClient('localhost', nativePort, webPort);
+    const countB = reflections(b);
+    await b.getStatus(3000);
+    b.close();
+    expect(countB()).toBe(1);
+  });
+
+  it('端口回落只针对 grpc-web 端口：自定义原生端口不会被改连到 9200', async () => {
+    const c = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    await c.getStatus(3000);
+    expect((c as unknown as { nativePort: number }).nativePort).toBe(nativePort);
+    c.close();
+  });
+
+  it('配置端口 = grpc-web 端口 ⇒ reflection 直接走 9200（不先在 HTTP/1.1 端口上白等）', async () => {
+    const c = new DishGrpcClient('127.0.0.1', webPort, webPort);
+    const seen: string[] = [];
+    const inner = c as unknown as { reflectFileContainingSymbol: (cl: grpc.Client) => Promise<Uint8Array[]> };
+    inner.reflectFileContainingSymbol = async (cl: grpc.Client) => {
+      seen.push(cl.getChannel().getTarget());
+      throw new Error('stop');
+    };
+    await expect(c.getStatus(500)).rejects.toThrow();
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toContain(':9200');
+    c.close();
+  });
+
+  it('磁盘缓存路径按 host 分文件', () => {
+    expect(perHostCachePath('/x/dish-descriptor.bin', '192.168.100.1'))
+      .toBe('/x/dish-descriptor-192.168.100.1.bin');
+    expect(perHostCachePath('/x/cache', 'a:b')).toBe('/x/cache-a_b');
+  });
+});
+
+describe('DishClient.getHistoryResponse —— 同一周期只拉一次 history', () => {
+  it('并发调用合并成一次 RPC，maxAge 内复用', async () => {
+    const client = new DishClient({ address: '127.0.0.1', grpcPort: 9200 });
+    let calls = 0;
+    (client as unknown as { grpc: unknown }).grpc = {
+      getHistory: async () => { calls += 1; return { current: 1 }; },
+      close: () => {},
+    };
+    const [a, b] = await Promise.all([client.getHistoryResponse(), client.getHistoryResponse()]);
+    expect(a).toBe(b);
+    await client.getHistoryResponse();
+    expect(calls).toBe(1);
+    await client.getHistoryResponse(1000, 0); // maxAge=0 ⇒ 强制重拉
+    expect(calls).toBe(2);
+  });
+});
+
+describe('latestHistorySample 环形索引不依赖 popPingLatencyMs', () => {
+  it('latency 数组缺失时，其它数组仍按 current 取模', async () => {
+    const { latestHistorySample } = await import('./dishClient');
+    const sample = latestHistorySample({ current: 5, downlinkThroughputBps: [100, 200, 300] });
+    expect(sample?.downlinkBps).toBe(200);
+  });
+});
+
+describe('getTelemetry —— 遮挡图按间隔刷新', () => {
+  it('间隔内不重复拉 60KB 遮挡图，且沿用上一份图的 SNR', async () => {
+    const client = new DishClient({ address: '192.168.100.1', grpcPort: 9200 });
+    let mapCalls = 0;
+    (client as unknown as { grpc: unknown }).grpc = {
+      getStatus: async () => ({ downlinkThroughputBps: 1e6 }),
+      getHistory: async () => ({ current: 1, popPingLatencyMs: [30] }),
+      getObstructionMap: async () => {
+        mapCalls += 1;
+        return { data: [[0]], numRows: 1, numCols: 1, avgSnr: 9, source: 'real' };
+      },
+      close: () => {},
+    };
+    const first = await client.getTelemetry();
+    // 让 history 缓存过期，确保第二帧真的重新组装
+    (client as unknown as { lastHistory: unknown }).lastHistory = null;
+    const second = await client.getTelemetry();
+    expect(mapCalls).toBe(1);
+    expect(first.snr).toBe(9);
+    expect(second.snr).toBe(9);
+    expect(second.obstructionMapSource).toBe('real');
+    expect(second.obstructionMap).toEqual([[0]]);
   });
 });
