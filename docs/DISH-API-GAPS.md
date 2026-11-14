@@ -200,3 +200,25 @@ dishylink 的 `decodeHistoryWindow` 讲得很清楚：
 响应体大小：dishylink 实测 history 响应约 **18,128 字节**（900 个样本 × 4 个数组），
 ⇒ 验证脚本的读取缓冲区从 8 KB 提到 **64 KB**，否则 trailers 帧（带 grpc-status）
 读不到 ⇒ 会把"响应被截断"误判成"分支不存在"。
+
+## 12. 用户真机（192.168.100.1，firmware 未标注）的实测能力清单
+
+用 `verify-dish.ps1` §3d 在 **grpc-web 9201** 上逐个字段号实测（2026-11-15）：
+
+| 字段号 | 分支 | grpc-status | 响应字节 | 结论 |
+|---|---|---|---|---|
+| 1004 | `get_status` | **0** | 835 | ✅ 可用 |
+| 1007 | `get_history` | **0** | 22,446 | ✅ 可用（含 900 样本环形缓冲） |
+| 2006 | `dish_get_history` | 12 | 291 | ❌ **该固件没有这个分支** |
+| 2008 | `dish_get_obstruction_map` | **0** | 60,803 | ✅ 可用（遮挡图很大，60KB） |
+| 1008 | `get_device_info` | **0** | 412 | ✅ 可用 |
+| — | 空请求（无分支字段） | 12 | 291 | 基准：空请求 ⇒ UNIMPLEMENTED |
+
+⇒ 这台固件的分支命名是 **`get_*`**（不是 `dish_get_*`），**与我们的实现一致** ✓
+⇒ 历史上 app 失败与分支名**无关**，只因：① 9200 的 Handle 回 UNIMPLEMENTED
+（该固件只实现 grpc-web 入口）② 兜底需要 9200 做 reflection ⇒ 循环依赖
+⇒ 两点都已修（grpc-web 兜底 + 描述符模块级/磁盘缓存）
+
+⚠️ **遮挡图 60KB、history 22KB**：原生 gRPC 的 maxReceiveMessageLength 默认 4MB ✓ 无压力；
+但每 30 秒拉一次 = 约 2 kB/s（history 另有一份，见 `analyzeHandoffs`），
+⇒ 后续可考虑让两次 history 调用共用一次响应。

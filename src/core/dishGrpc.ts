@@ -734,7 +734,8 @@ export class DishGrpcClient {
   async getObstructionMap(timeoutMs = 8000): Promise<ObstructionMapResult> {
     const res = await this.call({ id: Date.now() % 100000, dishGetObstructionMap: {} }, timeoutMs);
 
-    const map = res.dishGetObstructionMap as {
+    // 兜底键：不同固件的响应字段名可能是 dish_get_obstruction_map 或 get_obstruction_map
+    const map = (res.dishGetObstructionMap ?? res.getObstructionMap) as {
       numRows?: number; numCols?: number;
       snr?: number[]; obstructionMatrix?: number[];
     } | undefined;
