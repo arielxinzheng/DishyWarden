@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
-import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info } from 'lucide-react';
+import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info, Radar } from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
 import {
@@ -599,32 +599,16 @@ export default function Settings() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {/* dish 侧读取优先放在前面：真机远程桌面 / 系统定位服务关闭时浏览器定位必然失败，
-                dish 自带 GNSS，不依赖用户机器，是更稳的数据源 */}
+            {/* ① 浏览器定位 —— 首选。
+                终端自带的 GPS 接口在**多数终端上已被封闭**（分支不存在 ⇒
+                UNIMPLEMENTED，或终端不开放本地网络访问 ⇒ code 7），
+                把它当首选只会让人多点一次再失败。 */}
             <Button
               variant="default"
-              onClick={handleGetDishLocation}
-              disabled={dishLoading}
-              className="flex-1"
-              title={t('settings:location.dish_source_tooltip')}
-            >
-              {dishLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {t('settings:location.fetching')}
-                </>
-              ) : (
-                <>
-                  <MapPin className="w-4 h-4 mr-2" />
-                  {t('settings:location.get_from_dish')}
-                </>
-              )}
-            </Button>
-            <Button
-              variant="outline"
               onClick={handleGetCurrentLocation}
               disabled={geoLoading}
               className="flex-1"
+              title={t('settings:location.browser_source_tooltip')}
             >
               {geoLoading ? (
                 <>
@@ -656,7 +640,29 @@ export default function Settings() {
               <RotateCcw className="w-4 h-4 mr-2" />
               {t('settings:location.clear')}
             </Button>
+            {/* ② 终端 GPS —— 次要（多数终端已封闭该接口，成功率低） */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleGetDishLocation}
+              disabled={dishLoading}
+              className="text-muted-foreground"
+              title={t('settings:location.dish_source_tooltip')}
+            >
+              {dishLoading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  {t('settings:location.fetching')}
+                </>
+              ) : (
+                <>
+                  <Radar className="w-3.5 h-3.5 mr-1.5" />
+                  {t('settings:location.get_from_dish')}
+                </>
+              )}
+            </Button>
           </div>
+          <p className="text-xs text-muted-foreground">{t('settings:location.dish_rare_note')}</p>
 
           {/* 常驻提示: 否则按钮灰着时用户不知道为什么要先填经纬度 */}
           {!latitude || !longitude ? (
@@ -674,13 +680,13 @@ export default function Settings() {
             <AlertDescription className="ml-7 text-sm">
               <strong>{t('settings:location.usage_title')}</strong>
               <br />
-              1. {t('settings:location.usage_dish')}
+              1. {t('settings:location.usage_1')}
               <br />
-              2. {t('settings:location.usage_1')}
+              2. {t('settings:location.usage_2')}
               <br />
-              3. {t('settings:location.usage_2')}
+              3. {t('settings:location.usage_3')}
               <br />
-              4. {t('settings:location.usage_3')}
+              4. {t('settings:location.usage_dish')}
               <br />
               <span className="text-xs opacity-80">{t('settings:location.rdp_hint')}</span>
               <br />

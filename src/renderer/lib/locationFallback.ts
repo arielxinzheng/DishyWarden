@@ -47,10 +47,17 @@ export interface LocationFallbackDeps {
 }
 
 /**
- * 按「终端 → 浏览器」的顺序尝试取值。
+ * 按「浏览器 → 终端」的顺序尝试取值。
  *
- * 终端成功 ⇒ 直接返回；终端失败 ⇒ 自动回落浏览器；
- * 两边都失败 ⇒ 返回两条原因（调用方拼成提示）。
+ * ## 为什么浏览器在前
+ *
+ * 用户实测反馈：**星链终端的 GPS 接口在多数终端上已被封闭**
+ * （`get_location` 分支不存在 ⇒ UNIMPLEMENTED；或终端不开放本地网络访问
+ * ⇒ code 7）。把它当首选只会让人多点一次再失败。
+ *
+ * ⇒ 浏览器定位升为首选（本地桌面会话下最稳）；
+ * ⇒ 终端 GPS 退为**自动回落**的第二步（少数开放该接口的终端能捡到）；
+ * ⇒ 两者都失败 ⇒ 手动填写。
  */
 export async function resolveLocation(
   deps: LocationFallbackDeps,
@@ -58,7 +65,16 @@ export async function resolveLocation(
   const attempted: LocationSource[] = [];
   const reasons: string[] = [];
 
-  // ── 1. 星链终端 GPS ──────────────────────────────────────────────
+  // ── 1. 浏览器定位（首选）─────────────────────────────────────────
+  attempted.push('browser');
+  try {
+    const fromBrowser = await deps.fromBrowser();
+    return { ok: true, ...fromBrowser, source: 'browser' };
+  } catch (err) {
+    reasons.push(deps.formatBrowserFailure(err));
+  }
+
+  // ── 2. 星链终端 GPS（自动回落；多数终端已封闭该接口）──────────
   attempted.push('dish');
   try {
     const fromDish = await deps.fromDish();
@@ -73,15 +89,6 @@ export async function resolveLocation(
     reasons.push(deps.formatDishFailure(null));
   } catch (err) {
     reasons.push(deps.formatDishFailure(err));
-  }
-
-  // ── 2. 浏览器定位（自动回落）────────────────────────────────────
-  attempted.push('browser');
-  try {
-    const fromBrowser = await deps.fromBrowser();
-    return { ok: true, ...fromBrowser, source: 'browser' };
-  } catch (err) {
-    reasons.push(deps.formatBrowserFailure(err));
   }
 
   // ── 3. 都不行 ⇒ 交给用户手动填 ────────────────────────────────

@@ -55,7 +55,7 @@
     "got_position": "Current location acquired: {{lat}}, {{lon}}. Click \"Save location\" to save it.",
     "fetch_failed": "Failed to get the location",
     "permission_denied": "Location permission was denied. Enter the coordinates manually, or allow location access in your browser settings and try again.",
-    "position_unavailable": "System location service unavailable (common in Remote Desktop sessions or when Windows Location is off). Use \"Read from Starlink dish\" or enter coordinates manually",
+    "position_unavailable": "System location service unavailable (common over Remote Desktop or when the Windows location service is off). Please enter the coordinates manually.",
     "timeout": "Location request timed out. Try again or enter the coordinates manually.",
     "not_supported": "Your browser does not support geolocation. Please enter the coordinates manually.",
     "lat_invalid": "Latitude must be between -90 and 90 (current value: {{value}})",
@@ -71,10 +71,12 @@
     "dish_no_fix": "The dish has no GPS fix yet. Try again later or enter coordinates manually.",
     "dish_other": "Failed to read location from the Starlink dish. Please enter coordinates manually.",
     "error_code": "(error code {{code}})",
-    "usage_dish": "Recommended: click \"Read from Starlink dish\" to use the dish's built-in GPS",
-    "rdp_hint": "\"Get current location\" does not work in Remote Desktop sessions or when the system location service is off (POSITION_UNAVAILABLE). Use \"Read from Starlink dish\" or enter coordinates manually.",
+    "usage_dish": "Fallback: on the few terminals that expose it, \"Read from Starlink terminal\" uses the antenna GNSS",
+    "rdp_hint": "Over Remote Desktop or with the system location service off, \"Get current position\" fails (POSITION_UNAVAILABLE). Please enter the coordinates manually.",
     "fallback_to_browser": "Falling back to browser geolocation…",
-    "manual_hint": "Please enter the coordinates manually."
+    "manual_hint": "Please enter the coordinates manually.",
+    "dish_rare_note": "\"Read from Starlink terminal\": this interface is closed on most terminals (UNIMPLEMENTED or PERMISSION_DENIED) — a fallback only.",
+    "browser_source_tooltip": "Get the current position via browser geolocation (needs the OS location service; usually unavailable over Remote Desktop)"
   },
   "thresholds": {
     "title": "Alert Thresholds",

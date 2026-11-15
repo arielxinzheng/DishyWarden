@@ -55,7 +55,7 @@
     "got_position": "Đã lấy vị trí hiện tại: {{lat}}, {{lon}}. Hãy nhấn nút “Lưu vị trí” để lưu.",
     "fetch_failed": "Lấy vị trí thất bại",
     "permission_denied": "Người dùng đã từ chối yêu cầu định vị. Vui lòng nhập vĩ độ/kinh độ thủ công, hoặc cho phép quyền định vị trong cài đặt trình duyệt rồi thử lại.",
-    "position_unavailable": "Dịch vụ định vị hệ thống không khả dụng (thường gặp khi dùng Remote Desktop hoặc tắt Vị trí của Windows). Hãy dùng \"Đọc từ thiết bị Starlink\" hoặc nhập tọa độ thủ công",
+    "position_unavailable": "Dịch vụ vị trí hệ thống không khả dụng (thường gặp qua Remote Desktop hoặc khi tắt dịch vụ vị trí Windows). Vui lòng nhập tọa độ thủ công.",
     "timeout": "Yêu cầu vị trí đã hết thời gian chờ, vui lòng thử lại hoặc nhập vĩ độ/kinh độ thủ công",
     "not_supported": "Trình duyệt của bạn không hỗ trợ định vị, vui lòng nhập vĩ độ/kinh độ thủ công",
     "lat_invalid": "Vĩ độ phải nằm trong khoảng -90 đến 90 (giá trị hiện tại: {{value}})",
@@ -71,10 +71,12 @@
     "dish_no_fix": "Thiết bị chưa định vị GPS xong. Thử lại sau hoặc nhập tọa độ thủ công.",
     "dish_other": "Đọc vị trí từ thiết bị Starlink thất bại. Vui lòng nhập tọa độ thủ công.",
     "error_code": "(mã lỗi {{code}})",
-    "usage_dish": "Khuyến nghị: nhấn \"Đọc từ thiết bị Starlink\" để dùng GPS tích hợp của ăng-ten",
-    "rdp_hint": "\"Lấy vị trí hiện tại\" không dùng được trong phiên Remote Desktop hoặc khi dịch vụ định vị hệ thống tắt (POSITION_UNAVAILABLE). Hãy dùng \"Đọc từ thiết bị Starlink\" hoặc nhập thủ công.",
+    "usage_dish": "Dự phòng: với thiết bị có hỗ trợ, \"Đọc từ thiết bị Starlink\" dùng GNSS của ăng-ten",
+    "rdp_hint": "Qua Remote Desktop hoặc khi dịch vụ vị trí hệ thống bị tắt, \"Lấy vị trí hiện tại\" sẽ thất bại (POSITION_UNAVAILABLE). Vui lòng nhập tọa độ thủ công.",
     "fallback_to_browser": "Đang tự động chuyển sang vị trí trình duyệt…",
-    "manual_hint": "Vui lòng nhập tọa độ thủ công."
+    "manual_hint": "Vui lòng nhập tọa độ thủ công.",
+    "dish_rare_note": "\"Đọc từ thiết bị Starlink\": giao diện này đã bị đóng trên hầu hết thiết bị (UNIMPLEMENTED / PERMISSION_DENIED). Chỉ dùng dự phòng.",
+    "browser_source_tooltip": "Lấy vị trí hiện tại qua định vị trình duyệt (cần dịch vụ vị trí của hệ điều hành; thường không dùng được qua Remote Desktop)"
   },
   "thresholds": {
     "title": "Ngưỡng cảnh báo",
