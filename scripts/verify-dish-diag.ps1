@@ -81,6 +81,10 @@ try {
         $first = ($o1 -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
         Add-Result "tracert (default)" "FAIL" $first.Trim()
     }
+    Write-Host ""
+    Write-Host "---- FULL tracert (default) output ----" -ForegroundColor DarkGray
+    Write-Host $o1
+    Write-Host "---- end ----" -ForegroundColor DarkGray
 } catch {
     Add-Result "tracert (default)" "FAIL" $_.Exception.Message
 }
@@ -94,6 +98,10 @@ try {
         $first2 = ($o2 -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
         Add-Result "tracert -4" "FAIL" $first2.Trim()
     }
+    Write-Host ""
+    Write-Host "---- FULL tracert -4 output ----" -ForegroundColor DarkGray
+    Write-Host $o2
+    Write-Host "---- end ----" -ForegroundColor DarkGray
 } catch {
     Add-Result "tracert -4" "FAIL" $_.Exception.Message
 }
