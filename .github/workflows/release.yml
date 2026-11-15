@@ -32,6 +32,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ⚠️ 必须显式把原生模块重编译到 **Electron 的 ABI**。
+      #    package.json 有 npmRebuild: false（坑 31: 保护本地开发机的 arm64
+      #    模块不被打包覆盖），但那条只在 app-builder-lib 的 packager 流程里
+      #    生效（packager.js:405）。CI 是干净环境, 不存在要保护的东西:
+      #      npm ci 用 runner 的 Node 22 编译 better-sqlite3 ⇒ ABI 127
+      #      Electron 33 需要 ABI 130
+      #    ⇒ 打进安装包的 .node 加载失败:
+      #        ERR_DLOPEN_FAILED  NODE_MODULE_VERSION 127 vs 130
+      #    ⇒ 后果是历史库"降级为内存模式"(重启丢全部数据)、
+      #      后台服务 Failed to start background services。
+      #    实测(v1.0.0 首发包, VM 真机): 就是这个报错。
+      #    install-app-deps 是独立 CLI, 不受 npmRebuild 影响。
+      - name: Rebuild native modules for Electron ABI
+        run: npx electron-builder install-app-deps
+
       - name: 校验 tag 版本 == package.json version
         shell: pwsh
         run: |
@@ -142,6 +157,21 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # ⚠️ 必须显式把原生模块重编译到 **Electron 的 ABI**。
+      #    package.json 有 npmRebuild: false（坑 31: 保护本地开发机的 arm64
+      #    模块不被打包覆盖），但那条只在 app-builder-lib 的 packager 流程里
+      #    生效（packager.js:405）。CI 是干净环境, 不存在要保护的东西:
+      #      npm ci 用 runner 的 Node 22 编译 better-sqlite3 ⇒ ABI 127
+      #      Electron 33 需要 ABI 130
+      #    ⇒ 打进安装包的 .node 加载失败:
+      #        ERR_DLOPEN_FAILED  NODE_MODULE_VERSION 127 vs 130
+      #    ⇒ 后果是历史库"降级为内存模式"(重启丢全部数据)、
+      #      后台服务 Failed to start background services。
+      #    实测(v1.0.0 首发包, VM 真机): 就是这个报错。
+      #    install-app-deps 是独立 CLI, 不受 npmRebuild 影响。
+      - name: Rebuild native modules for Electron ABI
+        run: npx electron-builder install-app-deps
 
       - name: 校验 tag 版本 == package.json version
         run: |
