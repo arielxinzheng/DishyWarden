@@ -23,6 +23,7 @@
  */
 
 import { exec } from 'child_process';
+import net from 'net';
 import { promises as dns } from 'dns';
 import tls from 'tls';
 import { EventEmitter } from 'events';
@@ -149,20 +150,82 @@ const parsePingRtt = parsePingRttFromStats;
 /**
  * 执行一次 ICMP 探测。
  */
+/**
+ * TCP 可达性回落。
+ *
+ * ICMP 不通**不等于**设备不可达 —— 星链路由器就**不应答 ICMP**，
+ * 但它的 HTTP(:80) 和 gRPC(:9001) 都在 ⇒ 只探 ICMP 会永远显示「状态未知」。
+ *
+ * 逐个尝试常见端口，任意一个连上就算可达（并记录是哪个端口），
+ * 用真实 TCP 握手耗时当 RTT —— 这比 ICMP 更接近"业务能不能通"。
+ */
+async function probeTcpFallback(
+  host: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean; port?: number; rttMs?: number }> {
+  const ports = [80, 443, 9001, 22, 53];
+  // ⚠️ 总预算必须封顶 —— 采集周期是 30s，回落不能把整轮拖死。
+  // 每个端口分到 timeoutMs/ports.length（上限 2s），一轮总耗时 ≈ timeoutMs。
+  const perPort = Math.max(500, Math.min(2000, Math.floor(timeoutMs / ports.length)));
+  const deadline = Date.now() + timeoutMs;
+
+  for (const port of ports) {
+    if (Date.now() >= deadline) break;
+    const started = Date.now();
+    const ok = await new Promise<boolean>((resolve) => {
+      const socket = net.connect({ host, port });
+      const done = (v: boolean) => {
+        socket.removeAllListeners();
+        socket.destroy();
+        resolve(v);
+      };
+      socket.setTimeout(perPort, () => done(false));
+      socket.once('connect', () => done(true));
+      socket.once('error', () => done(false));
+    });
+    if (ok) return { ok: true, port, rttMs: Date.now() - started };
+  }
+  return { ok: false };
+}
+
 async function probeIcmp(node: ProbeNodeConfig): Promise<ProbeResult> {
   const started = Date.now();
   const count = 3;
-  const { stdout, code } = await execAsync(
-    buildPingCommand(node.target, count, node.timeoutSec),
-    node.timeoutSec * 1000 + 2000
-  );
+
+  // ⚠️ ping 在目标不可达时**退出码非 0** ⇒ exec 会 reject。
+  // 旧代码直接 await ⇒ 异常冒泡 ⇒ probeAndRecord 状态永远更新不了
+  // ⇒ 节点永远显示「状态未知」。这里接住异常并用 stdout 里的丢包率判断。
+  let stdout = '';
+  let code = 0;
+  try {
+    const r = await execAsync(
+      buildPingCommand(node.target, count, node.timeoutSec),
+      node.timeoutSec * 1000 + 2000
+    );
+    stdout = r.stdout;
+    code = r.code;
+  } catch (err: any) {
+    stdout = typeof err?.stdout === 'string' ? err.stdout : '';
+    code = typeof err?.code === 'number' ? err.code : 1;
+  }
 
   if (code !== 0 && !/\d+\s+packets received/.test(stdout)) {
+    // ICMP 不通 —— 再用 TCP 回落试一次（星链路由器不回 ICMP，但 HTTP/gRPC 在）
+    const tcp = await probeTcpFallback(node.target, node.timeoutSec * 1000);
+    if (tcp.ok) {
+      return {
+        nodeId: node.id,
+        ok: true,
+        rttMs: tcp.rttMs ?? Date.now() - started,
+        detail: `ICMP 不通，但 TCP :${tcp.port} 可达`,
+        ts: Date.now(),
+      };
+    }
     return {
       nodeId: node.id,
       ok: false,
       rttMs: null,
-      error: '目标不可达',
+      error: '目标不可达 (ICMP 与 TCP 均不通)',
       ts: Date.now(),
     };
   }
@@ -173,11 +236,21 @@ async function probeIcmp(node: ProbeNodeConfig): Promise<ProbeResult> {
   const loss = parsePingLossRatio(stdout) ?? 0;
 
   if (loss >= 100) {
+    const tcp = await probeTcpFallback(node.target, node.timeoutSec * 1000);
+    if (tcp.ok) {
+      return {
+        nodeId: node.id,
+        ok: true,
+        rttMs: tcp.rttMs ?? Date.now() - started,
+        detail: `ICMP 100% 丢包，但 TCP :${tcp.port} 可达`,
+        ts: Date.now(),
+      };
+    }
     return {
       nodeId: node.id,
       ok: false,
       rttMs: null,
-      error: '目标不可达 (100% 丢包)',
+      error: '目标不可达 (100% 丢包, TCP 也不通)',
       ts: Date.now(),
     };
   }
@@ -542,7 +615,21 @@ export class ProbeRunner extends EventEmitter {
   }
 
   private async probeAndRecord(node: ProbeNodeConfig): Promise<void> {
-    const result = await runProbe(node);
+    // ⚠️ 探测本身出错（命令不存在/权限/异常）不能让状态停在「未知」——
+    // 那等于没有结论。失败也要落成一个明确的"不可达 + 原因"。
+    let result: ProbeResult;
+    try {
+      result = await runProbe(node);
+    } catch (error: unknown) {
+      const err = error as { code?: string; message?: string };
+      result = {
+        nodeId: node.id,
+        ok: false,
+        rttMs: null,
+        error: err?.code || err?.message || '探测异常',
+        ts: Date.now(),
+      };
+    }
 
     // ⚠️ 探测期间可能已经 stop() 了(退出流程) ——
     //   此时不该再 emit: 渲染层可能已销毁, 推过去会抛

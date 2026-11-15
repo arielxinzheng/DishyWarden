@@ -307,7 +307,8 @@
     "not_reached": "Chưa tới",
     "expand_all": "Hiện tất cả",
     "collapse": "Thu gọn",
-    "no_info": "Không lấy được thông tin tuyến"
+    "no_info": "Không lấy được thông tin tuyến",
+    "failed_reason": "Lý do thất bại"
   },
   "direction": {
     "n": "Bắc",

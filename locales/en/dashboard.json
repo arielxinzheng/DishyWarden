@@ -307,7 +307,8 @@
     "not_reached": "Not reached",
     "expand_all": "Show all",
     "collapse": "Collapse",
-    "no_info": "Unable to get route information"
+    "no_info": "Unable to get route information",
+    "failed_reason": "Reason"
   },
   "direction": {
     "n": "N",

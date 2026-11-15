@@ -307,7 +307,8 @@
     "not_reached": "도달하지 못함",
     "expand_all": "모두 펼치기",
     "collapse": "접기",
-    "no_info": "경로 정보를 가져올 수 없습니다"
+    "no_info": "경로 정보를 가져올 수 없습니다",
+    "failed_reason": "실패 원인"
   },
   "direction": {
     "n": "북",

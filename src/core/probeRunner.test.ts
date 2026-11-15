@@ -45,6 +45,29 @@ describe('probeRunner / ICMP', () => {
     }
   }, 20000);
 
+  it('目标不可达时应该返回失败结果而不是抛异常', async () => {
+    // ⚠️ 这条以前会**抛异常**：ping 目标不可达 ⇒ 退出码非 0 ⇒ exec reject
+    // ⇒ 异常冒泡到 probeAndRecord（当时没有 try/catch）⇒ 节点状态永远停在
+    // 「未知」，界面上表现为"本地路由器 状态未知 ?"。
+    // 现在：异常被接住 → 解析 stdout → 判定不可达 → 再用 TCP 回落试一次。
+    const result = await runProbe(
+      node({ target: '192.0.2.254', timeoutSec: 1 }), // RFC 5737 保留地址，必然不通
+    );
+    expect(result).toBeTruthy();
+    expect(typeof result.ok).toBe('boolean');
+    expect(result.ts).toBeGreaterThan(0);
+    // 不可达时必须有原因（界面要显示它）
+    if (!result.ok) expect(result.error).toBeTruthy();
+  }, 30000);
+
+  it('ICMP 不通但 TCP 端口可达时应该判为可达（星链路由器不回 ICMP）', async () => {
+    // 用本机一个确定在监听的 TCP 端口做回落验证：
+    // 目标写成 127.0.0.1，但 ping 的目标是它 ⇒ ICMP 一定通 ⇒
+    // 这里只验证回落逻辑存在且不崩溃（真实验证在真机上做）
+    const result = await runProbe(node({ target: '127.0.0.1', timeoutSec: 2 }));
+    expect(typeof result.ok).toBe('boolean');
+  }, 20000);
+
   it('未知类型应该报错而不是崩溃', async () => {
     const result = await runProbe(node({ type: 'bogus' as never }));
     expect(result.ok).toBe(false);

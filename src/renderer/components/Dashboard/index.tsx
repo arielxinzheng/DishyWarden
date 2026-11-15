@@ -1097,6 +1097,8 @@ function RouteTraceCard({
     hops: Array<{ hop: number; ip: string | null; hostname: string; rtt: number | null }>;
     completed: boolean;
     duration: number;
+    /** 失败原因（主进程带出来的）—— 用来告诉用户到底卡在哪 */
+    error?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 追踪目标来自设置页的「探针节点管理」(默认 example.com)。
@@ -1325,8 +1327,14 @@ function RouteTraceCard({
         )}
 
         {data && data.hops.length === 0 && (
-          <div className="text-xs text-slate-400 py-8 text-center">
-            {t('dashboard:route.no_info')}
+          <div className="text-xs text-slate-400 py-8 text-center space-y-1">
+            <div>{t('dashboard:route.no_info')}</div>
+            {/* 失败原因由主进程带出来 —— 之前只写日志，界面无从判断 */}
+            {data.error && (
+              <div className="text-[11px] text-warning-orange/80 break-words">
+                {t('dashboard:route.failed_reason')}: {data.error}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

@@ -307,7 +307,8 @@
     "not_reached": "未到達",
     "expand_all": "すべて表示",
     "collapse": "折りたたむ",
-    "no_info": "経路情報を取得できません"
+    "no_info": "経路情報を取得できません",
+    "failed_reason": "失敗理由"
   },
   "direction": {
     "n": "北",

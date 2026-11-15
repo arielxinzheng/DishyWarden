@@ -36,6 +36,14 @@ export interface TracerouteResult {
   hops: TraceHop[];
   completed: boolean;   // 是否到达目标
   duration: number;     // 执行耗时(ms)
+  /**
+   * 失败原因（可选）。
+   *
+   * 之前失败原因只写进主进程日志，界面只显示「无法获取路由信息」——
+   * 用户无从判断是"tracert 命令没找到"还是"目标不可达"。
+   * 现在把它带出来，界面直接显示。
+   */
+  error?: string;
 }
 
 /**
@@ -95,13 +103,34 @@ export async function traceroute(
   const platform = process.platform;
   const command = buildTraceCommand(platform, target, { maxHops, hopTimeout, probes });
 
+  // Windows 上 GUI 进程的执行环境可能拿不到 PATH 里的系统工具
+  // （'tracert' 不是内部或外部命令）⇒ 命令找不到时用绝对路径再试一次。
+  const windowsFallback =
+    platform === 'win32'
+      ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\tracert` +
+        ` -h ${maxHops} -w ${hopTimeout * 1000} -d ${target}`
+      : null;
+
   try {
-    const { stdout } = await execAsync(command, {
-      timeout,
-      maxBuffer: 1024 * 1024, // 1MB
-      // windowsHide: Windows 上 GUI 应用执行 tracert 会闪黑色控制台窗口
-      windowsHide: true,
-    });
+    let stdout: string;
+    try {
+      ({ stdout } = await execAsync(command, {
+        timeout,
+        maxBuffer: 1024 * 1024, // 1MB
+        // windowsHide: Windows 上 GUI 应用执行 tracert 会闪黑色控制台窗口
+        windowsHide: true,
+      }));
+    } catch (err: any) {
+      const msg = String(err?.message ?? '');
+      const notFound = /不是内部或外部命令|not recognized as an internal/i.test(msg);
+      if (!windowsFallback || !notFound) throw err;
+      console.warn('[Traceroute] PATH 里找不到 tracert，改用绝对路径重试');
+      ({ stdout } = await execAsync(windowsFallback, {
+        timeout,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      }));
+    }
 
     const rawHops = platform === 'win32'
       ? parseWindowsTraceroute(stdout)
@@ -165,6 +194,8 @@ export async function traceroute(
       hops: [],
       completed: false,
       duration: Date.now() - startTime,
+      // 把原因带出去 —— 界面直接显示，不再只有一句「无法获取路由信息」
+      error: String(error?.message ?? error ?? 'traceroute 执行失败').slice(0, 300),
     };
   }
 }
