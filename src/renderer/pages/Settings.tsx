@@ -472,6 +472,7 @@ export default function Settings() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('settings:collector.dish_address')}</label>
+              <HintTip text={t('settings:collector.dish_address_hint')} label={t('settings:collector.dish_address')} />
               <Input
                 value={config.collector.dishAddress}
                 onChange={(e) =>
@@ -482,7 +483,6 @@ export default function Settings() {
                 }
                 placeholder={t('settings:collector.dish_address_placeholder')}
               />
-              <HintTip text={t('settings:collector.dish_address_hint')} label={t('settings:collector.dish_address')} />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('settings:collector.dish_port')}</label>
@@ -502,6 +502,7 @@ export default function Settings() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('settings:collector.router_address')}</label>
+              <HintTip text={t('settings:collector.router_address_hint')} label={t('settings:collector.router_address')} />
               <Input
                 value={config.collector.routerAddress}
                 onChange={(e) =>
@@ -512,13 +513,16 @@ export default function Settings() {
                 }
                 placeholder={t('settings:collector.router_address_placeholder')}
               />
-              <HintTip text={t('settings:collector.router_address_hint')} label={t('settings:collector.router_address')} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings:collector.interval')}</label>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium">{t('settings:collector.interval')}</span>
+                <HintTip text={t('settings:collector.interval_hint')} label={t('settings:collector.interval')} />
+              </div>
               <Input
                 type="number"
                 value={config.collector.interval / 1000}
@@ -534,10 +538,13 @@ export default function Settings() {
                 min="10"
                 max="300"
               />
-              <HintTip text={t('settings:collector.interval_hint')} label={t('settings:collector.interval')} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('settings:collector.buffer_size')}</label>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium">{t('settings:collector.buffer_size')}</span>
+                <HintTip text={t('settings:collector.buffer_size_hint')} label={t('settings:collector.buffer_size')} />
+              </div>
               <Input
                 type="number"
                 value={config.collector.bufferSize}
@@ -548,7 +555,6 @@ export default function Settings() {
                   })
                 }
               />
-              <HintTip text={t('settings:collector.buffer_size_hint')} label={t('settings:collector.buffer_size')} />
             </div>
           </div>
         </CardContent>
@@ -557,24 +563,24 @@ export default function Settings() {
       {/* 终端位置配置 */}
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <MapPin className="w-5 h-5" />
-            <div className="flex items-center gap-1.5">
-              <CardTitle>{t('settings:location.title')}</CardTitle>
-              {/* 使用说明改成悬浮帮助 ⓘ —— 原来是一整块常驻 Alert，占版面 */}
-              <HintTip
-                title={t('settings:location.usage_title')}
-                text={buildTipText([
-                  `1. ${t('settings:location.usage_1')}`,
-                  `2. ${t('settings:location.usage_2')}`,
-                  `3. ${t('settings:location.usage_3')}`,
-                  t('settings:location.rdp_hint'),
-                  t('settings:location.privacy'),
-                ])}
-                label={t('settings:location.usage_title')}
-              />
-            </div>
+          <div className="flex items-start gap-2">
+            <MapPin className="w-5 h-5 mt-0.5" />
             <div>
+              <div className="flex items-center gap-1.5">
+                <CardTitle>{t('settings:location.title')}</CardTitle>
+                {/* 使用说明改成悬浮帮助 ⓘ —— 原来是一整块常驻 Alert，占版面 */}
+                <HintTip
+                  title={t('settings:location.usage_title')}
+                  text={buildTipText([
+                    `1. ${t('settings:location.usage_1')}`,
+                    `2. ${t('settings:location.usage_2')}`,
+                    `3. ${t('settings:location.usage_3')}`,
+                    t('settings:location.rdp_hint'),
+                    t('settings:location.privacy'),
+                  ])}
+                  label={t('settings:location.usage_title')}
+                />
+              </div>
               <CardDescription>{t('settings:location.description')}</CardDescription>
             </div>
           </div>
@@ -686,9 +692,12 @@ export default function Settings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <label htmlFor="high-latency-threshold" className="block text-sm font-medium mb-2">
-              {t('settings:thresholds.high_latency')}
-            </label>
+            <div className="mb-2 flex items-center gap-1.5">
+              <label htmlFor="high-latency-threshold" className="text-sm font-medium">
+                {t('settings:thresholds.high_latency')}
+              </label>
+              <HintTip text={t('settings:thresholds.high_latency_hint')} label={t('settings:thresholds.high_latency')} />
+            </div>
             <input
               type="number"
               id="high-latency-threshold"
@@ -707,13 +716,15 @@ export default function Settings() {
               min="10"
               max="1000"
             />
-            <HintTip text={t('settings:thresholds.high_latency_hint')} label={t('settings:thresholds.high_latency')} />
           </div>
 
           <div>
-            <label htmlFor="high-packet-loss-threshold" className="block text-sm font-medium mb-2">
-              {t('settings:thresholds.high_packet_loss')}
-            </label>
+            <div className="mb-2 flex items-center gap-1.5">
+              <label htmlFor="high-packet-loss-threshold" className="text-sm font-medium">
+                {t('settings:thresholds.high_packet_loss')}
+              </label>
+              <HintTip text={t('settings:thresholds.high_packet_loss_hint')} label={t('settings:thresholds.high_packet_loss')} />
+            </div>
             <input
               type="number"
               id="high-packet-loss-threshold"
@@ -732,7 +743,6 @@ export default function Settings() {
               max="50"
               step="0.1"
             />
-            <HintTip text={t('settings:thresholds.high_packet_loss_hint')} label={t('settings:thresholds.high_packet_loss')} />
           </div>
         </CardContent>
       </Card>
@@ -798,6 +808,7 @@ export default function Settings() {
             <>
               <div className="space-y-2">
                 <label className="text-sm font-medium">{t('settings:notifications.bot_token')}</label>
+                <HintTip text={t('settings:notifications.bot_token_hint')} label={t('settings:notifications.bot_token')} />
                 <Input
                   type="password"
                   value={config.notifications.telegram.botToken}
@@ -815,11 +826,11 @@ export default function Settings() {
                   }
                   placeholder={t('settings:notifications.bot_token_placeholder')}
                 />
-                <HintTip text={t('settings:notifications.bot_token_hint')} label={t('settings:notifications.bot_token')} />
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">{t('settings:notifications.chat_id')}</label>
+                <HintTip text={t('settings:notifications.chat_id_hint')} label={t('settings:notifications.chat_id')} />
                 <Input
                   value={config.notifications.telegram.chatId}
                   onChange={(e) =>
@@ -836,7 +847,6 @@ export default function Settings() {
                   }
                   placeholder={t('settings:notifications.chat_id_placeholder')}
                 />
-                <HintTip text={t('settings:notifications.chat_id_hint')} label={t('settings:notifications.chat_id')} />
               </div>
             </>
           )}
@@ -939,6 +949,7 @@ export default function Settings() {
                 <label className="text-sm font-medium">
                   {t('settings:notifications.webhook_headers_label')}
                 </label>
+                <HintTip text={t('settings:notifications.webhook_headers_hint')} label={t('settings:notifications.webhook_headers_label')} />
                 <textarea
                   value={webhookHeadersText}
                   onChange={(e) => {
@@ -962,7 +973,6 @@ export default function Settings() {
                   spellCheck={false}
                   className="flex w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 font-mono text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 />
-                <HintTip text={t('settings:notifications.webhook_headers_hint')} label={t('settings:notifications.webhook_headers_label')} />
                 {parseWebhookHeaders(webhookHeadersText).ok ? null : (
                   <p className="text-xs text-destructive">
                     {t('settings:notifications.webhook_headers_invalid')}
@@ -976,6 +986,7 @@ export default function Settings() {
                   <label className="text-sm font-medium">
                     {t('settings:notifications.webhook_template_label')}
                   </label>
+                <HintTip text={t('settings:notifications.webhook_template_hint')} label={t('settings:notifications.webhook_template_label')} />
                   <Button
                     variant="outline"
                     size="sm"
@@ -1018,7 +1029,6 @@ export default function Settings() {
                   spellCheck={false}
                   className="flex w-full min-h-[180px] rounded-md border border-input bg-background px-3 py-2 font-mono text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 />
-                <HintTip text={t('settings:notifications.webhook_template_hint')} label={t('settings:notifications.webhook_template_label')} />
                 {isValidWebhookTemplate(webhookPayloadText) ? null : (
                   <p className="text-xs text-destructive">
                     {t('settings:notifications.webhook_template_invalid')}
@@ -1226,9 +1236,13 @@ export default function Settings() {
       {/* 底部固定操作条：重置 / 保存放在这里，更醒目 */}
       <div className="sticky bottom-0 z-20 -mx-8 px-8 py-4 bg-background/95 backdrop-blur border-t border-border">
         <div className="flex items-center justify-end gap-4">
-          <div className="flex items-center gap-3">
-            {/* 保存/重置的说明改成悬浮帮助 ⓘ（放在「重置」左侧） */}
-            <HintTip text={t('settings:save.footer_hint')} label={t('settings:save.footer_hint')} />
+          <div className="flex items-center gap-2">
+            {/* 保存/重置的说明改成悬浮帮助 ⓘ（紧挨「重置」按钮左侧） */}
+            <HintTip
+              text={t('settings:save.footer_hint')}
+              label={t('settings:save.footer_hint')}
+              className="w-4 h-4 ml-0 align-middle"
+            />
             <Button variant="outline" size="lg" onClick={handleReset} disabled={saving}>
               <RotateCcw className="w-4 h-4 mr-2" />
               {t('settings:save.reset')}

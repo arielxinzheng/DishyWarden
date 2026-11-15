@@ -187,7 +187,7 @@ export function HintTip({ text, title, label, className }: HintTipProps) {
         className={`inline-flex shrink-0 items-center justify-center rounded-full
                     text-muted-foreground transition-colors hover:text-foreground
                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-                    ${className ?? 'w-4 h-4'}`}
+                    ${className ?? 'w-4 h-4 ml-1.5 align-middle'}`}
         onMouseEnter={onMouseEnter}
         onMouseMove={onMouseMove}
         onMouseLeave={onMouseLeave}
