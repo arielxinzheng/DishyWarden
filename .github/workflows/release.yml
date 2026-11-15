@@ -1,0 +1,179 @@
+name: Release
+
+# 发版触发: push 一个 v* tag
+#   tag 必须等于 package.json 的 version —— 否则清单里的版本与客户端
+#   看到的版本不一致, 升级会静默失效（docs/CLOUD-UPGRADE.md §3.2）。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 发 Release 需要
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # 发版不要中途取消: 会留下半套资产
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Windows: NSIS 安装器 —— 唯一支持自动升级的包型
+  # ─────────────────────────────────────────────────────────────
+  build-win:
+    name: Windows · NSIS installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 校验 tag 版本 == package.json version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}".TrimStart('v')
+          $pkgVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($tagVersion -ne $pkgVersion) {
+            Write-Error "::error::tag $tagVersion != package.json version $pkgVersion"
+            exit 1
+          }
+          Write-Host "Version check OK: $tagVersion"
+
+      - name: Typecheck (renderer + shared)
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Typecheck (electron main process)
+        run: npx tsc --noEmit -p tsconfig.electron.json
+
+      - name: Build renderer
+        run: npx vite build
+
+      - name: Build main process
+        run: npm run electron:build
+
+      # 在 Windows runner 上构建: 原生模块(sql.js)与安装器都在目标平台生成,
+      # 不需要 scripts/prepare-win-native.sh, 也不需要 wine。
+      # build.publish 已是 github provider ⇒ --publish always 直接发到 Releases。
+      - name: Build and publish installer
+        run: npx electron-builder --win nsis --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # 发到 Releases 用的标签; electron-builder 从 git tag 取
+          BUILD_TAG: ${{ github.ref_name }}
+
+      - name: 自检 —— 清单与安装器可下载
+        shell: pwsh
+        run: |
+          $base = "https://github.com/${{ github.repository }}/releases/latest/download"
+          $version = "${{ github.ref_name }}".TrimStart('v')
+
+          # latest.yml 必须 200 且能解析出 version
+          $r = Invoke-WebRequest -Uri "$base/latest.yml" -UseBasicParsing
+          if ($r.StatusCode -ne 200) { Write-Error "latest.yml HTTP $($r.StatusCode)"; exit 1 }
+          Write-Host "latest.yml OK:"
+          Write-Host $r.Content
+          if ($r.Content -notmatch "version:\s*$([regex]::Escape($version))") {
+            Write-Error "::error::latest.yml version != $version"
+            exit 1
+          }
+
+          # 安装器 HEAD 必须 200 且有 Content-Length
+          $exe = "DishyWarden-Setup-$version.exe"
+          $h = Invoke-WebRequest -Uri "$base/$exe" -Method Head -UseBasicParsing
+          if ($h.StatusCode -ne 200) { Write-Error "$exe HTTP $($h.StatusCode)"; exit 1 }
+          Write-Host "$exe OK: $($h.Headers['Content-Length']) bytes"
+
+  # ─────────────────────────────────────────────────────────────
+  # macOS: dmg（无 OTA —— MacUpdater 要 latest-mac.yml + zip,
+  # 本次 build.mac.target 只有 dmg, 故不产可用清单）
+  #
+  # ⚠️ 串在 build-win 之后, 不能并行:
+  #   electron-builder 的 GitHub provider 会**查找同 tag 的已有 Release
+  #   并复用**（electron-publish/out/gitHubPublisher.js getOrCreateRelease）,
+  #   两个 job 同时 --publish always 会竞争同一个 Release ⇒ 竞态/资产丢失。
+  #   串行后 mac 只是往已存在的 Release 里**追加**资产。
+  # ─────────────────────────────────────────────────────────────
+  build-mac:
+    name: macOS · DMG (no auto-update)
+    needs: [build-win]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 校验 tag 版本 == package.json version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $tag_version != package.json version $pkg_version"
+            exit 1
+          fi
+          echo "Version check OK: $tag_version"
+
+      - name: Build renderer
+        run: npx vite build
+
+      - name: Build main process
+        run: npm run electron:build
+
+      - name: Build and publish dmg
+        run: npx electron-builder --mac dmg --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: 自检 —— 两个架构的 dmg 可下载
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          base="https://github.com/${{ github.repository }}/releases/latest/download"
+          # artifactName = ${productName}-${version}-${os}-${arch}.${ext}
+          # mac.target 的 arch 是 [arm64, x64] ⇒ 两个包都要在
+          for arch in arm64 x64; do
+            url="$base/DishyWarden-${version}-mac-${arch}.dmg"
+            code="$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)"
+            echo "$arch dmg HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::dmg not downloadable: $url"
+              exit 1
+            fi
+          done
+
+  # ─────────────────────────────────────────────────────────────
+  # 上线自检: 从"公网视角"确认发布结果真的可用
+  # （docs/CLOUD-UPGRADE.md §9）
+  # ─────────────────────────────────────────────────────────────
+  verify:
+    name: 上线自检
+    needs: [build-win]
+    runs-on: ubuntu-latest
+    steps:
+      - name: latest.yml 可取且内容正确
+        run: |
+          set -euo pipefail
+          GH="https://github.com/${{ github.repository }}/releases/latest/download"
+          version="${GITHUB_REF_NAME#v}"
+          curl -fsSL "$GH/latest.yml" -o /tmp/latest.yml
+          head -12 /tmp/latest.yml
+          grep -qE "^version:\s*${version}\s*$" /tmp/latest.yml \
+            || { echo "::error::latest.yml version mismatch"; exit 1; }
+
+      - name: 安装器 HEAD 可取
+        run: |
+          set -euo pipefail
+          GH="https://github.com/${{ github.repository }}/releases/latest/download"
+          version="${GITHUB_REF_NAME#v}"
+          code="$(curl -sIL -o /dev/null -w '%{http_code}' "$GH/DishyWarden-Setup-${version}.exe")"
+          echo "installer HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::installer not reachable"; exit 1; }

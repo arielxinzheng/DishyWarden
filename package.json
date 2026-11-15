@@ -145,7 +145,8 @@
       {
         "provider": "github",
         "owner": "arielxinzheng",
-        "repo": "DishyWarden"
+        "repo": "DishyWarden",
+        "releaseType": "release"
       }
     ]
   },
