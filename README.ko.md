@@ -83,8 +83,8 @@
 **Node.js 20+** 와 연결 가능한 단말이 필요합니다.
 
 ```bash
-git clone https://github.com/OWNER/DishyWarden.git
-cd dishywarden
+git clone https://github.com/arielxinzheng/DishyWarden.git
+cd DishyWarden
 npm install
 npm run dev
 ```
@@ -137,7 +137,7 @@ npm run lint
 
 ## 📥 릴리스 설치
 
-[릴리스 페이지](https://github.com/OWNER/DishyWarden/releases)에서 최신 산출물을 받으세요.
+[릴리스 페이지](https://github.com/arielxinzheng/DishyWarden/releases)에서 최신 산출물을 받으세요.
 
 | 플랫폼 | 파일 |
 |---|---|
@@ -151,7 +151,7 @@ npm run lint
 > 각 산출물 옆에 `sha512` 값이 함께 공개되니 대조해 보세요.
 
 업데이트는 [electron-updater](https://github.com/electron-userland/electron-builder)
-가 매니페스트 `https://github.com//dishywarden/releases/latest/download/latest.yml` 로 배포합니다. 시작할 때 한 번, 이후 대략 12시간마다
+가 매니페스트 `https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml` 로 배포합니다. 시작할 때 한 번, 이후 대략 12시간마다
 확인하며 네트워크를 쓸 수 없으면 조용히 물러납니다.
 
 ---

@@ -1,7 +1,11 @@
 {
   "name": "dishywarden",
-  "version": "0.1.0",
-  "description": "DishyWarden — Starlink 终端监控（延迟/丢包/遮挡/告警）",
+  "version": "1.0.0",
+"repository": {
+    "type": "git",
+    "url": "https://github.com/arielxinzheng/DishyWarden.git"
+  },
+    "description": "DishyWarden — Starlink 终端监控（延迟/丢包/遮挡/告警）",
   "main": "dist-electron/main/index.js",
   "type": "module",
   "scripts": {
@@ -139,8 +143,9 @@
     },
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://cloud.dishywarden.com/releases/win"
+        "provider": "github",
+        "owner": "arielxinzheng",
+        "repo": "DishyWarden"
       }
     ]
   },

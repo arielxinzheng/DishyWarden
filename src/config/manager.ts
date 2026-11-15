@@ -124,13 +124,18 @@ export const CLOUD_ENDPOINT = 'https://cloud.dishywarden.com';
 /**
  * 更新源 feed —— 同样后台固定。
  *
- * 目前**留空**：云端只提供 /healthz 与 /api/feedback，还没有发布通道；
- * 空串 = 不检查更新（Updater 进入 disabled，界面显示「更新通道未开放」）。
- * 等 GitHub Releases 通道就位后把这里换成
- * https://github.com/<owner>/dishywarden/releases/latest/download/latest.yml
- * 即可，设置页无需任何改动。
+ * **托管方 = GitHub Releases（路线 A）**：
+ * https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml
+ *
+ * 与 `build.publish` 的 github provider 一致（两处必须同时改，否则
+ * 客户端会去找一个服务器上并不存在的清单）。清单与安装器字节级通用，
+ * 换托管方只改这两处 —— 见 docs/CLOUD-UPGRADE.md §2.3。
+ *
+ * ⚠️ 通道就位前这个值是空串（= 不检查更新，界面显示「更新通道未开放」）。
+ *    填上之后必须**重新打包发版**才会生效（值编译进包）。
  */
-export const UPDATE_FEED_URL = '';
+export const UPDATE_FEED_URL =
+  'https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml';
 
 export interface AppConfig {
   collector: CollectorConfig;

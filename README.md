@@ -81,8 +81,8 @@ and tells you the moment something goes wrong.
 Requires **Node.js 20+** and a terminal you can reach.
 
 ```bash
-git clone https://github.com/OWNER/DishyWarden.git
-cd dishywarden
+git clone https://github.com/arielxinzheng/DishyWarden.git
+cd DishyWarden
 npm install
 npm run dev
 ```
@@ -136,7 +136,7 @@ npm run lint
 
 ## 📥 Install a release
 
-Download the latest asset from the [releases page](https://github.com/OWNER/DishyWarden/releases):
+Download the latest asset from the [releases page](https://github.com/arielxinzheng/DishyWarden/releases):
 
 | Platform | Asset |
 |---|---|
@@ -150,7 +150,7 @@ Download the latest asset from the [releases page](https://github.com/OWNER/Dish
 > Verify the download with the `sha512` value published next to each asset.
 
 Upgrades are delivered by [electron-updater](https://github.com/electron-userland/electron-builder)
-through the manifest at `https://github.com//dishywarden/releases/latest/download/latest.yml`; the app checks on startup and roughly every
+through the manifest at `https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml`; the app checks on startup and roughly every
 12 hours, silently degrading if the network is unavailable.
 
 ---

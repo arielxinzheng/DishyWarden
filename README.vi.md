@@ -86,8 +86,8 @@ thành thông tin dùng được, và báo ngay khi có gì bất ổn.
 Cần **Node.js 20+** và một đầu cuối mà bạn kết nối được.
 
 ```bash
-git clone https://github.com/OWNER/DishyWarden.git
-cd dishywarden
+git clone https://github.com/arielxinzheng/DishyWarden.git
+cd DishyWarden
 npm install
 npm run dev
 ```
@@ -141,7 +141,7 @@ npm run lint
 
 ## 📥 Cài bản phát hành
 
-Tải bản mới nhất từ [trang phát hành](https://github.com/OWNER/DishyWarden/releases):
+Tải bản mới nhất từ [trang phát hành](https://github.com/arielxinzheng/DishyWarden/releases):
 
 | Nền tảng | Tệp |
 |---|---|
@@ -155,7 +155,7 @@ Tải bản mới nhất từ [trang phát hành](https://github.com/OWNER/Dishy
 > Mỗi bản đều kèm giá trị `sha512` để bạn tự đối chiếu.
 
 Bản cập nhật do [electron-updater](https://github.com/electron-userland/electron-builder)
-phát qua manifest `https://github.com//dishywarden/releases/latest/download/latest.yml`; ứng dụng kiểm tra lúc khởi động và sau đó khoảng
+phát qua manifest `https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml`; ứng dụng kiểm tra lúc khởi động và sau đó khoảng
 mỗi 12 giờ, và im lặng bỏ qua nếu mạng không sẵn dụng.
 
 ---

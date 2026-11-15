@@ -75,8 +75,8 @@
 需要 **Node.js 20+**，以及一台你能连上的终端。
 
 ```bash
-git clone https://github.com/OWNER/DishyWarden.git
-cd dishywarden
+git clone https://github.com/arielxinzheng/DishyWarden.git
+cd DishyWarden
 npm install
 npm run dev
 ```
@@ -127,7 +127,7 @@ npm run lint
 
 ## 📥 安装正式版
 
-从[发布页](https://github.com/OWNER/DishyWarden/releases)下载最新产物：
+从[发布页](https://github.com/arielxinzheng/DishyWarden/releases)下载最新产物：
 
 | 平台 | 文件 |
 |---|---|
@@ -141,7 +141,7 @@ npm run lint
 > 每个产物旁边都发布了 `sha512`，请自行核对。
 
 升级由 [electron-updater](https://github.com/electron-userland/electron-builder)
-经清单 `https://github.com//dishywarden/releases/latest/download/latest.yml` 投递；应用启动时检查一次，之后约每 12 小时一次，
+经清单 `https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml` 投递；应用启动时检查一次，之后约每 12 小时一次，
 网络不可用时静默降级。
 
 ---

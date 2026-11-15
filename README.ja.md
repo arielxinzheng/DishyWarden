@@ -84,8 +84,8 @@
 **Node.js 20+** と、接続できるターミナルが必要です。
 
 ```bash
-git clone https://github.com/OWNER/DishyWarden.git
-cd dishywarden
+git clone https://github.com/arielxinzheng/DishyWarden.git
+cd DishyWarden
 npm install
 npm run dev
 ```
@@ -138,7 +138,7 @@ npm run lint
 
 ## 📥 リリースのインストール
 
-[リリースページ](https://github.com/OWNER/DishyWarden/releases)から最新の成果物をダウンロードしてください。
+[リリースページ](https://github.com/arielxinzheng/DishyWarden/releases)から最新の成果物をダウンロードしてください。
 
 | プラットフォーム | ファイル |
 |---|---|
@@ -152,7 +152,7 @@ npm run lint
 > を実行してください。各成果物には `sha512` を併記しているので照合してください。
 
 更新は [electron-updater](https://github.com/electron-userland/electron-builder)
-がマニフェスト `https://github.com//dishywarden/releases/latest/download/latest.yml` から配信します。起動時に一度、その後は約 12 時間ごとに
+がマニフェスト `https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml` から配信します。起動時に一度、その後は約 12 時間ごとに
 確認し、ネットワークが使えない場合は静かに縮退します。
 
 ---
