@@ -138,6 +138,100 @@ dishylink 的第 ⑤ 兜底我们这次做进来了（`src/renderer/lib/ipLocati
 
 ---
 
+## 5.5 ⭐ 真机日志定性 + Chromium 源码级根因（决定性）
+
+用户在 Windows 真机跑出新包后，Chromium 日志给出了**完整因果链**。
+
+### 日志原文（关键行）
+
+```
+Geolocation: DEBUG: geolocation_provider_impl.cc:317 Start provider: high_accuracy=1
+Geolocation: DEBUG: network_location_provider.cc:179 Start provider: high_accuracy=1
+Geolocation: DEBUG: wifi_data_provider_common.cc:95 Scanned: update_available=1 is_first_scan_complete=0
+Geolocation: DEBUG: network_location_request.cc:200 Sending a network location request: Number of Wi-Fi APs=22
+Geolocation: DEBUG: network_location_request.cc:267 Got network location response: response_code=403
+NetworkLocationRequest::CreateGeopositionErrorResult() : Network location provider at
+    'https://www.googleapis.com/' : Returned error code 403.
+```
+
+⇒ **两个事实**：
+1. **403** ⇒ Google 定位服务拒绝 ⇒ **Electron 没有 `GOOGLE_API_KEY`** ⇒ 网络定位必然失败
+2. 日志里**只有 `network_location_provider`**，`location_provider_winrt`（平台 provider）
+   **一次都没有 Start** ⇒ ⇒ **平台 provider 在这台机器上根本没被创建**
+
+### Chromium 官方源码给出的完整链条
+
+| # | 源码位置 | 逻辑 |
+|---|---|---|
+| ① | `services/device/geolocation/location_provider_manager.cc` | Windows 默认 `kPlatformOnly`（平台 provider 优先） |
+| ② | `services/device/public/cpp/device_features.cc` → `GetLocationProviderManagerMode()` | **若** `!IsWindowsLocationPlatformSupported()`（Win10 < 1903/build 18362）**则退回** `kNetworkOnly` |
+| ③ | `services/device/geolocation/win/location_provider_winrt.cc` → `NewSystemLocationProvider()` | **若** `!IsSystemLocationSettingEnabled()` **则 `return nullptr`** ⇒ 平台 provider 根本不存在 |
+| ④ | `services/device/geolocation/network_location_request.cc` | 网络 provider 没有 API key ⇒ **403** ⇒ `POSITION_UNAVAILABLE` |
+
+`IsSystemLocationSettingEnabled()` 的实现（同一文件第 80-105 行）：
+
+```cpp
+bool IsSystemLocationSettingEnabled() {
+  ... CreateFromDeviceClass(DeviceClass::DeviceClass_Location, &dev_access_info);
+  auto status = DeviceAccessStatus::DeviceAccessStatus_Unspecified;
+  dev_access_info->get_CurrentStatus(&status);
+  return !(status == DeviceAccessStatus_DeniedBySystem ||
+           status == DeviceAccessStatus_DeniedByUser);
+}
+```
+
+⇒ 它查的是 Windows **「设备类 = Location」的访问状态**，
+也就是系统设置里 **「允许桌面应用访问你的位置」** 那一位。
+
+### 结论
+
+这台机器上 **Windows 位置服务对桌面应用是拒绝状态** ⇒ 平台 provider 返回 nullptr
+⇒ Chromium 只剩网络 provider ⇒ 没有 API key ⇒ **403** ⇒ `POSITION_UNAVAILABLE`。
+
+**为什么 Edge 能定位？** Edge 用的是**微软自己的云定位服务**（不依赖 Windows 位置服务开关），
+所以"浏览器能定位"**不能证明**本机定位服务可用 ⭐ —— 之前的推断在这里是错的。
+
+### 修复路径（Windows 侧）
+
+**设置 → 隐私和安全性 → 位置 → 「允许桌面应用访问你的位置」打开**（最关键的一位），
+并确保「位置服务」总开关打开。
+
+验证：改完再点一次，Chromium 日志里应当出现
+`location_provider_winrt.cc:... Start provider` ⇒ 平台 provider 起来了 ⇒ 成功。
+
+查当前这一位的值（cmd）：
+
+```cmd
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" /v Value
+```
+
+末 4 位十六进制**从低位到高位**：位0 = 允许桌面应用访问你的位置、位1 = 允许应用访问、
+位2 = 允许传统桌面应用、位3 = 允许广告 ID。**位0 = 0 ⇒ 平台 provider 被系统拒绝**。
+
+### 顺带修正：Chromium 的 provider 模式开关写法（已从源码确认）
+
+```cpp
+const base::FeatureParam<device::mojom::LocationProviderManagerMode>::Option
+    location_provider_manager_mode_options[] = {
+        {kNetworkOnly,   "NetworkOnly"},
+        {kPlatformOnly,  "PlatformOnly"},
+        {kHybridPlatform,"HybridPlatform"},
+        {kHybridPlatform2,"HybridPlatform2"},
+    };
+```
+
+⇒ 值是**字符串名**（不是整数）⇒ 命令行写法为
+`--enable-features=LocationProviderManagerMode:HybridPlatform`。
+
+⚠️ 但**本项目没有采用这个开关**：Windows 默认已经是 `kPlatformOnly`，
+问题是③的系统权限被拒 —— 改 feature flag 绕不过系统权限，
+而且 `kPlatformOnly` 恰好就是"没有网络兜底"的模式 ⇒ 反而更糟
+（源码注释：*"Because `kPlatformOnly` has no fallback, leaving it selected where the
+Windows Location Platform is unavailable makes every location request fail with
+`kPositionUnavailable`."*）。
+
+---
+
 ## 6. 我们当前的取值链
 
 ```
