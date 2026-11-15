@@ -112,7 +112,7 @@ disabled ──(填好 UPDATE_FEED_URL)──> idle
   2. `DishyWarden-Setup-<version>.exe.blockmap`
   3. `latest.yml`
   4. （可选）`DishyWarden-Setup-<version>.exe.nsis.7z` 差分包
-- 客户端 feed：`https://github.com/<owner>/DishyWarden/releases/latest/download/`
+- 客户端 feed（**目录形式**，见 §2.3 的尾斜杠说明）：`https://github.com/<owner>/DishyWarden/releases/latest/download/`
 - **`latest.yml` 必须原样上传**（只改名成 `latest.yml`，不要编辑任何字段）
 
 **发版入口**：`.github/workflows/release.yml`（DESIGN §7.1）——
@@ -153,6 +153,11 @@ https://cloud.dishywarden.com/releases/win/
 
 ```ts
 // src/config/manager.ts
+// ⚠️ 必须是**目录形式**(带尾斜杠), 不能写成完整文件路径 ——
+//    electron-updater 用 generic provider, 它按「发布目录」语义拼 URL:
+//    newBaseUrl(feed) 会给路径补尾斜杠, 再 new URL('latest.yml', base)。
+//    实测: 写成 .../latest/download/latest.yml ⇒ 实际请求
+//          .../latest/download/latest.yml/latest.yml   ❌ 404
 export const UPDATE_FEED_URL = 'https://github.com/<owner>/DishyWarden/releases/latest/download/';
 ```
 
@@ -338,7 +343,7 @@ zip 的定位：**给无管理员权限、或安装器在该机器崩掉的用�
 # 路线 A（GitHub）
 GH=https://github.com/<owner>/DishyWarden/releases/latest/download
 curl -sf $GH/latest.yml | head -12
-curl -sI $GH/DishyWarden-Setup-0.1.0.exe | grep -iE 'HTTP/|content-length|content-type'
+curl -sI $GH/DishyWarden-Setup-1.0.0.exe | grep -iE 'HTTP/|content-length|content-type'
 
 # 自建目录
 BASE=https://cloud.dishywarden.com/releases/win

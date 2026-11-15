@@ -125,17 +125,39 @@ export const CLOUD_ENDPOINT = 'https://cloud.dishywarden.com';
  * 更新源 feed —— 同样后台固定。
  *
  * **托管方 = GitHub Releases（路线 A）**：
- * https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml
+ * https://github.com/arielxinzheng/DishyWarden/releases/latest/download/
  *
- * 与 `build.publish` 的 github provider 一致（两处必须同时改，否则
- * 客户端会去找一个服务器上并不存在的清单）。清单与安装器字节级通用，
- * 换托管方只改这两处 —— 见 docs/CLOUD-UPGRADE.md §2.3。
+ * ## ⚠️ 结尾的斜杠不能省, 且**不要**再补 `latest.yml`
+ *
+ * electron-updater 用的是 **generic provider**
+ * (`src/core/updater.ts`: `setFeedURL({ provider: 'generic', url: feedUrl })`),
+ * 它按「发布目录」语义拼 URL:
+ *
+ *   baseUrl     = newBaseUrl(feedUrl)   ← 路径不以 / 结尾就强制补 /
+ *   channelFile = `${channel}.yml`      ← channel 默认 'latest' ⇒ latest.yml
+ *   最终请求     = new URL(channelFile, baseUrl)
+ *
+ * 实测(electron-updater/out/util.js):
+ *
+ *   feed = .../latest/download/latest.yml  ⇒ 实际请求
+ *          .../latest/download/latest.yml/latest.yml   ❌ 404
+ *   feed = .../latest/download/            ⇒ 实际请求
+ *          .../latest/download/latest.yml              ✅
+ *
+ * ⇒ 这里必须是**目录形式**(带尾斜杠)。文档 docs/CLOUD-UPGRADE.md §2.3
+ *   写的完整文件路径是错的, 已同步修正。
+ *
+ * ## 与 build.publish 的关系
+ *
+ * `build.publish` 的 github provider 决定**产物发到哪里**;
+ * 这个常量决定**客户端去哪里取清单**。两者指向同一个 Release,
+ * 但 URL 形态不同(publish 是 repo 坐标, 这里是目录)。
  *
  * ⚠️ 通道就位前这个值是空串（= 不检查更新，界面显示「更新通道未开放」）。
  *    填上之后必须**重新打包发版**才会生效（值编译进包）。
  */
 export const UPDATE_FEED_URL =
-  'https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml';
+  'https://github.com/arielxinzheng/DishyWarden/releases/latest/download/';
 
 export interface AppConfig {
   collector: CollectorConfig;
@@ -262,7 +284,11 @@ const DEFAULT_CONFIG: AppConfig = {
     updateFeedUrl: UPDATE_FEED_URL,
     checkIntervalHours: 12,
   },
-  version: '0.1.0',
+  // ⚠️ 这个字段**不是**应用版本号的来源 ——
+  //    上报用的 app_version 来自主进程 `app.getVersion()`（读 package.json），
+  //    见 src/main/index.ts 的 getAppVersion 与 src/core/cloudClient.ts。
+  //    这里只是配置结构的占位, 升版本时不必改（改了也不会生效）。
+  version: '1.0.0',
 };
 
 export class ConfigManager {
