@@ -308,7 +308,8 @@
     "expand_all": "すべて表示",
     "collapse": "折りたたむ",
     "no_info": "経路情報を取得できません",
-    "failed_reason": "失敗理由"
+    "failed_reason": "失敗理由",
+    "reason_unknown": "不明（コマンドの出力なし）"
   },
   "direction": {
     "n": "北",

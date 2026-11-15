@@ -170,6 +170,16 @@ export interface ElectronAPI {
     }>;
     completed: boolean;
     duration: number;
+    /** hops 为空时必带：失败原因（命令输出里的报错行 / 超时 / exit code） */
+    error?: string;
+  }>;
+
+  // 读 dish 自带 GPS 的位置（不依赖本机定位服务）
+  getDishLocation: () => Promise<{
+    ok: boolean;
+    location?: { lat: number; lon: number; alt?: number; sigmaM?: number; source?: string };
+    reason?: 'permission_denied' | 'unsupported' | 'unreachable' | 'no_fix' | 'other';
+    error?: string;
   }>;
 
   // 获取遮挡事件历史
@@ -340,6 +350,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTLESeed: () => ipcRenderer.invoke('get-tle-seed'),
 
   runTraceroute: (target?: string) => ipcRenderer.invoke('run-traceroute', target),
+
+  getDishLocation: () => ipcRenderer.invoke('get-dish-location'),
 
   getObstructionEvents: (fromMs: number, toMs: number, limit?: number) =>
     ipcRenderer.invoke('get-obstruction-events', fromMs, toMs, limit),

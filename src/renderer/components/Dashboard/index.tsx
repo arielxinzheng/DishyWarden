@@ -34,6 +34,7 @@ import { ThroughputChart } from './ThroughputChart';
 import { AlertDrawerContent } from './AlertDrawerContent';
 import { RecentlyResolvedCard } from './RecentlyResolvedCard';
 import { TopologyChain } from './TopologyChain';
+import { RouteTraceEmpty } from './RouteTraceEmpty';
 import { useRecentlyResolved } from './useRecentlyResolved';
 import { ObstructionHemisphere } from './ObstructionHemisphere';
 import { MetricCard, CHART_HEIGHT } from './MetricCard';
@@ -1326,17 +1327,8 @@ function RouteTraceCard({
           </>
         )}
 
-        {data && data.hops.length === 0 && (
-          <div className="text-xs text-slate-400 py-8 text-center space-y-1">
-            <div>{t('dashboard:route.no_info')}</div>
-            {/* 失败原因由主进程带出来 —— 之前只写日志，界面无从判断 */}
-            {data.error && (
-              <div className="text-[11px] text-warning-orange/80 break-words">
-                {t('dashboard:route.failed_reason')}: {data.error}
-              </div>
-            )}
-          </div>
-        )}
+        {/* 失败原因由主进程带出来 —— 之前只写日志，界面无从判断 */}
+        {data && data.hops.length === 0 && <RouteTraceEmpty error={data.error} t={t} />}
       </CardContent>
     </Card>
   );

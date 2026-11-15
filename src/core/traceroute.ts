@@ -22,7 +22,84 @@ import { exec } from 'child_process';
 import { promises as dnsPromises } from 'dns';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execAsyncRaw = promisify(exec);
+
+/**
+ * 把命令输出（Buffer）解码成字符串。
+ *
+ * ⚠️ 中文 Windows 的 tracert 按 **OEM 代码页（936/GBK）** 输出，不是 UTF-8。
+ * exec 默认按 UTF-8 解码 ⇒ "请求超时"/"无法解析目标系统名称" 全变乱码 ⇒
+ * 超时跳识别不到、界面上的失败原因也是乱码。
+ * 策略：先按 UTF-8 严格解码，失败（含非法序列）再按 GBK 解。
+ */
+export function decodeCommandOutput(buf: Buffer | string | undefined): string {
+  if (buf === undefined || buf === null) return '';
+  if (typeof buf === 'string') return buf;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    try {
+      return new TextDecoder('gbk').decode(buf);
+    } catch {
+      return buf.toString('latin1');
+    }
+  }
+}
+
+/** exec 包一层：拿 Buffer 再自行解码；抛错时也把 stdout/stderr 解码好挂回 error 上 */
+async function execAsync(
+  command: string,
+  options: { timeout: number; maxBuffer: number; windowsHide: boolean },
+): Promise<{ stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execAsyncRaw(command, { ...options, encoding: 'buffer' });
+    return { stdout: decodeCommandOutput(stdout), stderr: decodeCommandOutput(stderr) };
+  } catch (err: any) {
+    if (err && typeof err === 'object') {
+      err.stdout = decodeCommandOutput(err.stdout);
+      err.stderr = decodeCommandOutput(err.stderr);
+      // message 里拼的是 UTF-8 解码的 stderr（可能乱码）⇒ 用解码后的重拼
+      if (err.stderr && typeof err.message === 'string') {
+        err.message = `Command failed: ${command}\n${err.stderr}`;
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * 从 stdout/stderr 里挑一条**对人类有意义**的报错行。
+ *
+ * 为什么不直接把整段 stderr 丢给用户：
+ *   · tracert 的 stderr 常常是空的，报错在 stdout 里（Windows 把
+ *     "无法解析目标系统名称"、"Unable to resolve target" 都打到 stdout）
+ *   · 完整 stdout 里混杂了"Tracing route to ..." 这种无信息头部
+ * 所以：**只挑含关键字的行**；都没有就取首行非空；都空就返回 null。
+ */
+export function pickMeaningfulLine(
+  stdout: string | undefined,
+  stderr: string | undefined,
+): string | null {
+  const text = `${stderr ?? ''}\n${stdout ?? ''}`;
+  const keywords = [
+    '无法解析', '无法', '失败', '拒绝', '超时',
+    'Unable', 'unable', 'cannot', 'Cannot', 'failed', 'denied', 'refused',
+    'not recognized', '不是内部或外部命令',
+    'Name or service not known', 'unknown host',
+    'Network is unreachable', '网络不可达',
+  ];
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (const l of lines) {
+    if (keywords.some((k) => l.includes(k))) return l;
+  }
+  // 再退一步：取首个非空、不是 "跳号行"（以数字开头）、不是标题行的输出
+  for (const l of lines) {
+    if (/^(traceroute|Tracing|通过最多|over a maximum)/i.test(l)) continue;
+    if (/^\s*\d+\s+/.test(l)) continue;
+    return l;
+  }
+  return null;
+}
 
 export interface TraceHop {
   hop: number;          // 跳数
@@ -112,9 +189,15 @@ export async function traceroute(
       : null;
 
   try {
+    // ⚠️ exec 的成功路径**也要拿 stderr** ——
+    // tracert 在 "无法解析目标系统名称" 这类情况下 **exit code 可能是 0**，
+    // 真·报错行在 stderr 或 stdout 的非跳行里。只拿 stdout 的话，hops 解析出 0 条、
+    // 界面只能给一句"无法获取路由信息"，用户无从判断是 DNS 还是防火墙。
+    // 所以这里把 stderr 一并留下，`hops.length === 0` 的分支用它构造 error。
     let stdout: string;
+    let stderr: string;
     try {
-      ({ stdout } = await execAsync(command, {
+      ({ stdout, stderr } = await execAsync(command, {
         timeout,
         maxBuffer: 1024 * 1024, // 1MB
         // windowsHide: Windows 上 GUI 应用执行 tracert 会闪黑色控制台窗口
@@ -125,7 +208,7 @@ export async function traceroute(
       const notFound = /不是内部或外部命令|not recognized as an internal/i.test(msg);
       if (!windowsFallback || !notFound) throw err;
       console.warn('[Traceroute] PATH 里找不到 tracert，改用绝对路径重试');
-      ({ stdout } = await execAsync(windowsFallback, {
+      ({ stdout, stderr } = await execAsync(windowsFallback, {
         timeout,
         maxBuffer: 1024 * 1024,
         windowsHide: true,
@@ -148,11 +231,19 @@ export async function traceroute(
       : hops.length > 0 && hops[hops.length - 1].ip !== null;
     const duration = Date.now() - startTime;
 
+    // hops 为空 = 命令成功但"没走出去一跳"。原因在 stdout/stderr 里 ——
+    // 必须带原因回去（规则：**只要 hops 为空就必须有 error**）。
+    const error =
+      hops.length === 0
+        ? pickMeaningfulLine(stdout, stderr) ?? 'tracert 没有返回任何跳（stdout/stderr 均为空）'
+        : undefined;
+
     return {
       target,
       hops,
       completed,
       duration,
+      ...(error ? { error } : {}),
     };
   } catch (error: any) {
     // ⚠️ **超时 ≠ 没有数据**。
@@ -187,15 +278,15 @@ export async function traceroute(
       };
     }
 
-    // 真失败: 没有任何可解析的输出
-    console.error('[Traceroute] Failed:', error.message);
+    // 真失败: 没有任何可解析的跳
+    console.error('[Traceroute] Failed:', error?.message);
     return {
       target,
       hops: [],
       completed: false,
       duration: Date.now() - startTime,
       // 把原因带出去 —— 界面直接显示，不再只有一句「无法获取路由信息」
-      error: String(error?.message ?? error ?? 'traceroute 执行失败').slice(0, 300),
+      error: describeExecFailure(error, timeout),
     };
   }
 }
@@ -208,6 +299,32 @@ export async function traceroute(
  * Windows 的 tracert 把数据也放 stdout, 标题在 stderr。
  * 两者都空 ⇒ 真的什么都没拿到。
  */
+/**
+ * 把 exec 的失败对象翻成一句**用户看得懂**的原因。
+ *
+ * 优先级：超时 > 输出里的报错行 > exit code > error.message 首行。
+ * `error.message` 是 "Command failed: tracert -h 15 ..." —— 只有命令行本身，
+ * 原来直接显示它，等于没给原因。
+ */
+export function describeExecFailure(error: any, timeoutMs: number): string {
+  const parts: string[] = [];
+  if (error?.killed || error?.signal === 'SIGTERM' || error?.code === 'ETIMEDOUT') {
+    parts.push(`超时（${Math.round(timeoutMs / 1000)}s 内没有任何跳返回）`);
+  }
+  const line = pickMeaningfulLine(
+    typeof error?.stdout === 'string' ? error.stdout : '',
+    typeof error?.stderr === 'string' ? error.stderr : '',
+  );
+  if (line) parts.push(line);
+  if (typeof error?.code === 'number') parts.push(`exit code ${error.code}`);
+  if (typeof error?.code === 'string' && error.code !== 'ETIMEDOUT') parts.push(error.code);
+  if (parts.length === 0) {
+    const msg = String(error?.message ?? error ?? '').split(/\r?\n/)[0].trim();
+    parts.push(msg || 'traceroute 执行失败');
+  }
+  return parts.join('；').slice(0, 300);
+}
+
 function extractPartialOutput(error: any): string | null {
   const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
   const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
@@ -315,7 +432,7 @@ export function parseTargetIpFromHeader(output: string): string | null {
 }
 
 export function parseUnixTraceroute(output: string): TraceHop[] {
-  const lines = output.split('\n');
+  const lines = output.split(/\r?\n/);
   const hops: TraceHop[] = [];
   /** 已见过的跳号 —— 多地址跳的续行要去重, 见下面的注释 */
   const seen = new Set<number>();
@@ -406,7 +523,7 @@ export function parseUnixTraceroute(output: string): TraceHop[] {
  * 标题行没有开头的数字, 会被 hopMatch 过滤掉, 所以不过滤。
  */
 export function parseWindowsTraceroute(output: string): TraceHop[] {
-  const lines = output.split('\n');
+  const lines = output.split(/\r?\n/);
   const hops: TraceHop[] = [];
 
   for (const line of lines) {
@@ -419,7 +536,10 @@ export function parseWindowsTraceroute(output: string): TraceHop[] {
     const hopNum = parseInt(hopMatch[1], 10);
 
     // 检查是否超时
-    if (line.includes('请求超时') || line.includes('Request timed out') || line.includes('* * *')) {
+    // ⚠️ tracert 的超时行是 "  2     *        *        *     请求超时。" —— 星号之间是**多个空格**，
+    // 只认 '* * *' 会漏；文案又随系统语言/代码页变化。⇒ 以"三个探测位全是 *"为准。
+    const allStars = /^\s*\d+\s+\*\s+\*\s+\*/.test(line);
+    if (allStars || line.includes('请求超时') || line.includes('Request timed out')) {
       hops.push({
         hop: hopNum,
         ip: null,

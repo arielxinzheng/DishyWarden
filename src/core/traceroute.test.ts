@@ -242,6 +242,33 @@ Trace complete.
       expect(parseWindowsTraceroute('')).toEqual([]);
       expect(parseWindowsTraceroute('\n\n\n')).toEqual([]);
     });
+
+    // 真机 tracert 输出是 **CRLF**。之前按 '\n' 切行，每行尾巴带 '\r'，
+    // IP 正则 `...\]?$` 永远不匹配 ⇒ 每一跳都被丢掉 ⇒ 界面「无法获取路由信息」。
+    it('CRLF 换行（Windows 真机输出）照样解析', () => {
+      const output = [
+        '',
+        'Tracing route to example.com [198.51.100.7]',
+        'over a maximum of 15 hops:',
+        '',
+        '  1    <1 ms    <1 ms    <1 ms  192.168.100.1',
+        '  2     *        *        *     Request timed out.',
+        '  3    12 ms    12 ms    12 ms  198.51.100.7',
+        '',
+        'Trace complete.',
+        '',
+      ].join('\r\n');
+      const hops = parseWindowsTraceroute(output);
+      expect(hops).toHaveLength(3);
+      expect(hops[0].ip).toBe('192.168.100.1');
+      expect(hops[1].ip).toBeNull();
+      expect(hops[2].ip).toBe('198.51.100.7');
+    });
+
+    it('超时行文案乱码/未知语言时，靠三个 * 识别', () => {
+      const hops = parseWindowsTraceroute('  2     *        *        *     ÇëÇó³¬Ê±¡£\r\n');
+      expect(hops).toEqual([{ hop: 2, ip: null, hostname: '* (超时)', rtt: null }]);
+    });
   });
 });
 
