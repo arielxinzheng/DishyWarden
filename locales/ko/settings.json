@@ -72,7 +72,9 @@
     "dish_other": "Starlink 단말에서 위치를 읽지 못했습니다. 직접 입력하세요.",
     "error_code": "(오류 코드 {{code}})",
     "usage_dish": "권장: \"Starlink 단말에서 읽기\"를 눌러 안테나 내장 GPS 위치 사용",
-    "rdp_hint": "원격 데스크톱 세션이거나 시스템 위치 서비스가 꺼져 있으면 \"현재 위치 가져오기\"를 사용할 수 없습니다(POSITION_UNAVAILABLE). \"Starlink 단말에서 읽기\" 또는 직접 입력을 사용하세요."
+    "rdp_hint": "원격 데스크톱 세션이거나 시스템 위치 서비스가 꺼져 있으면 \"현재 위치 가져오기\"를 사용할 수 없습니다(POSITION_UNAVAILABLE). \"Starlink 단말에서 읽기\" 또는 직접 입력을 사용하세요.",
+    "fallback_to_browser": "브라우저 위치 정보로 자동으로 전환합니다…",
+    "manual_hint": "위도/경도를 직접 입력해 주세요."
   },
   "thresholds": {
     "title": "알림 임계값",

@@ -72,7 +72,9 @@
     "dish_other": "Đọc vị trí từ thiết bị Starlink thất bại. Vui lòng nhập tọa độ thủ công.",
     "error_code": "(mã lỗi {{code}})",
     "usage_dish": "Khuyến nghị: nhấn \"Đọc từ thiết bị Starlink\" để dùng GPS tích hợp của ăng-ten",
-    "rdp_hint": "\"Lấy vị trí hiện tại\" không dùng được trong phiên Remote Desktop hoặc khi dịch vụ định vị hệ thống tắt (POSITION_UNAVAILABLE). Hãy dùng \"Đọc từ thiết bị Starlink\" hoặc nhập thủ công."
+    "rdp_hint": "\"Lấy vị trí hiện tại\" không dùng được trong phiên Remote Desktop hoặc khi dịch vụ định vị hệ thống tắt (POSITION_UNAVAILABLE). Hãy dùng \"Đọc từ thiết bị Starlink\" hoặc nhập thủ công.",
+    "fallback_to_browser": "Đang tự động chuyển sang vị trí trình duyệt…",
+    "manual_hint": "Vui lòng nhập tọa độ thủ công."
   },
   "thresholds": {
     "title": "Ngưỡng cảnh báo",

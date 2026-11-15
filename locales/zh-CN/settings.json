@@ -72,7 +72,9 @@
     "dish_other": "从星链终端读取位置失败，请手动填写经纬度。",
     "error_code": "（错误码 {{code}}）",
     "usage_dish": "推荐：点击\"从星链终端读取\"，使用天线自带 GPS 的位置",
-    "rdp_hint": "远程桌面会话或系统\"定位服务\"关闭时，\"获取当前位置\"不可用（会报 POSITION_UNAVAILABLE），请改用\"从星链终端读取\"或手动填写。"
+    "rdp_hint": "远程桌面会话或系统\"定位服务\"关闭时，\"获取当前位置\"不可用（会报 POSITION_UNAVAILABLE），请改用\"从星链终端读取\"或手动填写。",
+    "fallback_to_browser": "正在自动改用浏览器定位…",
+    "manual_hint": "请手动填写经纬度。"
   },
   "thresholds": {
     "title": "告警阈值",

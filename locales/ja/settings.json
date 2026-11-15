@@ -72,7 +72,9 @@
     "dish_other": "Starlink 端末からの位置読み取りに失敗しました。手動で入力してください。",
     "error_code": "（エラーコード {{code}}）",
     "usage_dish": "おすすめ：「Starlink 端末から読み取る」でアンテナ内蔵 GPS の位置を使用",
-    "rdp_hint": "リモートデスクトップ接続中やシステムの位置情報サービスがオフの場合、「現在地を取得」は使えません（POSITION_UNAVAILABLE）。「Starlink 端末から読み取る」か手動入力をご利用ください。"
+    "rdp_hint": "リモートデスクトップ接続中やシステムの位置情報サービスがオフの場合、「現在地を取得」は使えません（POSITION_UNAVAILABLE）。「Starlink 端末から読み取る」か手動入力をご利用ください。",
+    "fallback_to_browser": "ブラウザの位置情報に自動的に切り替えます…",
+    "manual_hint": "緯度経度を手動で入力してください。"
   },
   "thresholds": {
     "title": "アラートしきい値",

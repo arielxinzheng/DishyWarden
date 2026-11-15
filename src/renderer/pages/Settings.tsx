@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
-import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin } from 'lucide-react';
+import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info } from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
 import {
@@ -28,13 +28,14 @@ import {
   parseWebhookTimeout,
 } from '../lib/webhookTemplate';
 import { dishLocationFailureText, geolocationFailureText } from '../lib/locationMessages';
+import { resolveLocation } from '../lib/locationFallback';
 
 export default function Settings() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [grafanaChecking, setGrafanaChecking] = useState(false);
   const [grafanaProvisioning, setGrafanaProvisioning] = useState(false);
   const [geoLoading, setGeoLoading] = useState(false);
@@ -257,28 +258,82 @@ export default function Settings() {
     setDishLoading(true);
     setMessage(null);
     try {
-      const result = await window.electronAPI.getDishLocation();
-      if (result.ok && result.location) {
-        const lat = result.location.lat.toFixed(6);
-        const lon = result.location.lon.toFixed(6);
-        setLatitude(lat);
-        setLongitude(lon);
-        setMessage({ type: 'success', text: t('settings:location.got_dish_position', { lat, lon }) });
-      } else {
-        setMessage({ type: 'error', text: dishLocationFailureText(t, result) });
-      }
-    } catch (error) {
-      setMessage({
-        type: 'error',
-        text: dishLocationFailureText(t, { reason: 'other', error: (error as Error).message }),
+      // ⭐ 取值链：星链终端 GPS → 浏览器定位 → 手动填写
+      // （终端取不到就**自动**回落浏览器，用户只点一次按钮）
+      const outcome = await resolveLocation({
+        fromDish: async () => {
+          const result = await window.electronAPI.getDishLocation!();
+          if (result.ok && result.location) {
+            return { lat: result.location.lat, lon: result.location.lon };
+          }
+          throw result;
+        },
+        fromBrowser: requestBrowserLocation,
+        formatDishFailure: (e) =>
+          dishLocationFailureText(
+            t,
+            e && typeof e === 'object' && 'reason' in (e as object)
+              ? (e as Parameters<typeof dishLocationFailureText>[1])
+              : { reason: 'other', error: e instanceof Error ? e.message : String(e) },
+          ),
+        formatBrowserFailure: (e) =>
+          e && typeof e === 'object' && 'code' in (e as object)
+            ? geolocationFailureText(
+                t,
+                e as Parameters<typeof geolocationFailureText>[1],
+              )
+            : t('settings:location.not_supported'),
       });
+
+      if (outcome.ok) {
+        setLatitude(outcome.lat);
+        setLongitude(outcome.lon);
+        setMessage({
+          type: 'success',
+          text:
+            outcome.source === 'dish'
+              ? t('settings:location.got_dish_position', { lat: outcome.lat, lon: outcome.lon })
+              : t('settings:location.got_position', { lat: outcome.lat, lon: outcome.lon }),
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: `${outcome.reasons.join(' ')} ${t('settings:location.manual_hint')}`,
+        });
+      }
     } finally {
       setDishLoading(false);
     }
   };
 
+
+
+  /**
+   * 浏览器定位（Promise 版）。
+   *
+   * 单独抽出来是为了让「从星链终端读取」失败时能**自动回落**到这里 ——
+   * 用户点一次按钮就够了，不用再点第二个。
+   */
+  const requestBrowserLocation = (): Promise<{ lat: string; lon: string }> =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error(t('settings:location.not_supported')));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude.toFixed(6),
+            lon: position.coords.longitude.toFixed(6),
+          });
+        },
+        (error) => reject(error),
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
+      );
+    });
+
   // 获取当前地理位置（浏览器定位 —— 远程桌面 / 系统定位服务关闭时不可用）
-  const handleGetCurrentLocation = () => {
+  const handleGetCurrentLocation = async () => {
     if (!navigator.geolocation) {
       setMessage({ type: 'error', text: t('settings:location.not_supported') });
       return;
@@ -373,9 +428,19 @@ export default function Settings() {
       </div>
 
       {message && (
-        <Alert className={message.type === 'error' ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'}>
+        <Alert
+          className={
+            message.type === 'error'
+              ? 'border-red-500 bg-red-500/10'
+              : message.type === 'info'
+                ? 'border-blue-500/40 bg-blue-500/10'
+                : 'border-green-500 bg-green-500/10'
+          }
+        >
           {message.type === 'success' ? (
             <CheckCircle className="h-4 w-4" />
+          ) : message.type === 'info' ? (
+            <Info className="h-4 w-4" />
           ) : (
             <AlertCircle className="h-4 w-4" />
           )}
