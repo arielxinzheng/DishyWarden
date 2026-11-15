@@ -137,8 +137,21 @@ export class DishGrpcClient {
   private port: number;
   /** grpc-web 兜底端口（9201） */
   private webPort: number;
-  /** 一旦发现原生 gRPC 不行，就一直走 grpc-web */
-  private useWebTransport = false;
+  /**
+   * 传输优先级。
+   *
+   * 2026-11-15 真机证据（docs/REAL-DEVICE-EVIDENCE-2026-11-15.md）：
+   * 9200 的 Handle **对所有已知分支都回 UNIMPLEMENTED**，而 9201 的 grpc-web
+   * 正常可用 —— dishylink 也**只用 9201 调 Handle**。
+   *
+   * 所以默认 `true`：直接走 grpc-web；原生 9200 只作兜底。好处：
+   *   - 每轮采集少掉 1 次必然失败的原生尝试（之前是 9200 失败再切 9201，
+   *     每帧多一次超时等待）
+   *   - 诊断模式 14 个分支不再先跑一遍"注定全挂"的原生 pass
+   *
+   * reflection 仍然在 9200 上（真机证据确认它在那里能通），这部分不变。
+   */
+  private useWebTransport = true;
   /** reflection 拿到的描述符（用于请求编码 + 响应解码） */
   private descriptorBytes: Uint8Array[] | null = null;
   private registry: ReturnType<typeof createFileRegistry> | null = null;
@@ -161,11 +174,17 @@ export class DishGrpcClient {
     port: number,
     webPort: number = DEFAULT_WEB_PORT,
     descriptorCachePath?: string | null,
+    /**
+     * 主传输（第 5 参数）。默认 `grpc-web`，与 dishylink 一致、也与真机实测一致。
+     * 测试里需要显式走原生通道的场景（本地起 gRPC 假服务）可以传 `native`。
+     */
+    preferTransport: 'grpc-web' | 'native' = 'grpc-web',
   ) {
     this.host = host;
     this.port = port;
     this.webPort = webPort;
     this.nativePort = port;
+    this.useWebTransport = preferTransport === 'grpc-web';
     this.descriptorCachePath = descriptorCachePath
       ? perHostCachePath(descriptorCachePath, host)
       : null;
@@ -720,27 +739,35 @@ export class DishGrpcClient {
 
   /** 调用 Handle, oneof 分支名必须是 camelCase */
   private async call(request: Record<string, unknown>, timeoutMs: number): Promise<Record<string, unknown>> {
-    if (this.useWebTransport) return this.callViaGrpcWeb(request, timeoutMs);
+    // 主传输 → 兜底传输。默认主传输是 grpc-web(9201)，与 dishylink 一致；
+    // 兜底成功就把主传输换过去（这台设备上兜底那条才是对的），之后不再白试。
+    const webFirst = this.useWebTransport;
+    const primary = webFirst ? 'grpc-web' : '原生 gRPC';
+    const secondary = webFirst ? '原生 gRPC' : 'grpc-web';
+    const run = (web: boolean) =>
+      web ? this.callViaGrpcWeb(request, timeoutMs) : this.callNative(request, timeoutMs);
 
     try {
-      return await this.callNative(request, timeoutMs);
+      return await run(webFirst);
     } catch (err) {
-      // 原生 gRPC(9200) 不吃这个请求 ⇒ 换 grpc-web(9201) 再试一次。
-      // 两种传输都失败时，抛原始错误（原生那条信息更贴近现场）。
       const original = err instanceof Error ? err : new Error(String(err));
       try {
-        const res = await this.callViaGrpcWeb(request, timeoutMs);
-        this.useWebTransport = true;
-        console.warn('[DishGrpc] 原生 gRPC 不可用, 已切换到 grpc-web 传输');
+        const res = await run(!webFirst);
+        this.useWebTransport = !webFirst;
+        console.warn(`[DishGrpc] ${primary} 不可用, 已切换到 ${secondary} 传输`);
         return res;
-      } catch (webErr) {
-        const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
-        console.warn('[DishGrpc] grpc-web 兜底也失败:', webMsg);
-        // 两条错误都带上：9200 拒连(code 14) + 9201 回 UNIMPLEMENTED(code 12) 时，
-        // 只抛原生那条会让 callWithFallback 以为是"真错误"而不去试下一个候选分支。
-        throw new Error(`${original.message}；grpc-web: ${webMsg}`);
+      } catch (fallbackErr) {
+        const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        // 两条错误都带上：一条拒连(code 14) + 另一条 UNIMPLEMENTED(code 12) 时，
+        // 只抛一条会让 callWithFallback 以为是"真错误"而不去试下一个候选分支。
+        throw new Error(`${primary}: ${original.message}；${secondary}: ${fbMsg}`);
       }
     }
+  }
+
+  /** 当前主传输（诊断输出用） */
+  get primaryTransport(): 'grpc-web' | 'native' {
+    return this.useWebTransport ? 'grpc-web' : 'native';
   }
 
   /**
@@ -1003,6 +1030,18 @@ export class DishGrpcClient {
  * 只认全限定名 ⇒ 报 `type_name RouterInfo not found` ⇒ grpc-web 解不了码。
  * 解析规则同 protoc：从字段所在消息的作用域逐层向外找，找到第一个已定义的名字。
  */
+/** protoc 的 json_name 规则：去掉下划线，下划线后的字母大写（`dish_get_status` → `dishGetStatus`） */
+export function protocJsonName(name: string): string {
+  let out = '';
+  let upper = false;
+  for (const ch of name) {
+    if (ch === '_') { upper = true; continue; }
+    out += upper ? ch.toUpperCase() : ch;
+    upper = false;
+  }
+  return out;
+}
+
 export function qualifyTypeNames(set: { file: FileDesc[] }): void {
   // 全限定类型名 → 定义它的文件名
   const defined = new Map<string, string>();
@@ -1038,7 +1077,13 @@ export function qualifyTypeNames(set: { file: FileDesc[] }): void {
     };
     const fix = (scope: string, m: MsgDesc): void => {
       const full = `${scope}.${m.name}`;
-      for (const fd of m.field) if (fd.typeName) fd.typeName = use(resolve(full, fd.typeName));
+      for (const fd of m.field) {
+        if (fd.typeName) fd.typeName = use(resolve(full, fd.typeName));
+        // 有的 reflection 实现（如 @grpc/reflection）发的描述符不带 json_name ⇒
+        // bufbuild 的 jsonName 是 "" ⇒ toJson 把所有字段都写到 "" 键下、
+        // getStatus 看到的顶层键只有一个空串。按 protoc 的规则补上。
+        if (!fd.jsonName && fd.name) fd.jsonName = protocJsonName(fd.name);
+      }
       for (const n of m.nestedType) fix(full, n);
     };
     const pkg = f.package ? `.${f.package}` : '';
@@ -1081,7 +1126,7 @@ type FileDesc = {
 
 type MsgDesc = {
   name: string;
-  field: { typeName: string }[];
+  field: { name: string; typeName: string; jsonName: string }[];
   nestedType: MsgDesc[];
   enumType: { name: string }[];
 };

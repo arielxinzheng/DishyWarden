@@ -15,7 +15,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ReflectionService } from '@grpc/reflection';
 import { DishClient, parseFiniteNumber, type TelemetryData } from './dishClient';
-import { DishGrpcClient, clearDescriptorCacheForTest, perHostCachePath } from './dishGrpc';
+import { DishGrpcClient, clearDescriptorCacheForTest, perHostCachePath, protocJsonName } from './dishGrpc';
 
 /** parseStatus 是 private，但映射逻辑是本文件要锁的东西 —— 用类型断言取出来 */
 function mapper() {
@@ -310,6 +310,16 @@ describe('latestHistorySample 环形缓冲索引', () => {
 //
 // 放在这个文件里是因为本轮改动的可写范围只含这一个测试文件；
 // 逻辑上属于 dishGrpc.ts，后续可挪到 dishGrpc.test.ts。
+describe('protocJsonName', () => {
+  it('按 protoc 规则把 snake_case 转 camelCase（空串/首字母/多下划线都要稳）', () => {
+    expect(protocJsonName('dish_get_status')).toBe('dishGetStatus');
+    expect(protocJsonName('get_history')).toBe('getHistory');
+    expect(protocJsonName('id')).toBe('id');
+    expect(protocJsonName('')).toBe('');
+    expect(protocJsonName('_leading')).toBe('Leading');
+  });
+});
+
 describe('DishGrpcClient 传输层（本地 reflection 服务）', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dishgrpc-'));
   // 跨文件引用 + 同文件内大量互相引用 —— 真机 proto 就是这个形状
@@ -394,7 +404,8 @@ service Device { rpc Handle(Request) returns (Response); }
   beforeEach(() => clearDescriptorCacheForTest());
 
   it('reflection 去重：传递依赖重复返回时 proto-loader 仍能建客户端（原生通道可用）', async () => {
-    const c = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    // 默认主传输已改为 grpc-web；这条测的是原生通道 ⇒ 显式指定
+    const c = new DishGrpcClient('127.0.0.1', nativePort, webPort, null, 'native');
     const status = await c.getStatus(3000);
     expect(status.hardwareVersion).toBe('rev4');
     c.close();
@@ -466,6 +477,27 @@ service Device { rpc Handle(Request) returns (Response); }
     expect(perHostCachePath('/x/dish-descriptor.bin', '192.168.100.1'))
       .toBe('/x/dish-descriptor-192.168.100.1.bin');
     expect(perHostCachePath('/x/cache', 'a:b')).toBe('/x/cache-a_b');
+  });
+
+  it('默认主传输是 grpc-web，响应顶层键能正确解码出 dishGetStatus（真机 9200 全挂的现象下也能工作）', async () => {
+    // 不传 preferTransport ⇒ 默认 grpc-web ⇒ 返回 "web"（假 grpc-web 服务的值），
+    // 而不是 "rev4"（原生 gRPC 的值）。顺带回归 jsonName 修复：
+    // 之前描述符 json_name 缺失会让所有字段挤到 "" 键 ⇒ getStatus 抛"响应里没有 dishGetStatus"。
+    const c = new DishGrpcClient('127.0.0.1', nativePort, webPort);
+    const status = await c.getStatus(3000);
+    expect(status.hardwareVersion).toBe('web');
+    c.close();
+  });
+
+  it('grpc-web 主通道失败时兜底到原生 gRPC 并记住新方向', async () => {
+    // 换一个"grpc-web 不可达"的端口：主通道必然失败，兜底走原生。
+    const deadWebPort = 1; // 肯定没有服务
+    const c = new DishGrpcClient('127.0.0.1', nativePort, deadWebPort);
+    const status = await c.getStatus(3000);
+    expect(status.hardwareVersion).toBe('rev4'); // 走到原生
+    // 兜底一次后应切换主传输：下一次 call 直接走原生
+    expect((c as unknown as { useWebTransport: boolean }).useWebTransport).toBe(false);
+    c.close();
   });
 });
 
