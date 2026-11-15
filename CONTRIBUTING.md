@@ -60,13 +60,33 @@ git add -A             # 会把无关改动一起提交
 
 ### 提交信息格式
 
-```
-<type>: <简述>
+**所有 commit message 一律用英文。** 本项目公开在 GitHub 上，提交历史对外可见。
 
-<正文: 为什么改, 怎么验证的>
+```
+<type>: <short imperative summary>
+
+<body: why the change was needed, and how it was verified>
 ```
 
-type 用：`feat` / `fix` / `refactor` / `docs` / `chore` / `perf`
+- **Subject**: English, imperative mood (`fix:` not `fixed:`), no trailing period, ~72 chars.
+- **Body**: English — explain *why* and *how verified*.
+- **Type**: `feat` / `fix` / `refactor` / `docs` / `chore` / `perf` / `test` / `ci`
+- **Do not** add `Co-Authored-By` footers for AI tools — they misattribute authorship
+  on GitHub's contributor graph. The human committer is the author.
+
+示例：
+
+```text
+fix(release): pin native modules to Electron ABI in CI
+
+npmRebuild:false protects the local arm64 dev machine, but it also disabled the
+rebuild on CI. npm ci then compiled better-sqlite3 for Node 22 (ABI 127) while
+Electron 33 requires ABI 130, so the packaged .node failed to dlopen: the
+telemetry DB fell back to in-memory mode and background services never started.
+
+Verified: rebuilt the installer, installed it on a clean Windows 11 VM, log now
+shows "history DB opened" instead of the DLOPEN error.
+```
 
 ---
 
