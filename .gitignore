@@ -39,6 +39,7 @@ CloudServer/
 # ─────────────────────────────────────────────────────────────
 
 # 内部交接与真机证据
+AGENTS.md
 DEVELOPMENT-STATUS.md
 FIX_ELECTRON.sh
 docs/HANDOFF-PROMPTS.md
