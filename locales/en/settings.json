@@ -72,7 +72,11 @@
     "rdp_hint": "Over Remote Desktop the system location service is usually unavailable (POSITION_UNAVAILABLE); changing permissions does not help. The terminal is fixed in place: look up its coordinates on a map, enter them once and save; they are kept from then on.",
     "fallback_to_browser": "Falling back to browser geolocation…",
     "manual_hint": "Please enter the coordinates manually.",
-    "browser_source_tooltip": "Get the current position via browser geolocation (needs the OS location service; usually unavailable over Remote Desktop)"
+    "browser_source_tooltip": "Get the current position via browser geolocation (needs the OS location service; usually unavailable over Remote Desktop)",
+    "ip_rough": "Approx. by IP",
+    "ip_rough_tooltip": "Estimate city-level coordinates from the exit IP (may be off by hundreds of km). Clicking means you agree to send your exit IP to a third-party geolocation service.",
+    "ip_rough_result": "Estimated from exit IP: {{lat}}, {{lon}}{{city}} (rough, city-level — enter exact coordinates for satellite elevation)",
+    "ip_rough_failed": "IP-based estimation failed: {{detail}}"
   },
   "thresholds": {
     "title": "Alert Thresholds",

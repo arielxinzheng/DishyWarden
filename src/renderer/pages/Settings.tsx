@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
-import {Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info} from 'lucide-react';
+import {Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info, Globe} from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
 import {
@@ -30,6 +30,7 @@ import {
 import { dishLocationFailureText, geolocationFailureText } from '../lib/locationMessages';
 import { resolveLocation } from '../lib/locationFallback';
 import { requestGeolocation } from '../lib/geolocation';
+import { requestIpLocation } from '../lib/ipLocation';
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -328,6 +329,39 @@ export default function Settings() {
     }
   };
 
+  /**
+   * IP 粗略定位（dishylink 同款兜底）。
+   *
+   * 浏览器定位在远程桌面 / 精简系统里经常拿不到（系统定位 provider 不可用），
+   * 而只要能出网，按出口 IP 查一下就能拿到**城市级**坐标。
+   *
+   * ⚠️ 它会把出口 IP 交给第三方 ⇒ 所以是**独立按钮**，用户点了才发请求，
+   *    绝不静默自动调用。
+   */
+  const handleGetIpLocation = async () => {
+    setGeoLoading(true);
+    setMessage(null);
+    try {
+      const loc = await requestIpLocation();
+      setLatitude(loc.lat.toFixed(6));
+      setLongitude(loc.lon.toFixed(6));
+      setMessage({
+        type: 'info',
+        text: t('settings:location.ip_rough_result', {
+          lat: loc.lat.toFixed(4),
+          lon: loc.lon.toFixed(4),
+          city: loc.city ?? '',
+        }),
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn('[Settings] IP 粗略定位失败:', detail);
+      setMessage({ type: 'error', text: t('settings:location.ip_rough_failed', { detail }) });
+    } finally {
+      setGeoLoading(false);
+    }
+  };
+
   // 保存位置信息
   const handleSaveLocation = () => {
     console.log('Save location clicked', { latitude, longitude });
@@ -581,6 +615,19 @@ export default function Settings() {
                   {t('settings:location.get_current')}
                 </>
               )}
+            </Button>
+            {/* IP 粗略定位 —— 次要按钮（dishylink 同款）。
+                精度只有城市级（误差可达几百公里），所以放在主按钮之后，
+                并在结果里明确标注"粗略估算"。点击即表示同意把出口 IP
+                交给第三方地理服务查询。 */}
+            <Button
+              variant="outline"
+              onClick={handleGetIpLocation}
+              disabled={geoLoading}
+              title={t('settings:location.ip_rough_tooltip')}
+            >
+              <Globe className="w-4 h-4 mr-2" />
+              {t('settings:location.ip_rough')}
             </Button>
             <Button 
               onClick={handleSaveLocation} 
