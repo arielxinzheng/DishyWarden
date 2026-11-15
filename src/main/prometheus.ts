@@ -351,6 +351,10 @@ groups:
     const startTime = Date.now();
     
     while (Date.now() - startTime < timeoutMs) {
+      // 子进程已经死了/出错了 ⇒ 没戏了，别再空等满超时
+      if (!this.process || !this.isRunning) {
+        throw new Error('Prometheus process exited before becoming ready');
+      }
       try {
         const response = await fetch(`http://localhost:${this.config.port}/-/ready`);
         if (response.ok) {
@@ -360,7 +364,7 @@ groups:
       } catch (error) {
         // 继续等待
       }
-      
+
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     
