@@ -62,8 +62,6 @@
     "lon_invalid": "经度必须在 -180 到 180 之间 (当前值: {{value}})",
     "saved": "终端位置已保存",
     "cleared": "终端位置已清除",
-    "get_from_dish": "从星链终端读取",
-    "dish_source_tooltip": "读取星链天线自带 GPS 的位置，不依赖本机定位服务",
     "got_dish_position": "已从星链终端读取位置: {{lat}}, {{lon}}。请点击\"保存位置\"按钮保存。",
     "dish_permission_denied": "星链终端拒绝提供位置（PERMISSION_DENIED）。请在 Starlink App →「设置」→「高级」里打开「允许本地网络访问」，或手动填写经纬度。",
     "dish_unsupported": "当前终端固件不支持读取位置（UNIMPLEMENTED），请手动填写经纬度。",
@@ -71,11 +69,9 @@
     "dish_no_fix": "星链终端尚未完成 GPS 定位，请稍后重试或手动填写经纬度。",
     "dish_other": "从星链终端读取位置失败，请手动填写经纬度。",
     "error_code": "（错误码 {{code}}）",
-    "usage_dish": "备用：少数开放该接口的终端可点「从星链终端读取」用天线自带 GPS",
     "rdp_hint": "远程桌面会话或系统\"定位服务\"关闭时，\"获取当前位置\"不可用（会报 POSITION_UNAVAILABLE），请手动填写经纬度。",
     "fallback_to_browser": "正在自动改用浏览器定位…",
     "manual_hint": "请手动填写经纬度。",
-    "dish_rare_note": "「从星链终端读取」：多数终端已封闭该接口（返回 UNIMPLEMENTED 或 PERMISSION_DENIED），成功率较低，仅作备用。",
     "browser_source_tooltip": "用浏览器定位获取当前位置（需要系统定位服务可用；远程桌面会话里通常不可用）"
   },
   "thresholds": {

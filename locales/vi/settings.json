@@ -62,8 +62,6 @@
     "lon_invalid": "Kinh độ phải nằm trong khoảng -180 đến 180 (giá trị hiện tại: {{value}})",
     "saved": "Đã lưu vị trí thiết bị đầu cuối",
     "cleared": "Đã xóa vị trí thiết bị đầu cuối",
-    "get_from_dish": "Đọc từ thiết bị Starlink",
-    "dish_source_tooltip": "Dùng vị trí GPS tích hợp trên ăng-ten, không phụ thuộc dịch vụ định vị của máy tính này",
     "got_dish_position": "Đã đọc vị trí từ thiết bị Starlink: {{lat}}, {{lon}}. Nhấn \"Lưu vị trí\" để lưu.",
     "dish_permission_denied": "Thiết bị từ chối cung cấp vị trí (PERMISSION_DENIED). Bật \"Cho phép truy cập mạng cục bộ\" trong ứng dụng Starlink (Cài đặt → Nâng cao), hoặc nhập tọa độ thủ công.",
     "dish_unsupported": "Firmware thiết bị không hỗ trợ đọc vị trí (UNIMPLEMENTED). Vui lòng nhập tọa độ thủ công.",
@@ -71,11 +69,9 @@
     "dish_no_fix": "Thiết bị chưa định vị GPS xong. Thử lại sau hoặc nhập tọa độ thủ công.",
     "dish_other": "Đọc vị trí từ thiết bị Starlink thất bại. Vui lòng nhập tọa độ thủ công.",
     "error_code": "(mã lỗi {{code}})",
-    "usage_dish": "Dự phòng: với thiết bị có hỗ trợ, \"Đọc từ thiết bị Starlink\" dùng GNSS của ăng-ten",
     "rdp_hint": "Qua Remote Desktop hoặc khi dịch vụ vị trí hệ thống bị tắt, \"Lấy vị trí hiện tại\" sẽ thất bại (POSITION_UNAVAILABLE). Vui lòng nhập tọa độ thủ công.",
     "fallback_to_browser": "Đang tự động chuyển sang vị trí trình duyệt…",
     "manual_hint": "Vui lòng nhập tọa độ thủ công.",
-    "dish_rare_note": "\"Đọc từ thiết bị Starlink\": giao diện này đã bị đóng trên hầu hết thiết bị (UNIMPLEMENTED / PERMISSION_DENIED). Chỉ dùng dự phòng.",
     "browser_source_tooltip": "Lấy vị trí hiện tại qua định vị trình duyệt (cần dịch vụ vị trí của hệ điều hành; thường không dùng được qua Remote Desktop)"
   },
   "thresholds": {

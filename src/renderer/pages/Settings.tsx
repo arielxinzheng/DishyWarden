@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
-import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info, Radar } from 'lucide-react';
+import {Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin, Info} from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
 import {
@@ -39,7 +39,6 @@ export default function Settings() {
   const [grafanaChecking, setGrafanaChecking] = useState(false);
   const [grafanaProvisioning, setGrafanaProvisioning] = useState(false);
   const [geoLoading, setGeoLoading] = useState(false);
-  const [dishLoading, setDishLoading] = useState(false);
   
   // 位置状态
   /** 升级与反馈卡片把自己的保存能力交出来，由页面底部的总保存按钮统一提交 */
@@ -250,61 +249,6 @@ export default function Settings() {
   };
 
   // 从星链终端读取位置（dish 自带 GPS，不依赖本机定位服务）
-  const handleGetDishLocation = async () => {
-    if (!window.electronAPI?.getDishLocation) {
-      setMessage({ type: 'error', text: t('settings:location.dish_other') });
-      return;
-    }
-    setDishLoading(true);
-    setMessage(null);
-    try {
-      // ⭐ 取值链：星链终端 GPS → 浏览器定位 → 手动填写
-      // （终端取不到就**自动**回落浏览器，用户只点一次按钮）
-      const outcome = await resolveLocation({
-        fromDish: async () => {
-          const result = await window.electronAPI.getDishLocation!();
-          if (result.ok && result.location) {
-            return { lat: result.location.lat, lon: result.location.lon };
-          }
-          throw result;
-        },
-        fromBrowser: requestBrowserLocation,
-        formatDishFailure: (e) =>
-          dishLocationFailureText(
-            t,
-            e && typeof e === 'object' && 'reason' in (e as object)
-              ? (e as Parameters<typeof dishLocationFailureText>[1])
-              : { reason: 'other', error: e instanceof Error ? e.message : String(e) },
-          ),
-        formatBrowserFailure: (e) =>
-          e && typeof e === 'object' && 'code' in (e as object)
-            ? geolocationFailureText(
-                t,
-                e as Parameters<typeof geolocationFailureText>[1],
-              )
-            : t('settings:location.not_supported'),
-      });
-
-      if (outcome.ok) {
-        setLatitude(outcome.lat);
-        setLongitude(outcome.lon);
-        setMessage({
-          type: 'success',
-          text:
-            outcome.source === 'dish'
-              ? t('settings:location.got_dish_position', { lat: outcome.lat, lon: outcome.lon })
-              : t('settings:location.got_position', { lat: outcome.lat, lon: outcome.lon }),
-        });
-      } else {
-        setMessage({
-          type: 'error',
-          text: `${outcome.reasons.join(' ')} ${t('settings:location.manual_hint')}`,
-        });
-      }
-    } finally {
-      setDishLoading(false);
-    }
-  };
 
 
 
@@ -342,30 +286,48 @@ export default function Settings() {
     setGeoLoading(true);
     setMessage(null);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude.toFixed(6);
-        const lon = position.coords.longitude.toFixed(6);
-        setLatitude(lat);
-        setLongitude(lon);
-        setGeoLoading(false);
-        setMessage({
-          type: 'success',
-          text: t('settings:location.got_position', { lat, lon }),
-        });
+    // 取值链：浏览器定位 →（失败时静默试一次星链终端 GPS）→ 手动填写。
+    // 终端 GPS 这条路**不在界面上暴露按钮**（多数终端已封闭该接口），
+    // 只在浏览器定位失败时自动尝试一次 ⇒ 成功就有位置，失败则两条原因都报出来。
+    const outcome = await resolveLocation({
+      fromBrowser: requestBrowserLocation,
+      fromDish: async () => {
+        if (!window.electronAPI?.getDishLocation) return null;
+        const result = await window.electronAPI.getDishLocation();
+        if (result.ok && result.location) {
+          return { lat: result.location.lat, lon: result.location.lon };
+        }
+        throw result;
       },
-      (error) => {
-        setGeoLoading(false);
-        // 带上真实错误码 + Chromium 原文，用户/我们才分得清是哪一种失败
-        console.warn('[Settings] geolocation failed', error.code, error.message);
-        setMessage({ type: 'error', text: geolocationFailureText(t, error) });
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      }
-    );
+      formatDishFailure: (e) =>
+        dishLocationFailureText(
+          t,
+          e && typeof e === 'object' && 'reason' in (e as object)
+            ? (e as Parameters<typeof dishLocationFailureText>[1])
+            : { reason: 'other', error: e instanceof Error ? e.message : String(e) },
+        ),
+      formatBrowserFailure: (e) =>
+        e && typeof e === 'object' && 'code' in (e as object)
+          ? geolocationFailureText(t, e as Parameters<typeof geolocationFailureText>[1])
+          : t('settings:location.not_supported'),
+    });
+
+    setGeoLoading(false);
+    if (outcome.ok) {
+      setLatitude(outcome.lat);
+      setLongitude(outcome.lon);
+      setMessage({
+        type: 'success',
+        text: t('settings:location.got_position', { lat: outcome.lat, lon: outcome.lon }),
+      });
+    } else {
+      // 带上真实错误码 + Chromium 原文，用户/我们才分得清是哪一种失败
+      console.warn('[Settings] location failed:', outcome.reasons.join(' | '));
+      setMessage({
+        type: 'error',
+        text: `${outcome.reasons.join(' ')} ${t('settings:location.manual_hint')}`,
+      });
+    }
   };
 
   // 保存位置信息
@@ -640,29 +602,7 @@ export default function Settings() {
               <RotateCcw className="w-4 h-4 mr-2" />
               {t('settings:location.clear')}
             </Button>
-            {/* ② 终端 GPS —— 次要（多数终端已封闭该接口，成功率低） */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleGetDishLocation}
-              disabled={dishLoading}
-              className="text-muted-foreground"
-              title={t('settings:location.dish_source_tooltip')}
-            >
-              {dishLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  {t('settings:location.fetching')}
-                </>
-              ) : (
-                <>
-                  <Radar className="w-3.5 h-3.5 mr-1.5" />
-                  {t('settings:location.get_from_dish')}
-                </>
-              )}
-            </Button>
           </div>
-          <p className="text-xs text-muted-foreground">{t('settings:location.dish_rare_note')}</p>
 
           {/* 常驻提示: 否则按钮灰着时用户不知道为什么要先填经纬度 */}
           {!latitude || !longitude ? (
@@ -685,8 +625,6 @@ export default function Settings() {
               2. {t('settings:location.usage_2')}
               <br />
               3. {t('settings:location.usage_3')}
-              <br />
-              4. {t('settings:location.usage_dish')}
               <br />
               <span className="text-xs opacity-80">{t('settings:location.rdp_hint')}</span>
               <br />

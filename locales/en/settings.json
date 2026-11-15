@@ -62,8 +62,6 @@
     "lon_invalid": "Longitude must be between -180 and 180 (current value: {{value}})",
     "saved": "Terminal location saved",
     "cleared": "Terminal location cleared",
-    "get_from_dish": "Read from Starlink dish",
-    "dish_source_tooltip": "Use the dish's built-in GPS position; does not depend on this computer's location service",
     "got_dish_position": "Read position from Starlink dish: {{lat}}, {{lon}}. Click \"Save location\" to save.",
     "dish_permission_denied": "The dish refused to share its location (PERMISSION_DENIED). Enable \"Allow access on local network\" in the Starlink app (Settings → Advanced), or enter coordinates manually.",
     "dish_unsupported": "This dish firmware does not support reading location (UNIMPLEMENTED). Please enter coordinates manually.",
@@ -71,11 +69,9 @@
     "dish_no_fix": "The dish has no GPS fix yet. Try again later or enter coordinates manually.",
     "dish_other": "Failed to read location from the Starlink dish. Please enter coordinates manually.",
     "error_code": "(error code {{code}})",
-    "usage_dish": "Fallback: on the few terminals that expose it, \"Read from Starlink terminal\" uses the antenna GNSS",
     "rdp_hint": "Over Remote Desktop or with the system location service off, \"Get current position\" fails (POSITION_UNAVAILABLE). Please enter the coordinates manually.",
     "fallback_to_browser": "Falling back to browser geolocation…",
     "manual_hint": "Please enter the coordinates manually.",
-    "dish_rare_note": "\"Read from Starlink terminal\": this interface is closed on most terminals (UNIMPLEMENTED or PERMISSION_DENIED) — a fallback only.",
     "browser_source_tooltip": "Get the current position via browser geolocation (needs the OS location service; usually unavailable over Remote Desktop)"
   },
   "thresholds": {

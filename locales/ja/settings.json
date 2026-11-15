@@ -62,8 +62,6 @@
     "lon_invalid": "経度は -180 から 180 の範囲で指定してください（現在値: {{value}}）",
     "saved": "端末位置を保存しました",
     "cleared": "端末位置をクリアしました",
-    "get_from_dish": "Starlink 端末から読み取る",
-    "dish_source_tooltip": "アンテナ内蔵 GPS の位置を使用します（この PC の位置情報サービスに依存しません）",
     "got_dish_position": "Starlink 端末から位置を取得しました: {{lat}}, {{lon}}。「位置を保存」をクリックして保存してください。",
     "dish_permission_denied": "端末が位置情報の提供を拒否しました（PERMISSION_DENIED）。Starlink アプリの「設定」→「詳細」で「ローカルネットワークからのアクセスを許可」を有効にするか、手動で入力してください。",
     "dish_unsupported": "この端末のファームウェアは位置の読み取りに対応していません（UNIMPLEMENTED）。手動で入力してください。",
@@ -71,11 +69,9 @@
     "dish_no_fix": "端末の GPS 測位がまだ完了していません。しばらくして再試行するか、手動で入力してください。",
     "dish_other": "Starlink 端末からの位置読み取りに失敗しました。手動で入力してください。",
     "error_code": "（エラーコード {{code}}）",
-    "usage_dish": "予備：対応している端末なら「星链ターミナルから取得」でアンテナの GNSS を使用",
     "rdp_hint": "リモートデスクトップやシステムの位置情報サービスが無効な場合、「現在地を取得」は使えません（POSITION_UNAVAILABLE）。緯度経度を手動で入力してください。",
     "fallback_to_browser": "ブラウザの位置情報に自動的に切り替えます…",
     "manual_hint": "緯度経度を手動で入力してください。",
-    "dish_rare_note": "「星链ターミナルから取得」：多くの端末ではこのインターフェースは閉じています（UNIMPLEMENTED / PERMISSION_DENIED）。予備手段です。",
     "browser_source_tooltip": "ブラウザの位置情報で現在地を取得（OS の位置情報サービスが必要。リモートデスクトップでは通常不可）"
   },
   "thresholds": {
