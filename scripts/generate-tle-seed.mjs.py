@@ -8,8 +8,8 @@ offline operation, not a precision source.
 """
 import json, glob, gzip, collections, math, os, datetime
 
-SRC = sorted(glob.glob('/Users/lixinzheng/ClaudeCode/Patent/202607/Experiment/data/real/raw/tle/tle_starlink_*.json'))[-1]
-OUT_DIR = '/Users/lixinzheng/Documents/work/星链/SLMonitor/src/renderer/assets'
+SRC = sorted(glob.glob('<HOME>/ClaudeCode/Patent/202607/Experiment/data/real/raw/tle/tle_starlink_*.json'))[-1]
+OUT_DIR = '<REPO_ROOT>/src/renderer/assets'
 OUT = os.path.join(OUT_DIR, 'tle-seed.json.gz')
 TOP_N = 3
 

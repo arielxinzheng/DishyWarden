@@ -121,7 +121,7 @@ for (const mod of PROTECTED) {
 
   results.push(
     `  ❌ ${mod.name}: 当前是 ${info.arch}，期望 ${mod.arch}` +
-    ` —— 需要用 node-gyp 重编（见 DEVELOPMENT-STATUS.md 踩坑备忘）`
+    ` —— 需要用 node-gyp 重编（见 CONTRIBUTING.md 的「不要做的事」）`
   );
 }
 

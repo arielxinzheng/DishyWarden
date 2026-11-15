@@ -234,7 +234,7 @@ jobs:
 ### 4.2 手工发版（自建目录 / 无 CI 时）
 
 ```bash
-cd "/Users/lixinzheng/Documents/work/星链/SLMonitor"
+cd "<REPO_ROOT>"
 npm version patch --no-git-tag-version    # 升版本；不要动 appId
 npm run build:win                          # 产出 exe + zip + latest.yml + blockmap
 

@@ -5,8 +5,6 @@
 `src/core/dishClient.desired.test.ts`（回归用例）
 **状态**: 实机验证通过
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
-
 ---
 
 ## 1. 症状

@@ -7,8 +7,6 @@
 `src/renderer/hooks/useDish.tsx`（mock 刻度）
 **状态**: 单测 + 浏览器实渲染验收通过
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
-
 ---
 
 ## 1. 核心 Bug：数字和图形在说两套话

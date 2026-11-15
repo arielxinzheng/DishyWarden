@@ -156,7 +156,7 @@ React 容器（`__reactContainer$…`）存在但 `#root.children.length === 0`�
 | 加载方式 | `location.pathname` | `<Route path="/">` |
 |---|---|---|
 | 开发态 `http://localhost:5173/` | `/` | 匹配 ✓ |
-| 打包态 `file:///…/app.asar/dist/index.html` | `/Users/…/dist/index.html`（Win 上是 `C:/…/index.html`） | **全不匹配 ✗** |
+| 打包态 `file:///…/app.asar/dist/index.html` | `<HOME>/dist/index.html`（Win 上是 `C:/…/index.html`） | **全不匹配 ✗** |
 
 `<Routes>` 匹配不到任何路由就返回 `null` → `Layout` 不渲染 → 只剩窗口背景色。
 因为「不匹配」不是错误，所以不会触发 ErrorBoundary，也不会有任何日志。

@@ -79,18 +79,22 @@ jobs:
         run: npm run test:e2e
 
   hygiene:
-    name: Repository hygiene (advisory)
+    name: Repository hygiene
     runs-on: ubuntu-latest
-    # Non-blocking while the existing absolute paths are being scrubbed.
-    # Once the repository is clean, drop `continue-on-error` to make it a gate.
-    continue-on-error: true
+    # Blocking gate: the repository has been scrubbed of machine-local paths
+    # and obvious credentials, so a regression here must fail the build.
     steps:
       - uses: actions/checkout@v4
 
       - name: No machine-local absolute paths
         run: |
           set -euo pipefail
-          if git grep -nE '/Users/[A-Za-z0-9._-]+' -- . ; then
+          # 只抓 **macOS 本机**路径: /Users/<name>
+          # 排除 Windows 盘符形式 (C:/Users/Public/ 之类) —— 那是上传目标目录,
+          # 不是某台开发机的家目录, 是真阳性会造成误报。
+          #
+          # `(^|[^A-Za-z0-9:])` 前缀: 前面不能紧跟盘符字母+冒号。
+          if git grep -nE '(^|[^A-Za-z0-9:])/Users/[A-Za-z0-9._-]+' -- . ; then
             echo '::error::Found machine-local absolute paths. Use relative paths or a <USERNAME> placeholder.'
             exit 1
           fi

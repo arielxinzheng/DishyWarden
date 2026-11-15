@@ -5,8 +5,6 @@
 **范围**: `src/renderer/utils/servingSatellite.ts`（新增）、`src/renderer/pages/SatelliteRadar.tsx`
 **状态**: 端到端已验证
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
-
 ---
 
 ## 1. 为什么不能只回退到「仰角最高」

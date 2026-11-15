@@ -5,8 +5,6 @@
 **状态**: 已完成并验证（第一步）；hourly 聚合部分留作技术债
 
 > 交接对象：接手本项目的开发 agent
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)
-
 ---
 
 ## 1. 问题背景

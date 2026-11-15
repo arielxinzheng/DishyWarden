@@ -92,7 +92,7 @@ npm run electron:build                      # esbuild 通过，electron-updater 
 
 ---
 
-## 6. 踩坑记录（详见 DEVELOPMENT-STATUS.md §踩坑备忘 44）
+## 6. 踩坑记录
 
 **开发态 `require('electron')` 命中 npm shim（一个路径字符串）而不是 Electron 内置模块**
 ⇒ `require('electron-updater')` 在模块加载期就抛

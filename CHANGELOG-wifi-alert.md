@@ -262,9 +262,7 @@ getTelemetry()
 
 ## 相关文档
 
-- **需求文档**: `SL监控软件需求文档1.0.docx` 
-- **开发状态**: `DEVELOPMENT-STATUS.md`
-- **Agent 指南**: `AGENTS.md`
+- **贡献指南**: `CONTRIBUTING.md`
 - **告警规则**: `src/alerting/manager.ts` (L560-L628)
 
 ---

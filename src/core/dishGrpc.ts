@@ -202,7 +202,7 @@ export class DishGrpcClient {
   /**
    * 传输优先级。
    *
-   * 2026-11-15 真机证据（docs/REAL-DEVICE-EVIDENCE-2026-11-15.md）：
+   * 2026-11-15 真机证据（内部验证记录，未随公开仓库发布）：
    * 9200 的 Handle **对所有已知分支都回 UNIMPLEMENTED**，而 9201 的 grpc-web
    * 正常可用 —— dishylink 也**只用 9201 调 Handle**。
    *

@@ -5,7 +5,6 @@
 **范围**: `src/core/dishGrpc.ts`（新增）、`src/core/dishClient.ts`、`src/storage/telemetryStore.ts`、`package.json`
 **状态**: 端到端已验证
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
 > 前置阅读：[`CHANGELOG-obstruction-source.md`](./CHANGELOG-obstruction-source.md)（遮挡图来源标记）。
 
 ---
@@ -46,7 +45,7 @@ client.Handle({ id: 1, dishGetObstructionMap: {} })
 client.Handle({ id: 1, dish_get_obstruction_map: {} })
 ```
 
-被测方生产代码（`/Users/lixinzheng/Downloads/sl-monitor-0.1.0/server/dist/grpc/grpc-client.js`）
+被测方生产代码（`<HOME>/Downloads/sl-monitor-0.1.0/server/dist/grpc/grpc-client.js`）
 用 `normalizeRequest()` 做 snake→camel 转换，本实现直接写 camelCase。
 
 ### 2.3 响应挂在顶层 camelCase 键

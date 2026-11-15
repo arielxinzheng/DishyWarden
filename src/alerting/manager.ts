@@ -45,7 +45,7 @@ export interface AlertRule {
    *
    * ⇒ 告警每 30 秒闪一下就消失, 历史记录里全是短命的告警。
    *
-   * 这正是踩过的坑(见 DEVELOPMENT-STATUS.md 踩坑备忘)。
+   * 这正是踩过的坑(见 CONTRIBUTING.md §2.2)。
    */
   managedBy?: 'telemetry' | 'outages';
 }

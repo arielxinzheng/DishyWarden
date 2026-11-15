@@ -5,8 +5,6 @@
 `TopologyChain.tsx`（新增）、`topologyModel.test.ts`（新增）、`index.tsx`（挂载）
 **状态**: 单测 + Electron 实机验收通过
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
-
 ---
 
 ## 1. 它解决什么问题

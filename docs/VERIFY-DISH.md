@@ -83,15 +83,15 @@ Tee-Object 结果：加 | Tee-Object -FilePath C:\Users\Public\dish-check.txt
 
 ### B. WinRM（管理员 PowerShell，一次搞定 + 结果自动回传）
 ```powershell
-Invoke-Command -ComputerName {{HOSTNAME_ih2q0ict}} -Credential (Get-Credential) `
+Invoke-Command -ComputerName <WINDOWS_HOST> -Credential (Get-Credential) `
   -FilePath .\scripts\verify-dish.ps1 | Tee-Object -FilePath .\dish-check.txt
 ```
 （远程需已启用 WinRM：`Enable-PSRemoting -Force`）
 
 ### C. SSH（远程装了 OpenSSH Server）
 ```bash
-scp scripts/verify-dish.ps1 {{USER_nr8rho6r}}@{{HOSTNAME_isx9vimd}}:C:/Users/Public/
-ssh {{USER_nr8rho6r}}@{{HOSTNAME_isx9vimd}} powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Public/verify-dish.ps1
+scp scripts/verify-dish.ps1 <WINDOWS_USER>@<WINDOWS_HOST>:C:/Users/Public/
+ssh <WINDOWS_USER>@<WINDOWS_HOST> powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Public/verify-dish.ps1
 ```
 
 ### D. 一行版（不想传文件，直接粘进远程 PowerShell）

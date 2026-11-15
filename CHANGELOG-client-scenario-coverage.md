@@ -6,8 +6,6 @@
 `src/alerting/manager.test.ts`（5 项新用例）
 **状态**: 单测 + 真机端到端验收通过
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
-
 ---
 
 ## 1. 结论：这两个场景**都该告警**，而且一个是真缺口，一个是接线缺失

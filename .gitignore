@@ -29,3 +29,42 @@ coverage/
 
 # 云端服务独立仓库（git 独立于本仓库，勿作为子目录提交）
 CloudServer/
+
+# ─────────────────────────────────────────────────────────────
+# 不进公开仓库的材料
+#
+# D 桶：需求文档 / 真机证据 / 内部交接状态 / 原型与竞品素材
+#      —— 已从 git 索引移除，但保留在本机工作树（本地可用）。
+#      副本另存于 ~/private/dishywarden-internal/
+# ─────────────────────────────────────────────────────────────
+
+# 内部交接与真机证据
+DEVELOPMENT-STATUS.md
+FIX_ELECTRON.sh
+docs/HANDOFF-PROMPTS.md
+docs/REAL-DEVICE-EVIDENCE-*.md
+docs/VERIFY-2026-11-15.md
+docs/VERIFY-TRACE-LOCATION-2026-11-15.md
+
+# 需求文档 / 设计稿 / 原型 / 竞品素材
+# ⚠️ 用精确文件名而不是 *.docx —— 通配符会把将来想公开的文档也挡掉
+SL监控软件需求文档0.1.md
+SL监控软件需求文档1.0.docx
+前端菜单设计.docx
+*.itmz
+星链监控软件.markdown
+星链监控软件脑图0826.markdown
+prompts.txt
+prompt0831.rtf
+UIUX.png
+UIUX方案2.png
+UIUX方案3.png
+UIUX方案4.png
+校准.png
+Obstruction.png
+prototype0831/
+Prototype_0828/
+竞品/
+SLMonitor-Prototype.html
+StarlinkMonitor.html
+alert-demo.html

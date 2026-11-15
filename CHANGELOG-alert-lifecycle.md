@@ -6,7 +6,6 @@
 `src/storage/telemetryStore.ts`、`src/renderer/hooks/useDish.tsx`
 **状态**: 单测 + 实机验收通过（见 §5）
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
 > 校准页部分见 [`CHANGELOG-calibration-ui.md`](./CHANGELOG-calibration-ui.md)。
 
 ---

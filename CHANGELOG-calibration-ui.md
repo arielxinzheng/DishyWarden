@@ -5,8 +5,6 @@
 **范围**: `src/renderer/components/Alignment/`（新增 9 个文件）、`src/renderer/pages/AlignmentPage.tsx`、`src/renderer/hooks/useDish.tsx`
 **状态**: 浏览器已验证（Electron 真机待验）
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)。
-
 ---
 
 ## 1. 需求 → 实现对照

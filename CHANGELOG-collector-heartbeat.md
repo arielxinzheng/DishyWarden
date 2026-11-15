@@ -275,6 +275,5 @@ expr: (time() - starlink_collector_last_success_timestamp) > 180
 
 ## 参考
 
-- 告警引擎设计: `DEVELOPMENT-STATUS.md`
 - Prometheus 集成: `README.md` - Prometheus 章节
 - 告警抽屉 UI: `CHANGELOG-alert-drawer.md`

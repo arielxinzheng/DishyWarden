@@ -5,8 +5,6 @@
 **范围**: `src/storage/` `src/collector/` `src/main/` `src/renderer/`
 **状态**: 数据链路已通；**设备侧 gRPC 接口尚未实现**（见 §4）
 
-> 相关总览见 [`DEVELOPMENT-STATUS.md`](./DEVELOPMENT-STATUS.md)
-
 ---
 
 ## 1. 问题背景

@@ -39,13 +39,13 @@ dish 地址指向必失败的 127.0.0.1:59999)。渲染层代码路径 100% 真�
 ### 步骤
 
 ```bash
-cd "/Users/lixinzheng/Documents/work/星链/SLMonitor"
+cd "<REPO_ROOT>"
 
 # 1. 造手工版脚本(把窗口显示出来, 跑完不退出)
 cat > /tmp/probe/manual_day0.cjs <<'EOF'
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const PROJ = '/Users/lixinzheng/Documents/work/星链/SLMonitor';
+const PROJ = '<REPO_ROOT>';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 app.setPath('userData', '/tmp/slm-day0-manual');
