@@ -14,7 +14,8 @@
     "reset_success": "配置已重置,请重启应用生效",
     "reset_failed": "重置失败: {{error}}",
     "success": "配置已保存",
-    "failed": "保存失败: {{error}}"
+    "failed": "保存失败: {{error}}",
+    "footer_hint": "修改后请点右侧「保存」；重置会把所有配置恢复默认值并需要重启应用"
   },
   "collector": {
     "title": "数据采集",
@@ -186,6 +187,7 @@
     "saved": "已保存",
     "save_failed": "保存失败: {{error}}",
     "hint_dev_mode": "开发模式下不检查更新（打包后才会生效）",
-    "hint_updater_unavailable": "更新组件不可用，请检查安装包是否完整"
+    "hint_updater_unavailable": "更新组件不可用，请检查安装包是否完整",
+    "save_hint": "随页面底部的「保存」按钮一起生效"
   }
 }

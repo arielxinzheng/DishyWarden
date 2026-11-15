@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -148,6 +148,29 @@ function resolveAppIcon(): string | undefined {
   }
   console.warn('[Main] 未找到应用图标 build/icon.png，使用 Electron 默认图标');
   return undefined;
+}
+
+/**
+ * 放开渲染层的地理位置权限。
+ *
+ * Electron 默认**拒绝**所有权限请求（含 geolocation）⇒
+ * 设置页的「获取当前位置」必然拿到 PERMISSION_DENIED。
+ *
+ * 只放 geolocation（用户主动点按钮才会用到），其余权限一律拒绝。
+ * Windows 上还需要系统「定位服务」开启，否则拿不到坐标 —— 那属于系统层问题，
+ * 界面会给出对应提示。
+ */
+function grantGeolocationPermission(): void {
+  const allow = (permission: string): boolean => permission === 'geolocation';
+  try {
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(allow(permission));
+    });
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => allow(permission));
+    console.log('[Main] geolocation permission granted (geolocation only)');
+  } catch (err) {
+    console.warn('[Main] 设置 geolocation 权限失败:', err);
+  }
 }
 
 function createWindow() {
@@ -1004,6 +1027,7 @@ app.whenReady().then(async () => {
   // 慢启动（Prometheus 最长 30s 等 ready）或静默异常都会让窗口迟到甚至永不出现 ——
   // 用户看到的就是"双击没反应"。窗口先起之后再启后台，UI 有空态可显。
   try {
+    grantGeolocationPermission();
     createWindow();
   } catch (err) {
     console.error('[Main] createWindow 失败:', err);

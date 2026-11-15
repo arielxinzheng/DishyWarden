@@ -14,7 +14,8 @@
     "reset_success": "설정이 초기화되었습니다. 적용하려면 앱을 재시작하십시오.",
     "reset_failed": "초기화 실패: {{error}}",
     "success": "설정이 저장되었습니다",
-    "failed": "저장 실패: {{error}}"
+    "failed": "저장 실패: {{error}}",
+    "footer_hint": "수정한 뒤 오른쪽 \"저장\"을 클릭하세요. 초기화는 기본값을 복원하며 재시작이 필요합니다."
   },
   "collector": {
     "title": "데이터 수집",
@@ -186,6 +187,7 @@
     "saved": "저장했습니다",
     "save_failed": "저장 실패: {{error}}",
     "hint_dev_mode": "개발 모드에서는 업데이트를 확인하지 않습니다(패키징 빌드에서만 동작)",
-    "hint_updater_unavailable": "업데이트 구성 요소를 사용할 수 없습니다. 설치가 완전한지 확인하세요"
+    "hint_updater_unavailable": "업데이트 구성 요소를 사용할 수 없습니다. 설치가 완전한지 확인하세요",
+    "save_hint": "페이지 하단의 \"저장\" 버튼과 함께 저장됩니다"
   }
 }

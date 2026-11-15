@@ -14,7 +14,8 @@
     "reset_success": "Settings reset. Restart the app for the changes to take effect.",
     "reset_failed": "Reset failed: {{error}}",
     "success": "Settings saved",
-    "failed": "Save failed: {{error}}"
+    "failed": "Save failed: {{error}}",
+    "footer_hint": "Click Save on the right after editing. Reset restores defaults and requires a restart."
   },
   "collector": {
     "title": "Data Collection",
@@ -186,6 +187,7 @@
     "saved": "Saved",
     "save_failed": "Save failed: {{error}}",
     "hint_dev_mode": "Update checks are disabled in dev mode (they only run in packaged builds)",
-    "hint_updater_unavailable": "The updater component is unavailable; check that the install is complete"
+    "hint_updater_unavailable": "The updater component is unavailable; check that the install is complete",
+    "save_hint": "Saved together with the Save button at the bottom of the page"
   }
 }

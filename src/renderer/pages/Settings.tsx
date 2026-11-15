@@ -12,7 +12,10 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Save, RotateCcw, CheckCircle, AlertCircle, ExternalLink, Loader2, MapPin } from 'lucide-react';
 import type { AppConfig } from '../../config/manager';
 import { ProbeNodesCard } from '../components/Settings/ProbeNodesCard';
-import { UpdateFeedbackCard } from '../components/Settings/UpdateFeedbackCard';
+import {
+  UpdateFeedbackCard,
+  type UpdateFeedbackCardHandle,
+} from '../components/Settings/UpdateFeedbackCard';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 // 共享常量：默认模板 + 变量清单（纯 TS，渲染层可安全引用）
 import { DEFAULT_WEBHOOK_TEMPLATE } from '../../alerting/webhookTemplate';
@@ -36,6 +39,9 @@ export default function Settings() {
   const [geoLoading, setGeoLoading] = useState(false);
   
   // 位置状态
+  /** 升级与反馈卡片把自己的保存能力交出来，由页面底部的总保存按钮统一提交 */
+  const feedbackRef = useRef<UpdateFeedbackCardHandle>(null);
+
   const [latitude, setLatitude] = useState<string>('');
   const [longitude, setLongitude] = useState<string>('');
 
@@ -84,7 +90,7 @@ export default function Settings() {
           dishAddress: '192.168.100.1',
           dishPort: 9200,
           dishWebPort: 9201,
-          routerAddress: '192.168.100.1',
+          routerAddress: '192.168.1.1',
           interval: 30000,
           bufferSize: 2880,
         },
@@ -160,6 +166,9 @@ export default function Settings() {
 
       // 保存探针配置(节点列表 + 路由跟踪目标)
       await window.electronAPI.updateProbeConfig(config.probe);
+
+      // 保存「升级与匿名反馈」段（以前这块自带一个保存按钮，和这里重复）
+      await feedbackRef.current?.save();
 
       setMessage({ type: 'success', text: t('settings:save.success') });
     } catch (error) {
@@ -337,19 +346,9 @@ export default function Settings() {
           <h1 className="text-3xl font-bold">{t('layout:nav_settings')}</h1>
           <p className="text-muted-foreground mt-1">{t('settings:subtitle')}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleReset} disabled={saving}>
-            <RotateCcw className="w-4 h-4 mr-2" />
-            {t('settings:save.reset')}
-          </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            <Save className="w-4 h-4 mr-2" />
-            {saving ? t('settings:save.saving') : t('settings:save.button')}
-          </Button>
-
-          {/* 全局语言切换（需求指定的「右上角」位置） */}
-          <LanguageSwitcher variant="icon" />
-        </div>
+        {/* 全局语言切换（需求指定的「右上角」位置）。
+            重置/保存按钮移到页面底部，更醒目，也不和滚动位置脱节。 */}
+        <LanguageSwitcher variant="icon" />
       </div>
 
       {message && (
@@ -660,7 +659,7 @@ export default function Settings() {
       )}
 
       {/* 升级与匿名反馈(需求文档 2.8 自动检查升级更新) */}
-      {config && <UpdateFeedbackCard cloud={config.cloud} />}
+      {config && <UpdateFeedbackCard ref={feedbackRef} cloud={config.cloud} />}
 
       {/* Telegram 通知 */}
       <Card>
@@ -1137,6 +1136,23 @@ export default function Settings() {
           )}
         </CardContent>
       </Card>
+
+      {/* 底部固定操作条：重置 / 保存放在这里，更醒目 */}
+      <div className="sticky bottom-0 z-20 -mx-8 px-8 py-4 bg-background/95 backdrop-blur border-t border-border">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-xs text-muted-foreground">{t('settings:save.footer_hint')}</p>
+          <div className="flex gap-3">
+            <Button variant="outline" size="lg" onClick={handleReset} disabled={saving}>
+              <RotateCcw className="w-4 h-4 mr-2" />
+              {t('settings:save.reset')}
+            </Button>
+            <Button size="lg" onClick={handleSave} disabled={saving}>
+              <Save className="w-4 h-4 mr-2" />
+              {saving ? t('settings:save.saving') : t('settings:save.button')}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

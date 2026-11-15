@@ -871,18 +871,16 @@ export class AlertManager extends EventEmitter {
         summary: () => '采集器连续多次采样失败',
         description: () => '无法从 Starlink 设备获取遥测数据，可能是网络或 gRPC 服务异常',
         evidence: () => {
-          // 参考时间点与 checkCollectorHeartbeat() 的超时判定保持一致:
-          // 从未成功采样过时回退到"心跳检查启动时间"。
-          //
-          // ⚠️ 不能只在 lastCollectorSuccess 非空时才给 minutes_since_success ——
-          //    "从未成功过"恰恰是最需要诊断信息的情况(刚启动就断了),
-          //    那时告警详情里却显示 null, 什么线索都没有。
-          const referenceTime = this.lastCollectorSuccess || this.heartbeatStartTime;
+          // 参考时间点与 checkCollectorHeartbeat() 的超时判定保持一致。
+          // 从未成功采样过时 lastCollectorSuccess 为空 ⇒ 这里也给 null，
+          // 避免把"还没连上过"显示成一段离线时长。
+          const referenceTime = this.lastCollectorSuccess;
           return {
-            last_success_time: this.lastCollectorSuccess?.toISOString() || null,
-            minutes_since_success: Math.floor(
-              (Date.now() - referenceTime.getTime()) / 60000
-            ),
+            last_success_time: referenceTime?.toISOString() || null,
+            // 从未成功采集过时为 null —— 不把"还没连上过"算成一段离线时长
+            minutes_since_success: referenceTime
+              ? Math.floor((Date.now() - referenceTime.getTime()) / 60000)
+              : null,
             never_succeeded: this.lastCollectorSuccess === null,
             collector_started_at: this.heartbeatStartTime.toISOString(),
           };
@@ -1298,8 +1296,27 @@ export class AlertManager extends EventEmitter {
     const now = new Date();
     const alertKey = 'collector_heartbeat_lost:starlink';
 
-    // 计算距离上次成功的时间，如果从未成功则计算距离启动的时间
-    const referenceTime = this.lastCollectorSuccess || this.heartbeatStartTime;
+    // ⚠️ **从未成功采集过** ⇒ 不存在"失联"这回事（没有健康基线可比）。
+    // 之前这里回退到 heartbeatStartTime，于是"刚装上还没连上设备"会被算成
+    // "采集器离线 34 小时" —— 用户看到的 34h56m 就是这么来的（虽然是真实故障，
+    // 但把"还没连上过"说成"离线 N 小时"是误导）。
+    // 引导页已经负责提示"未找到设备"，这里不再制造误导性的时长。
+    if (!this.lastCollectorSuccess) {
+      // 若历史遗留一条 ongoing 的失联告警（来自旧版本/旧安装），直接解除它
+      const stale = this.db.getAlertByKey(alertKey);
+      if (stale && stale.status === 'ongoing') {
+        this.db.upsertAlert({
+          ...stale,
+          status: 'resolved',
+          last_seen: now.toISOString(),
+        });
+        console.log('[AlertManager] 从未成功采集过 ⇒ 解除历史遗留的失联告警（不计离线时长）');
+      }
+      return;
+    }
+
+    // 计算距离上次成功采集的时间
+    const referenceTime = this.lastCollectorSuccess;
     const minutesSinceSuccess = (now.getTime() - referenceTime.getTime()) / 60000;
     const isTimeout = minutesSinceSuccess >= timeoutMinutes;
 

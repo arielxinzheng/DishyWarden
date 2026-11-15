@@ -15,19 +15,31 @@
  *   点「立即下载」才开始下载，下载完再点「重启并安装」。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Alert, AlertDescription } from '../ui/alert';
-import { Download, RefreshCw, Save, ShieldCheck, Upload } from 'lucide-react';
+import { Download, RefreshCw, ShieldCheck, Upload } from 'lucide-react';
 import type { UpdateState, UpdateStatus } from '../../../core/updater';
 import type { CloudConfig } from '../../../config/manager';
 
 interface UpdateFeedbackCardProps {
-  /** 云端配置（只读入参：卡片自己保存，不走设置页的总保存按钮） */
+  /** 云端配置（只读入参：由设置页的总保存按钮统一提交） */
   cloud: CloudConfig;
+}
+
+/**
+ * 暴露给父组件的保存入口。
+ *
+ * 之前这张卡自带一个「保存」按钮，和设置页右上角的「保存」并排，
+ * 用户分不清各自保存什么（实际是分段保存：总保存不含 cloud 段）。
+ * ⇒ 现在统一：**卡片不再有保存按钮**，由设置页的总保存按钮一并提交，
+ * 父组件通过 ref 调 `save()`。
+ */
+export interface UpdateFeedbackCardHandle {
+  save: () => Promise<void>;
 }
 
 /** 状态 → 语义色 */
@@ -46,7 +58,8 @@ function statusVariant(status: UpdateStatus): 'default' | 'secondary' | 'destruc
   }
 }
 
-export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
+export const UpdateFeedbackCard = forwardRef<UpdateFeedbackCardHandle, UpdateFeedbackCardProps>(
+  function UpdateFeedbackCard({ cloud }, ref) {
   const { t } = useTranslation();
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [checking, setChecking] = useState(false);
@@ -128,6 +141,9 @@ export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
       setSaving(false);
     }
   }, [feedbackEnabled, t]);
+
+  // 把保存能力交给父组件（设置页的总保存按钮）
+  useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
 
   const status = updateState?.status ?? 'idle';
   const statusKey: Record<UpdateStatus, string> = {
@@ -231,16 +247,16 @@ export function UpdateFeedbackCard({ cloud }: UpdateFeedbackCardProps) {
           </div>
         </div>
 
-        {/* 保存 */}
+        {/* 保存：并入设置页底部的总保存按钮，这里只给提示 */}
         <div className="flex items-center gap-3">
-          <Button onClick={handleSave} disabled={saving}>
-            <Save />
-            {saving ? t('settings:save.saving') : t('settings:cloud.save')}
-          </Button>
+          <span className="text-xs text-muted-foreground">
+            {saving ? t('settings:save.saving') : t('settings:cloud.save_hint')}
+          </span>
           {saved && <span className="text-xs text-green-600">{t('settings:cloud.saved')}</span>}
           {saveError && <span className="text-xs text-destructive">{saveError}</span>}
         </div>
       </CardContent>
     </Card>
   );
-}
+  },
+);

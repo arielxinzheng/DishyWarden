@@ -14,7 +14,8 @@
     "reset_success": "Đã đặt lại cấu hình. Vui lòng khởi động lại ứng dụng để áp dụng.",
     "reset_failed": "Đặt lại thất bại: {{error}}",
     "success": "Đã lưu cấu hình",
-    "failed": "Lưu thất bại: {{error}}"
+    "failed": "Lưu thất bại: {{error}}",
+    "footer_hint": "Sau khi chỉnh sửa, nhấn \"Lưu\" bên phải. Đặt lại sẽ khôi phục mặc định và cần khởi động lại."
   },
   "collector": {
     "title": "Thu thập dữ liệu",
@@ -186,6 +187,7 @@
     "saved": "Đã lưu",
     "save_failed": "Lưu thất bại: {{error}}",
     "hint_dev_mode": "Không kiểm tra cập nhật ở chế độ phát triển (chỉ chạy khi đóng gói)",
-    "hint_updater_unavailable": "Thành phần cập nhật không khả dụng; hãy kiểm tra bản cài đặt có đầy đủ không"
+    "hint_updater_unavailable": "Thành phần cập nhật không khả dụng; hãy kiểm tra bản cài đặt có đầy đủ không",
+    "save_hint": "Được lưu cùng với nút \"Lưu\" ở cuối trang"
   }
 }
