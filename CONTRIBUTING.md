@@ -278,6 +278,10 @@ npm run docs:check      # 校验生成产物与源文件一致（CI 会跑）
 托管方是 **GitHub Releases**。发版流程：改 `package.json` 的 `version` →
 打 `v<version>` tag → CI 自动构建并发布 → 自检清单可下载。
 
+**不需要配置任何 PAT** —— workflow 用 GitHub 内置的 `GITHUB_TOKEN`，
+权限由 workflow 里的 `permissions: contents: write` 授予，
+作用域仅限本仓库、仅该次 job。
+
 详见 [`docs/CLOUD-UPGRADE.md`](./docs/CLOUD-UPGRADE.md)。
 
 ---

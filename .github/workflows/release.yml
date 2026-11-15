@@ -61,8 +61,12 @@ jobs:
       - name: Build and publish installer
         run: npx electron-builder --win nsis --x64 --publish always
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          # 发到 Releases 用的标签; electron-builder 从 git tag 取
+          # 用 GitHub 内置的 GITHUB_TOKEN —— 免去配置 PAT。
+          # electron-publish 认 GITHUB_TOKEN / GH_TOKEN / GITHUB_RELEASE_TOKEN
+          # 三个名字（node_modules/electron-publish/out/gitHubPublisher.js）。
+          # 权限来自上面的 permissions: contents: write, 作用域仅限本仓库、
+          # 仅本次 job, 到期自动失效 —— 比 PAT 安全。
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_TAG: ${{ github.ref_name }}
 
       - name: 自检 —— 清单与安装器可下载
@@ -131,7 +135,7 @@ jobs:
       - name: Build and publish dmg
         run: npx electron-builder --mac dmg --publish always
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 自检 —— 两个架构的 dmg 可下载
         run: |
