@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # We only typecheck / test / bundle here — packaging happens in release.yml.
+          # Skipping the binary download saves ~100 MB and a couple of minutes.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Typecheck (renderer + shared)
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Typecheck (electron main process)
+        run: npx tsc --noEmit -p tsconfig.electron.json
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Build renderer
+        run: npx vite build
+
+      - name: Build main process
+        run: npm run electron:build
+
+      - name: Verify multi-language docs are in sync
+        # README.md / PRIVACY.md and their translations are generated from
+        # docs/readme/*.md and docs/privacy/*.md. If a source file was edited
+        # without re-running the generator, this fails.
+        run: node scripts/gen-readme.mjs --check
+
+  e2e:
+    name: E2E (advisory)
+    runs-on: ubuntu-latest
+    # Non-blocking for now: the suite talks to a mocked renderer and is still
+    # being stabilised. Promote to blocking once it is green on every push.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite
+        run: npm run test:e2e
+
+  hygiene:
+    name: Repository hygiene (advisory)
+    runs-on: ubuntu-latest
+    # Non-blocking while the existing absolute paths are being scrubbed.
+    # Once the repository is clean, drop `continue-on-error` to make it a gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No machine-local absolute paths
+        run: |
+          set -euo pipefail
+          if git grep -nE '/Users/[A-Za-z0-9._-]+' -- . ; then
+            echo '::error::Found machine-local absolute paths. Use relative paths or a <USERNAME> placeholder.'
+            exit 1
+          fi
+          echo 'No machine-local paths found.'
+
+      - name: No obvious credentials committed
+        run: |
+          set -euo pipefail
+          if git grep -nEi '(api[_-]?key|bot[_-]?token|client[_-]?secret)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{12,}' -- . \
+             ':!package-lock.json' ':!docs/**' ':!*.md' ; then
+            echo '::error::Possible credential committed. Remove it and rotate it.'
+            exit 1
+          fi
+          echo 'No obvious credentials found.'
