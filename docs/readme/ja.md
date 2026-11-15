@@ -89,10 +89,7 @@ DishyWarden はターミナルの**ローカル gRPC API** を使います:
 
 ターミナルは LAN にこの API を公開しないため、通常は同じマシンでターミナルへ
 転送する**ローカルブリッジ**（`dishylink` のようなツール）を動かし、
-**設定 → ターミナル接続** でアドレスとポートを指定します。フィールド単位の比較は
-[`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md)、
-応答しない場合は [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md)
-を参照してください。
+**設定 → ターミナル接続** でアドレスとポートを指定します。
 
 ---
 
@@ -201,10 +198,6 @@ src/
 
 | ドキュメント | 内容 |
 |---|---|
-| [`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md) | `dishylink` とのフィールド単位の比較（ポート名、応答形状、既知の障害） |
-| [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md) | ターミナルが応答しなくなった理由と切り分け方 |
-| [`docs/VERIFY-DISH.md`](docs/VERIFY-DISH.md) | 実機の Windows での遠隔検証手順 |
-| [`docs/WINDOWS-BUILD.md`](docs/WINDOWS-BUILD.md) | Windows でのパッケージング |
 | [`docs/CLOUD-UPGRADE.md`](docs/CLOUD-UPGRADE.md) | 更新マニフェストの契約とリリース方法 |
 
 ## 🛠️ 貢献する

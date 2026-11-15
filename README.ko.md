@@ -104,10 +104,7 @@ DishyWarden는 단말의 **로컬 gRPC API**를 사용합니다:
 
 단말은 이 API를 LAN에 노출하지 않으므로 보통은 같은 컴퓨터에서 단말로
 전달하는 **로컬 브리지**(`dishylink` 같은 도구)를 띄우고,
-**설정 → 단말 연결** 에 주소와 포트를 입력합니다. 필드 단위 비교는
-[`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md),
-응답이 없을 때는 [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md)
-를 참고하세요.
+**설정 → 단말 연결** 에 주소와 포트를 입력합니다.
 
 ---
 
@@ -217,10 +214,6 @@ src/
 
 | 문서 | 내용 |
 |---|---|
-| [`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md) | `dishylink`와의 필드 단위 비교 — 포트 이름, 응답 구조, 알려진 장애 |
-| [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md) | 단말이 응답하지 않는 이유와 좁혀 가는 방법 |
-| [`docs/VERIFY-DISH.md`](docs/VERIFY-DISH.md) | 실제 Windows 머신에서의 원격 검증 절차 |
-| [`docs/WINDOWS-BUILD.md`](docs/WINDOWS-BUILD.md) | Windows에서 패키징하기 |
 | [`docs/CLOUD-UPGRADE.md`](docs/CLOUD-UPGRADE.md) | 업데이트 매니페스트 계약과 릴리스 방법 |
 
 ## 🛠️ 기여하기

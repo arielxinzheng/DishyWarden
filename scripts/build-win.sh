@@ -25,7 +25,7 @@ export ELECTRON_CACHE="$PWD/release/.cache/electron"
 export ELECTRON_BUILDER_CACHE="$PWD/release/.cache/builder"
 
 # 两种产物：
-#   nsis —— 安装器（部分 Win10 环境里 NSIS 的 System 插件会崩，见 docs/WINDOWS-BUILD.md）
+#   nsis —— 安装器（部分 Win10 环境里 NSIS 的 System 插件会崩）
 #   zip  —— 免安装版，解压即用，完全绕开 NSIS
 npx electron-builder --win nsis zip --x64 --publish never \
   --config.win.signAndEditExecutable=false

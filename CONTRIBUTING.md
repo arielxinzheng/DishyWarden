@@ -291,11 +291,8 @@ npm run docs:check      # 校验生成产物与源文件一致（CI 会跑）
 | 文档 | 内容 |
 |---|---|
 | [`docs/CLOUD-UPGRADE.md`](./docs/CLOUD-UPGRADE.md) | 发布与升级托管契约 |
-| [`docs/WINDOWS-BUILD.md`](./docs/WINDOWS-BUILD.md) | Windows 打包细节 |
-| [`TESTING.md`](./TESTING.md) | 测试说明 |
-| [`TESTING-SCENARIO-A.md`](./TESTING-SCENARIO-A.md) | 首次安装采集失败的引导页测试 |
-| [`LAYOUT-CHANGE.md`](./LAYOUT-CHANGE.md) | 布局调整说明 |
-| `CHANGELOG-*.md` | 19 份变更记录（根 `CHANGELOG.md` 有汇总） |
+| [`docs/screenshots/README.md`](./docs/screenshots/README.md) | 截图占位说明 |
+| [`CHANGELOG.md`](./CHANGELOG.md) | 版本变更记录（1.0.0 起） |
 
 ---
 

@@ -87,10 +87,7 @@ DishyWarden talks to the terminal's **local gRPC API**:
 The dish does not expose this API to the LAN, so you normally point the app at a
 **local bridge** that proxies to the terminal (for example a `dishylink`-style
 tool running on the same machine). Configure the address and ports in
-**Settings → Terminal connection**. See
-[`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md) for the field-level comparison
-against `dishylink`, and [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md)
-if the terminal refuses to answer.
+**Settings → Terminal connection**.
 
 ---
 
@@ -199,10 +196,6 @@ Layer rules worth knowing if you contribute:
 
 | Document | What it covers |
 |---|---|
-| [`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md) | Field-level comparison against `dishylink` — port names, response shapes, known outages |
-| [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md) | Why a terminal stops answering, and how to narrow it down |
-| [`docs/VERIFY-DISH.md`](docs/VERIFY-DISH.md) | Remote verification workflow on a real Windows machine |
-| [`docs/WINDOWS-BUILD.md`](docs/WINDOWS-BUILD.md) | Packaging the app on Windows |
 | [`docs/CLOUD-UPGRADE.md`](docs/CLOUD-UPGRADE.md) | The update-manifest contract and how a release is published |
 
 ## 🛠️ Contributing

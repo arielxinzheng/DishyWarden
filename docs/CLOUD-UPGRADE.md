@@ -2,7 +2,6 @@
 
 > **谁该读**：负责发版的人（本仓库）+ 云端服务实现者（`CloudServer/`）。
 > **客户端代码**：`src/core/updater.ts`、`src/core/cloudClient.ts`、`src/config/manager.ts`。
-> **打包细节**：[`WINDOWS-BUILD.md`](./WINDOWS-BUILD.md)。
 > **云端既定设计**：`CloudServer/DESIGN.md` §3「路线 A：electron-updater + GitHub Releases 直连」。
 
 ---
@@ -332,7 +331,7 @@ zip 的定位：**给无管理员权限、或安装器在该机器崩掉的用�
 | `download_failed` + 服务端 404 | 清单先换、安装器没传完 | 按「先产物后清单」重发 |
 | `download_failed` + 校验失败 | `sha512`/`size` 被手工改过 | 用 `build:win` 生成的清单重传 |
 | 安装步骤弹 UAC | per-machine 安装器 | 预期行为；无权限机器用 zip |
-| 安装器崩溃（`System.dll` / c0000005） | NSIS per-user 模式的历史坑 | 已改 perMachine 修复（`WINDOWS-BUILD.md`）；必要时给用户 zip |
+| 安装器崩溃（`System.dll` / c0000005） | NSIS per-user 模式的历史坑 | 已改 perMachine 修复；必要时给用户 zip |
 | 升级后配置/历史丢失 | userData 目录变了 | 恢复 `<appData>/DishyWarden`；已内置从 `SLMonitor`/`slmonitor` 的迁移 |
 
 ---

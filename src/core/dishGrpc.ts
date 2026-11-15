@@ -492,7 +492,7 @@ export class DishGrpcClient {
    * 为什么需要：不同固件给同一语义起的分支名可能不同（dishylink 的 protoset 与
    * DishyMock 就不同）。硬编码只能覆盖已知的几种，靠描述符推导才通用。
    * 注：2026-11-15 真机实测 `get_history`(#1007) 可用、`dish_get_history`(#2006)
-   * 回 UNIMPLEMENTED（docs/DISH-CONNECTIVITY-ISSUES.md §4）。
+   * 回 UNIMPLEMENTED。
    *
    * 做法：从 Request 消息的字段里挑出名字含该语义关键字的（如 history），
    * 插到首选列表后面作为兜底。

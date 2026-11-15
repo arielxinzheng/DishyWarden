@@ -92,10 +92,6 @@ DishyWarden nói chuyện với **API gRPC cục bộ** của đầu cuối:
 Đầu cuối không công bố API này ra mạng nội bộ, nên thường bạn cần chạy một
 **cầu nối cục bộ** trên cùng máy để chuyển tiếp tới đầu cuối (ví dụ công cụ kiểu
 `dishylink`), rồi điền địa chỉ và cổng trong **Cài đặt → Kết nối đầu cuối**.
-Xem so sánh theo từng trường trong
-[`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md), và
-[`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md) nếu đầu cuối
-không phản hồi.
 
 ---
 
@@ -207,10 +203,6 @@ Vài quy tắc phân lớp đáng nhớ khi đóng góp:
 
 | Tài liệu | Nội dung |
 |---|---|
-| [`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md) | So sánh theo từng trường với `dishylink` — tên cổng, cấu trúc phản hồi, các sự cố đã biết |
-| [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md) | Vì sao đầu cuối ngừng phản hồi, và cách khoanh vùng |
-| [`docs/VERIFY-DISH.md`](docs/VERIFY-DISH.md) | Quy trình kiểm chứng từ xa trên máy Windows thật |
-| [`docs/WINDOWS-BUILD.md`](docs/WINDOWS-BUILD.md) | Đóng gói ứng dụng trên Windows |
 | [`docs/CLOUD-UPGRADE.md`](docs/CLOUD-UPGRADE.md) | Hợp đồng của manifest cập nhật và cách phát hành bản mới |
 
 ## 🛠️ Đóng góp

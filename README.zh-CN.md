@@ -96,8 +96,6 @@ DishyWarden 走终端的**本地 gRPC 接口**：
 
 终端不会把这个接口暴露到局域网，所以通常需要在本机跑一个**本地桥接**
 （例如 `dishylink` 这类工具）转发到终端，再在 **设置 → 终端连接** 里填地址和端口。
-字段级对比见 [`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md)；
-终端不回应时见 [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md)。
 
 ---
 
@@ -204,10 +202,6 @@ src/
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/DISH-API-GAPS.md`](docs/DISH-API-GAPS.md) | 与 `dishylink` 的字段级对比 —— 端口名、响应结构、已知故障 |
-| [`docs/DISH-CONNECTIVITY-ISSUES.md`](docs/DISH-CONNECTIVITY-ISSUES.md) | 终端为什么不回应了，怎么定位 |
-| [`docs/VERIFY-DISH.md`](docs/VERIFY-DISH.md) | 在真实 Windows 机器上的远程验证流程 |
-| [`docs/WINDOWS-BUILD.md`](docs/WINDOWS-BUILD.md) | 在 Windows 上打包 |
 | [`docs/CLOUD-UPGRADE.md`](docs/CLOUD-UPGRADE.md) | 升级清单契约与发版流程 |
 
 ## 🛠️ 参与贡献
