@@ -52,6 +52,13 @@ export async function grpcWebUnaryNode(
       fn();
     };
 
+    // ⭐ 持有响应流引用 —— 超时/出错时必须**连响应流一起销毁**。
+    // 只 destroy(req) 的话：对端可能已经回了 headers、body 还在传输，
+    // res 会变成"半开"的僵尸连接（agent 里占着 socket 不释放）。
+    // 采集每 30s 一轮，几轮下来 socket 堆积 ⇒ 连接耗尽 ⇒
+    // 表现为「数据已 N 分钟未更新」且日志里看不出原因。
+    let resRef: http.IncomingMessage | null = null;
+
     const req = http.request(
       {
         host: target.hostname,
@@ -72,6 +79,8 @@ export async function grpcWebUnaryNode(
         },
       },
       (res) => {
+        resRef = res;
+        watchResponseError(res);
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
         res.on('end', () => {
@@ -131,11 +140,22 @@ export async function grpcWebUnaryNode(
     );
 
     req.setTimeout(timeoutMs, () => {
+      // 连响应流一起销毁 —— 否则会留下占着 socket 的半开连接
+      resRef?.destroy();
       req.destroy(new Error(`grpc-web 请求超时 (${timeoutMs}ms)`));
     });
     req.on('error', (err) => {
+      resRef?.destroy();
       finish(() => reject(err));
     });
+    // 响应流本身出错（对方中途断开）也要让调用方知道，
+    // 否则 Promise 永远挂着 ⇒ 该轮采集一直占着 collecting 标记。
+    // （挂在 res 回调里，类型才收窄得住。）
+    const watchResponseError = (res: http.IncomingMessage) => {
+      res.on('error', (err: Error) => {
+        finish(() => reject(err));
+      });
+    };
 
     req.write(Buffer.from(frame));
     req.end();

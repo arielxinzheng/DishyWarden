@@ -781,6 +781,17 @@ export class DishGrpcClient {
     return this.descriptorBytes;
   }
 
+  /**
+   * 原生 9200 是否**只**提供 reflection（业务分支一律 UNIMPLEMENTED）。
+   *
+   * 真机实测结论：9200 上 `Handle` 对所有业务分支都回 UNIMPLEMENTED(12)，
+   * 业务实际只走 9201 grpc-web（dishylink 也只用 9201）。
+   *
+   * 首次拿到 code 12 时置位 ⇒ 之后不再拿 9200 当兜底试（省一次超时）。
+   * 保守：只有真正观测到 12 才置位，观测不到就照旧兜底。
+   */
+  private nativeIsUnimplementedOnly = false;
+
   /** 走原生 gRPC(9200) 调用 Handle */
   private async callNative(
     request: Record<string, unknown>,
@@ -792,8 +803,11 @@ export class DishGrpcClient {
         request,
         { deadline: Date.now() + timeoutMs },
         (err: grpc.ServiceError | null, res?: Record<string, unknown>) => {
-          if (err) reject(new Error(`gRPC 调用失败: ${err.message} (code ${err.code})`));
-          else resolve(res ?? {});
+          if (err) {
+            // code 12 = UNIMPLEMENTED ⇒ 这台设备的 9200 不实现该分支
+            if (err.code === 12) this.nativeIsUnimplementedOnly = true;
+            reject(new Error(`gRPC 调用失败: ${err.message} (code ${err.code})`));
+          } else resolve(res ?? {});
         }
       );
     });
@@ -813,6 +827,25 @@ export class DishGrpcClient {
       return await run(webFirst);
     } catch (err) {
       const original = err instanceof Error ? err : new Error(String(err));
+
+      // ⚠️ **UNIMPLEMENTED(12) 的兜底不用试**。
+      // 真机实测：这台设备的**原生 gRPC(9200) 对所有分支都返回 UNIMPLEMENTED** ——
+      // 因为 9200 只提供 reflection，实际业务分支只走 9201 grpc-web。
+      // 所以在 grpc-web 为主传输时，兜底去问 9200 必然得到 12，
+      // 白等一个超时（8~10s）还必然失败 ⇒ 采集周期被拖垮，
+      // 表现就是"数据已 N 分钟未更新"。
+      //
+      // ⇒ 主传输失败且**兜底传输对这个请求注定 UNIMPLEMENTED** 时，
+      //   直接抛主传输的错误，把秒级浪费省下来。
+      const secondaryWouldBeUnimplemented =
+        !webFirst && this.nativeIsUnimplementedOnly;
+
+      if (secondaryWouldBeUnimplemented) {
+        throw new Error(
+          `${primary}: ${original.message}（原生 9200 对该分支固定返回 UNIMPLEMENTED，已跳过兜底）`,
+        );
+      }
+
       try {
         const res = await run(!webFirst);
         this.useWebTransport = !webFirst;

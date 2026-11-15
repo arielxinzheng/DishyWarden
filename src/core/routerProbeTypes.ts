@@ -46,4 +46,18 @@ export interface RouterProbeResult {
   trusted?: boolean;
   /** 自检说明（不可信时给用户看原因） */
   trustNote?: string;
+  /**
+   * 本次结论的**证据来源**。
+   *
+   * 为什么需要它：`trusted: false` 只说明「ICMP 不可信」，但**不可信 ≠ 没有结论**。
+   * 路由器探针在 ICMP 不可信时会改用 **TCP 握手**判定可达性 ——
+   * TCP 是真实协议交互，VPN/隧道替不了 ⇒ 那份结论是可信的。
+   *
+   * 渲染层据此区分两种"不可信"：
+   *   - `icmp`  ⇒ 只有一份被篡改的 ICMP 结果 ⇒ **没有结论**，界面必须灰
+   *   - `tcp`   ⇒ 已经用 TCP 独立判定过 ⇒ **有结论**，界面照常显示
+   *
+   * 缺省（undefined）按 `icmp` 处理 —— 保守优先：没有证据就不给结论。
+   */
+  evidence?: 'icmp' | 'tcp';
 }

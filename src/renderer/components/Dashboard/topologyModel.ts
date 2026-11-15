@@ -182,8 +182,16 @@ function judgeLan(probe: RouterProbeResult | null): { tone: TopologyTone; detail
     return { tone: 'unknown', detail: { key: 'topology.lan_no_probe' } };
   }
 
-  // 探测不可信时不能报警也不能报平安 —— VPN/隧道会把任何 ICMP 都回掉
-  if (probe.trusted === false) {
+  // ICMP 不可信时不能报警也不能报平安 —— VPN/隧道会把任何 ICMP 都回掉。
+  //
+  // ⚠️ 但**只有"只有一份被篡改的 ICMP 结果"时才灰**。
+  // routerProbe 在 ICMP 不可信时会改用 **TCP 握手**判定可达性
+  // （TCP 是真实协议交互，VPN 替不了）⇒ 那份结论可信，界面照常显示。
+  //
+  // evidence 字段就是这个区分：
+  //   'icmp'（或缺省）⇒ 只有被篡改的 ICMP ⇒ 没有结论 ⇒ 灰
+  //   'tcp'           ⇒ 已经用 TCP 独立判定过 ⇒ 有结论 ⇒ 照常显示
+  if (probe.trusted === false && probe.evidence !== 'tcp') {
     return { tone: 'unknown', detail: { key: 'topology.lan_untrusted' } };
   }
 

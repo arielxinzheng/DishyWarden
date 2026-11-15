@@ -293,14 +293,17 @@ describe('traceroute.ts - 命令构造', () => {
     expect(cmd).toBe('traceroute -m 10 -q 2 -w 3 -n 10.0.0.1');
   });
 
-  it('Windows 用 tracert，没有探测次数参数', () => {
+  it('Windows 用 tracert，没有探测次数参数，但强制 IPv4', () => {
     const cmd = buildTraceCommand('win32', 'example.com', {
       maxHops: 15,
       hopTimeout: 2,
       probes: 1,
     });
-    expect(cmd).toBe('tracert -h 15 -w 2000 -d example.com');
+    // ⚠️ -4 是必须的：目标同时有 AAAA 记录时（example.com 就是），
+    // tracert 默认走 IPv4 会直接报"到 xxx [IPv6] 的路由:" 然后失败。
+    expect(cmd).toBe('tracert -4 -h 15 -w 2000 -d example.com');
     expect(cmd).not.toContain('-q');
+    expect(cmd).toContain('-4');
   });
 });
 

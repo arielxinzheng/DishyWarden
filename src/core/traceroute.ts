@@ -144,7 +144,13 @@ export function buildTraceCommand(
   if (platform === 'win32') {
     // Windows 的 tracert **没有**探测次数参数，固定 3 次 —— 降不下来
     // -d: 不做反向 DNS 解析（理由同 Unix 的 -n）
-    return `tracert -h ${opts.maxHops} -w ${opts.hopTimeout * 1000} -d ${target}`;
+    //
+    // ⚠️ **-4 必须加**：tracert 默认走 IPv4，但目标域名常同时有 AAAA 记录
+    // （example.com 就有）。解析到 IPv6 时 tracert 直接报
+    //   "到 example.com [2606:4700:10:ac42:93f3] 的路由:" 然后失败 ——
+    //   这不是网络不通，是**协议族不匹配**。强制 IPv4 才拿得到跳。
+    //   （macOS/Linux 的 traceroute 默认双栈，不需要这个开关。）
+    return `tracert -4 -h ${opts.maxHops} -w ${opts.hopTimeout * 1000} -d ${target}`;
   }
   // macOS/Linux: -m 最大跳数, -q 每跳探测次数, -w 单跳超时(秒), -n 不做反向 DNS
   //
@@ -185,7 +191,7 @@ export async function traceroute(
   const windowsFallback =
     platform === 'win32'
       ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\tracert` +
-        ` -h ${maxHops} -w ${hopTimeout * 1000} -d ${target}`
+        ` -4 -h ${maxHops} -w ${hopTimeout * 1000} -d ${target}`
       : null;
 
   try {

@@ -53,6 +53,8 @@ export class DataCollector extends EventEmitter {
   private routerProbe: RouterProbe;
   private buffer: TelemetryData[] = [];
   private intervalHandle: NodeJS.Timeout | null = null;
+  /** 是否有一轮采集正在跑（防止 setInterval 叠加） */
+  private collecting = false;
   private isRunning = false;
   private startTime: Date | null = null;
   /** 历史库。打不开时降级为 null, 采集与实时推送不受影响。 */
@@ -163,10 +165,21 @@ export class DataCollector extends EventEmitter {
    * 执行一次数据采集
    */
   private async collect() {
+    // ⚠️ **上一轮采集还没结束就不要再开一轮**。
+    // 旧代码用 setInterval 无条件开新轮：上一轮的 gRPC 调用超时后仍在飞，
+    // 下一轮又发起新的 ⇒ 在飞的调用越积越多，最终把连接池/事件循环压垮，
+    // 表现为"数据已 N 分钟未更新"（而且日志里看不到明确的失败原因）。
+    if (this.collecting) {
+      console.warn('[Collector] 上一轮采集未结束，跳过本轮');
+      return;
+    }
+    this.collecting = true;
+
     try {
-      // 添加超时保护（10秒）
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Starlink 设备连接超时 (10s)')), 10000)
+      // 超时保护。grpc-web 走 HTTP/1.1 往返，叠加首次反射拉取，
+      // 10 秒偏紧 —— 慢一点会误杀正常采集。放宽到 20 秒。
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Starlink 设备连接超时 (20s)')), 20000)
       );
       
       // 并行采集 dish 遥测、router 探活、公网探针、本地网关、history（包含 outages）
@@ -297,6 +310,10 @@ export class DataCollector extends EventEmitter {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('[Collector] Failed to collect data:', errorMessage);
       this.emit('error', error);
+    } finally {
+      // ⚠️ 必须在这里清标记 —— 超时抛错时 collectPromise 仍在飞，
+      // 但**下一轮不能因为它还在飞就永远跳过**（那会让采集彻底停摆）。
+      this.collecting = false;
     }
   }
 

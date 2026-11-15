@@ -69,6 +69,34 @@ describe('链路 1：用户终端 → 本地路由器', () => {
     expect(m.links[0].detail.key).toBe('topology.lan_untrusted');
   });
 
+  it('ICMP 不可信但已用 TCP 独立判定可达 → 照常显示（不是灰）', () => {
+    // routerProbe 在 ICMP 被 VPN 篡改时改用 TCP 握手判定 ——
+    // TCP 是真实协议交互，结论可信 ⇒ 界面不该一直灰着。
+    const m = buildTopology(
+      inputs({
+        routerProbe: probe({
+          trusted: false,
+          evidence: 'tcp',
+          reachable: true,
+          rttMs: 7.6,
+          packetLoss: 0,
+          trustNote: '疑似 VPN 环境',
+        }),
+      }),
+    );
+    expect(m.links[0].tone).toBe('ok');
+  });
+
+  it('ICMP 不可信且只有被篡改的 ICMP 结果（无 TCP 证据）→ 仍灰', () => {
+    const m = buildTopology(
+      inputs({
+        routerProbe: probe({ trusted: false, evidence: 'icmp', reachable: true }),
+      }),
+    );
+    expect(m.links[0].tone).toBe('unknown');
+    expect(m.links[0].detail.key).toBe('topology.lan_untrusted');
+  });
+
   it('没有任何探测结果 → 灰（没证据 ≠ 正常）', () => {
     expect(buildTopology(inputs({ routerProbe: null })).links[0].tone).toBe('unknown');
   });
