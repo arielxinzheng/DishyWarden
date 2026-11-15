@@ -1100,6 +1100,8 @@ function RouteTraceCard({
     duration: number;
     /** 失败原因（主进程带出来的）—— 用来告诉用户到底卡在哪 */
     error?: string;
+    /** tracert 原始输出（截断 4KB）—— 0 跳时折叠展示 */
+    raw?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 追踪目标来自设置页的「探针节点管理」(默认 example.com)。
@@ -1328,7 +1330,9 @@ function RouteTraceCard({
         )}
 
         {/* 失败原因由主进程带出来 —— 之前只写日志，界面无从判断 */}
-        {data && data.hops.length === 0 && <RouteTraceEmpty error={data.error} t={t} />}
+        {data && data.hops.length === 0 && (
+          <RouteTraceEmpty error={data.error} raw={data.raw} t={t} />
+        )}
       </CardContent>
     </Card>
   );

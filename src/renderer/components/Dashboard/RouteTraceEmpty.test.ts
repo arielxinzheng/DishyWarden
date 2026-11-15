@@ -17,6 +17,8 @@ const t = (k: string) =>
     'dashboard:route.no_info': '无法获取路由信息',
     'dashboard:route.failed_reason': '失败原因',
     'dashboard:route.reason_unknown': '未知（命令无输出）',
+    'dashboard:route.raw_output': '命令原始输出（点击展开）',
+    'dashboard:route.raw_empty': '（无输出）',
   })[k] ?? k;
 
 describe('RouteTraceEmpty', () => {
@@ -37,5 +39,17 @@ describe('RouteTraceEmpty', () => {
   it('error 缺失（旧主进程）⇒ 也显示兜底原因，不留白', () => {
     const html = renderToStaticMarkup(createElement(RouteTraceEmpty, { t }));
     expect(html).toContain('失败原因: 未知（命令无输出）');
+  });
+
+  it('raw 原样折叠展示 —— 用户能直接看到 tracert 吐了什么', () => {
+    const raw = '通过最多 15 个跃点跟踪\n到 example.com [203.0.113.5] 的路由:\n无法访问目标主机或路由。';
+    const html = renderToStaticMarkup(createElement(RouteTraceEmpty, { error: '无法访问目标主机或路由。', raw, t }));
+    expect(html).toContain('命令原始输出');
+    expect(html).toContain('到 example.com [203.0.113.5] 的路由:');
+  });
+
+  it('raw 缺失时折叠里给占位，不留白', () => {
+    const html = renderToStaticMarkup(createElement(RouteTraceEmpty, { error: 'x', t }));
+    expect(html).toContain('（无输出）');
   });
 });

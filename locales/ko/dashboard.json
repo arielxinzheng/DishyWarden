@@ -309,7 +309,9 @@
     "collapse": "접기",
     "no_info": "경로 정보를 가져올 수 없습니다",
     "failed_reason": "실패 원인",
-    "reason_unknown": "알 수 없음(명령 출력 없음)"
+    "reason_unknown": "알 수 없음(명령 출력 없음)",
+    "raw_output": "명령 원본 출력(클릭하여 펼치기)",
+    "raw_empty": "(출력 없음)"
   },
   "direction": {
     "n": "북",

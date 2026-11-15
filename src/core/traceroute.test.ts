@@ -269,6 +269,80 @@ Trace complete.
       const hops = parseWindowsTraceroute('  2     *        *        *     ÇëÇó³¬Ê±¡£\r\n');
       expect(hops).toEqual([{ hop: 2, ip: null, hostname: '* (超时)', rtt: null }]);
     });
+
+    // 第 4 轮真机反馈：失败原因只剩「到 example.com [...] 的路由:」、0 跳。
+    // 中文 Windows tracert 的真实形态：CRLF、亚毫秒写成「<1 毫秒」、
+    // **每个跳行行尾带一个空格**、前面有「通过最多 N 个跃点跟踪」「到 … 的路由:」两行说明。
+    const ZH_WIN_OUTPUT = [
+      '',
+      '通过最多 15 个跃点跟踪',
+      '到 example.com [203.0.113.5] 的路由:',
+      '',
+      '  1    <1 毫秒   <1 毫秒   <1 毫秒 192.168.1.1 ',
+      '  2     3 ms     2 ms     2 ms  10.11.80.1 ',
+      '  3     *        *        *     请求超时。',
+      '  4    31 ms    *       29 ms  100.64.0.1 ',
+      '  5    40 ms    41 ms    40 ms  203.0.113.5 ',
+      '',
+      '跟踪完成。',
+      '',
+    ].join('\r\n');
+
+    it('中文 Windows 真实输出（毫秒 / 行尾空格 / CRLF / 说明行）⇒ 5 跳', () => {
+      const hops = parseWindowsTraceroute(ZH_WIN_OUTPUT);
+      expect(hops).toEqual([
+        { hop: 1, ip: '192.168.1.1', hostname: '192.168.1.1', rtt: 1 },
+        { hop: 2, ip: '10.11.80.1', hostname: '10.11.80.1', rtt: 3 },
+        { hop: 3, ip: null, hostname: '* (超时)', rtt: null },
+        { hop: 4, ip: '100.64.0.1', hostname: '100.64.0.1', rtt: 31 },
+        { hop: 5, ip: '203.0.113.5', hostname: '203.0.113.5', rtt: 40 },
+      ]);
+    });
+
+    it('「<1 ms」里的 1 不会被当成 IP，也不会被当成主机名', () => {
+      const [hop] = parseWindowsTraceroute('  1    <1 ms    <1 ms    <1 ms  192.168.1.1 \r\n');
+      expect(hop.ip).toBe('192.168.1.1');
+      expect(hop.hostname).toBe('192.168.1.1');
+      expect(hop.rtt).toBe(1);
+    });
+
+    it('行尾空格不影响解析（旧正则 …]?$ 在这里全部失配）', () => {
+      const hops = parseWindowsTraceroute('  3    12 ms    12 ms    12 ms  example.com [198.51.100.7] \r\n');
+      expect(hops).toEqual([{ hop: 3, ip: '198.51.100.7', hostname: 'example.com', rtt: 12 }]);
+    });
+
+    it('说明行不算跳：无法访问目标主机或路由。/ 到 … 的路由: / 通过最多 … 跃点', () => {
+      const out = [
+        '无法访问目标主机或路由。',
+        '通过最多 15 个跃点跟踪',
+        '到 example.com [203.0.113.5] 的路由:',
+        'Tracing route to example.com [203.0.113.5]',
+        'over a maximum of 15 hops:',
+        'Trace complete.',
+        '跟踪完成。',
+      ].join('\r\n');
+      expect(parseWindowsTraceroute(out)).toEqual([]);
+    });
+
+    it('前置说明行之后的跳照常解析', () => {
+      const out = [
+        '无法访问目标主机或路由。',
+        '到 example.com [203.0.113.5] 的路由:',
+        '  1    <1 ms    <1 ms    <1 ms  192.168.1.1 ',
+        '  2     3 ms     2 ms     2 ms  10.0.0.1 ',
+      ].join('\r\n');
+      expect(parseWindowsTraceroute(out).map((h) => h.ip)).toEqual(['192.168.1.1', '10.0.0.1']);
+    });
+
+    it('首探测 * 时 RTT 取第一个有响应的探测', () => {
+      const [hop] = parseWindowsTraceroute('  4     *       29 ms    30 ms  100.64.0.1 ');
+      expect(hop).toEqual({ hop: 4, ip: '100.64.0.1', hostname: '100.64.0.1', rtt: 29 });
+    });
+
+    it('「报告: 无法访问目标主机。」的跳仍记下回报的 IP', () => {
+      const [hop] = parseWindowsTraceroute('  6    45 ms    44 ms    44 ms  198.51.100.9 报告: 无法访问目标主机。');
+      expect(hop.ip).toBe('198.51.100.9');
+    });
   });
 });
 

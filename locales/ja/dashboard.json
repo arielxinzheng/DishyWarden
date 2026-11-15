@@ -309,7 +309,9 @@
     "collapse": "折りたたむ",
     "no_info": "経路情報を取得できません",
     "failed_reason": "失敗理由",
-    "reason_unknown": "不明（コマンドの出力なし）"
+    "reason_unknown": "不明（コマンドの出力なし）",
+    "raw_output": "コマンドの生出力（クリックで展開）",
+    "raw_empty": "（出力なし）"
   },
   "direction": {
     "n": "北",

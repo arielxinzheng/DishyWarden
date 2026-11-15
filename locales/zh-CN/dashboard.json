@@ -309,7 +309,9 @@
     "collapse": "收起",
     "no_info": "无法获取路由信息",
     "failed_reason": "失败原因",
-    "reason_unknown": "未知（命令无输出）"
+    "reason_unknown": "未知（命令无输出）",
+    "raw_output": "命令原始输出（点击展开）",
+    "raw_empty": "（无输出）"
   },
   "direction": {
     "n": "北",

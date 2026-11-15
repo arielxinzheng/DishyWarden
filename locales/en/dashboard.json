@@ -309,7 +309,9 @@
     "collapse": "Collapse",
     "no_info": "Unable to get route information",
     "failed_reason": "Reason",
-    "reason_unknown": "unknown (command produced no output)"
+    "reason_unknown": "unknown (command produced no output)",
+    "raw_output": "Raw command output (click to expand)",
+    "raw_empty": "(no output)"
   },
   "direction": {
     "n": "N",

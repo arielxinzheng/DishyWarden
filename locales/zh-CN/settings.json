@@ -55,7 +55,7 @@
     "got_position": "已获取当前位置: {{lat}}, {{lon}}。请点击\"保存位置\"按钮保存。",
     "fetch_failed": "获取位置失败",
     "permission_denied": "用户拒绝了地理定位请求。请手动输入经纬度或在浏览器设置中允许定位权限后重试。",
-    "position_unavailable": "系统定位服务不可用（远程桌面会话或 Windows「定位服务」关闭时常见）。请手动填写经纬度",
+    "position_unavailable": "本机没有可用的位置源（远程桌面会话里 Windows 定位服务通常拿不到 GPS / Wi-Fi）。同一会话里浏览器能定位不代表本应用能：Chrome/Edge 自带谷歌/微软的网络定位服务，本应用没有。终端位置是固定的，请手动填写一次经纬度，保存后一直沿用",
     "timeout": "获取位置超时,请重试或手动输入经纬度",
     "not_supported": "您的浏览器不支持地理定位功能,请手动输入经纬度",
     "lat_invalid": "纬度必须在 -90 到 90 之间 (当前值: {{value}})",
@@ -69,7 +69,7 @@
     "dish_no_fix": "星链终端尚未完成 GPS 定位，请稍后重试或手动填写经纬度。",
     "dish_other": "从星链终端读取位置失败，请手动填写经纬度。",
     "error_code": "（错误码 {{code}}）",
-    "rdp_hint": "远程桌面会话或系统\"定位服务\"关闭时，\"获取当前位置\"不可用（会报 POSITION_UNAVAILABLE），请手动填写经纬度。",
+    "rdp_hint": "远程桌面会话里系统定位通常不可用（报 POSITION_UNAVAILABLE），改权限也无效。终端是固定安装的：在地图上查到经纬度手动填一次，保存后会一直沿用。",
     "fallback_to_browser": "正在自动改用浏览器定位…",
     "manual_hint": "请手动填写经纬度。",
     "browser_source_tooltip": "用浏览器定位获取当前位置（需要系统定位服务可用；远程桌面会话里通常不可用）"

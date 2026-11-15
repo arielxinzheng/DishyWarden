@@ -309,7 +309,9 @@
     "collapse": "Thu gọn",
     "no_info": "Không lấy được thông tin tuyến",
     "failed_reason": "Lý do thất bại",
-    "reason_unknown": "không rõ (lệnh không có đầu ra)"
+    "reason_unknown": "không rõ (lệnh không có đầu ra)",
+    "raw_output": "Đầu ra gốc của lệnh (bấm để mở)",
+    "raw_empty": "(không có đầu ra)"
   },
   "direction": {
     "n": "Bắc",

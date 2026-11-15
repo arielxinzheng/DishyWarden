@@ -172,6 +172,8 @@ export interface ElectronAPI {
     duration: number;
     /** hops 为空时必带：失败原因（命令输出里的报错行 / 超时 / exit code） */
     error?: string;
+    /** tracert/traceroute 的**原始输出**（截断到 4KB）—— 界面用 `<details>` 折叠展示 */
+    raw?: string;
   }>;
 
   // 读 dish 自带 GPS 的位置（不依赖本机定位服务）

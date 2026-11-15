@@ -55,7 +55,7 @@
     "got_position": "Current location acquired: {{lat}}, {{lon}}. Click \"Save location\" to save it.",
     "fetch_failed": "Failed to get the location",
     "permission_denied": "Location permission was denied. Enter the coordinates manually, or allow location access in your browser settings and try again.",
-    "position_unavailable": "System location service unavailable (common over Remote Desktop or when the Windows location service is off). Please enter the coordinates manually.",
+    "position_unavailable": "No location source on this machine (over Remote Desktop the Windows location service usually has no GPS / Wi-Fi). A browser in the same session may still succeed because Chrome/Edge bundle Google/Microsoft network location services; this app does not. The terminal does not move, so enter the coordinates once and they are kept",
     "timeout": "Location request timed out. Try again or enter the coordinates manually.",
     "not_supported": "Your browser does not support geolocation. Please enter the coordinates manually.",
     "lat_invalid": "Latitude must be between -90 and 90 (current value: {{value}})",
@@ -69,7 +69,7 @@
     "dish_no_fix": "The dish has no GPS fix yet. Try again later or enter coordinates manually.",
     "dish_other": "Failed to read location from the Starlink dish. Please enter coordinates manually.",
     "error_code": "(error code {{code}})",
-    "rdp_hint": "Over Remote Desktop or with the system location service off, \"Get current position\" fails (POSITION_UNAVAILABLE). Please enter the coordinates manually.",
+    "rdp_hint": "Over Remote Desktop the system location service is usually unavailable (POSITION_UNAVAILABLE); changing permissions does not help. The terminal is fixed in place: look up its coordinates on a map, enter them once and save; they are kept from then on.",
     "fallback_to_browser": "Falling back to browser geolocation…",
     "manual_hint": "Please enter the coordinates manually.",
     "browser_source_tooltip": "Get the current position via browser geolocation (needs the OS location service; usually unavailable over Remote Desktop)"

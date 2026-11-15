@@ -89,12 +89,25 @@ export function pickMeaningfulLine(
     'Network is unreachable', '网络不可达',
   ];
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const isHeader = (l: string): boolean =>
+    // Unix: "traceroute to example.com (1.2.3.4), 15 hops max, ..."
+    /^traceroute to /i.test(l) ||
+    // Windows 英文: "Tracing route to example.com [1.2.3.4]"
+    /^Tracing route to /i.test(l) ||
+    // Windows 中文: "到 example.com [1.2.3.4] 的路由:" —— 这是**失败块的开头**，
+    // 不是错误原因。旧实现把它当"首行非空"返回 ⇒ 用户看到的失败原因截到这里为止。
+    /^到 .+ 的路由\s*[:：]?\s*$/.test(l) ||
+    // "通过最多 N 跳" / "over a maximum of N hops"
+    /^(通过最多|over a maximum)/i.test(l) ||
+    // "Trace complete." / "跟踪完成。"
+    /^(Trace complete|跟踪完成)/i.test(l);
   for (const l of lines) {
+    if (isHeader(l)) continue;
     if (keywords.some((k) => l.includes(k))) return l;
   }
   // 再退一步：取首个非空、不是 "跳号行"（以数字开头）、不是标题行的输出
   for (const l of lines) {
-    if (/^(traceroute|Tracing|通过最多|over a maximum)/i.test(l)) continue;
+    if (isHeader(l)) continue;
     if (/^\s*\d+\s+/.test(l)) continue;
     return l;
   }
@@ -121,6 +134,34 @@ export interface TracerouteResult {
    * 现在把它带出来，界面直接显示。
    */
   error?: string;
+  /**
+   * tracert/traceroute 的**原始输出**（stdout + stderr，截断到 4KB）。
+   *
+   * 为什么要带：`describeExecFailure` / `pickMeaningfulLine` 只挑了"含关键字的行"
+   * ⇒ 真失败块里的"到 xxx 的路由:" 这种中文头部会被当成首行非空、把后面的
+   * 有效内容（无法访问目标主机或路由。、** 超时跳列表 **）全丢掉。
+   * 用户看到的失败原因只截到第一行 ⇒ 无法定位。
+   *
+   * 把原始输出一起回传，界面用 `<details>` 折叠展示 ——
+   * 用户能直接看到 tracert 到底吐了什么，不用再截图让开发翻日志。
+   */
+  raw?: string;
+}
+
+/** 原始输出截断上限 —— 4KB 够覆盖典型 20 跳的完整输出（每跳 ~80 字节 + 头尾），
+ *  同时又不至于让 IPC 消息膨胀到几 MB 卡死渲染层。*/
+export const RAW_OUTPUT_LIMIT = 4096;
+
+/** 合并 stdout/stderr 作为"原始输出"回传；截断到 RAW_OUTPUT_LIMIT，在边界加提示。 */
+export function buildRawSnapshot(stdout: string | undefined, stderr: string | undefined): string {
+  const out = (stdout ?? '').replace(/\r\n/g, '\n');
+  const err = (stderr ?? '').replace(/\r\n/g, '\n');
+  const parts: string[] = [];
+  if (out) parts.push(out);
+  if (err.trim()) parts.push(`--- stderr ---\n${err}`);
+  const joined = parts.join('\n').trim();
+  if (joined.length <= RAW_OUTPUT_LIMIT) return joined;
+  return joined.slice(0, RAW_OUTPUT_LIMIT) + `\n…（已截断，共 ${joined.length} 字节）`;
 }
 
 /**
@@ -241,7 +282,10 @@ export async function traceroute(
     // 必须带原因回去（规则：**只要 hops 为空就必须有 error**）。
     const error =
       hops.length === 0
-        ? pickMeaningfulLine(stdout, stderr) ?? 'tracert 没有返回任何跳（stdout/stderr 均为空）'
+        ? pickMeaningfulLine(stdout, stderr) ??
+          (`${stdout}${stderr}`.trim()
+            ? '命令有输出但没有解析出任何跳（原始输出见下方）'
+            : 'tracert 没有返回任何跳（stdout/stderr 均为空）')
         : undefined;
 
     return {
@@ -250,6 +294,9 @@ export async function traceroute(
       completed,
       duration,
       ...(error ? { error } : {}),
+      // 成功路径也带 raw：0 跳时它是唯一能看清"tracert 到底吐了什么"的证据；
+      // 有跳时用于核对解析结果（跳数对不上时能直接看原文）。
+      raw: buildRawSnapshot(stdout, stderr),
     };
   } catch (error: any) {
     // ⚠️ **超时 ≠ 没有数据**。
@@ -281,11 +328,16 @@ export async function traceroute(
         hops,
         completed: reached,
         duration,
+        raw: buildRawSnapshot(error?.stdout, error?.stderr),
       };
     }
 
     // 真失败: 没有任何可解析的跳
     console.error('[Traceroute] Failed:', error?.message);
+    const raw = buildRawSnapshot(
+      typeof error?.stdout === 'string' ? error.stdout : '',
+      typeof error?.stderr === 'string' ? error.stderr : '',
+    );
     return {
       target,
       hops: [],
@@ -293,6 +345,7 @@ export async function traceroute(
       duration: Date.now() - startTime,
       // 把原因带出去 —— 界面直接显示，不再只有一句「无法获取路由信息」
       error: describeExecFailure(error, timeout),
+      ...(raw ? { raw } : {}),
     };
   }
 }
@@ -528,65 +581,58 @@ export function parseUnixTraceroute(output: string): TraceHop[] {
  * 是否输出统计段都会变), 硬编码行数会随机吃掉数据行。
  * 标题行没有开头的数字, 会被 hopMatch 过滤掉, 所以不过滤。
  */
+/**
+ * Windows tracert 跳行：`跳号  探测1  探测2  探测3  目标`。
+ *
+ * 探测位 = `<1 ms` / `12 ms` / `*`；单位随系统语言变（中文 Windows 的亚毫秒是
+ * `<1 毫秒`，其余仍是 `ms` —— 同一行里可能混着出现）。
+ *
+ * ⚠️ 必须按**列**解析，不能"在整行里找 IP"：
+ *   · 中文版的 `毫秒` 不是 `ms` ⇒ 旧实现把它当主机名；
+ *   · tracert 每行**行尾带一个空格**（`192.168.1.1 \r\n`）⇒ 旧正则 `…]?$`
+ *     要求 IP 贴着行尾，全部失配 ⇒ 0 跳 ⇒ 失败原因只剩「到 xxx 的路由:」。
+ * 探测位必须出现 ≥1 个，这也把 "到 xxx 的路由:"、"通过最多 15 个跃点跟踪"、
+ * "无法访问目标主机或路由。" 这类说明行排除在外（它们不以「跳号 + 探测位」开头）。
+ */
+const WIN_PROBE = String.raw`(?:<?\d+\s*(?:ms|毫秒|мс)|\*)`;
+const WIN_HOP_LINE = new RegExp(String.raw`^\s*(\d+)\s+((?:${WIN_PROBE}\s+){1,3})(.*)$`);
+const IPV4 = String.raw`\d{1,3}(?:\.\d{1,3}){3}`;
+
 export function parseWindowsTraceroute(output: string): TraceHop[] {
   const lines = output.split(/\r?\n/);
   const hops: TraceHop[] = [];
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    // 行尾空格必须先剥（见上）
+    const line = rawLine.trimEnd();
     if (!line.trim()) continue;
 
-    // 匹配跳数
-    const hopMatch = line.match(/^\s*(\d+)/);
-    if (!hopMatch) continue;
+    // 末尾补一个空格：让最后一个探测位后面也有 \s+ 可匹配（目标列为空的行）
+    const m = `${line} `.match(WIN_HOP_LINE);
+    if (!m) continue;
 
-    const hopNum = parseInt(hopMatch[1], 10);
+    const hopNum = parseInt(m[1], 10);
+    const probes = m[2].trim().split(/\s+(?=<?\d|\*)/);
+    const rest = m[3].trim();
 
-    // 检查是否超时
-    // ⚠️ tracert 的超时行是 "  2     *        *        *     请求超时。" —— 星号之间是**多个空格**，
-    // 只认 '* * *' 会漏；文案又随系统语言/代码页变化。⇒ 以"三个探测位全是 *"为准。
-    const allStars = /^\s*\d+\s+\*\s+\*\s+\*/.test(line);
-    if (allStars || line.includes('请求超时') || line.includes('Request timed out')) {
-      hops.push({
-        hop: hopNum,
-        ip: null,
-        hostname: '* (超时)',
-        rtt: null,
-      });
+    // 目标列: "host [1.2.3.4]" / "1.2.3.4" / "请求超时。" / "1.2.3.4 报告: 无法访问目标主机。"
+    const bracketed = rest.match(new RegExp(String.raw`^(\S+)\s+\[(${IPV4})\]`));
+    const bare = rest.match(new RegExp(String.raw`(?:^|\s)(${IPV4})(?=\s|$)`));
+    const ip = bracketed?.[2] ?? bare?.[1] ?? null;
+
+    if (!ip) {
+      // ⚠️ 超时行 "  2     *        *        *     请求超时。" —— 星号之间是**多个空格**，
+      // 文案随系统语言/代码页变化（甚至乱码）⇒ 不认文案，"没有 IP" 就是超时跳。
+      hops.push({ hop: hopNum, ip: null, hostname: '* (超时)', rtt: null });
       continue;
     }
 
-    // 匹配时间和 IP
-    const timeMatch = line.match(/<?\s*(\d+)\s*ms/);
-    const ipMatch = line.match(/\[?([\d.]+)\]?$/);
+    // RTT 取第一个有响应的探测；"<1 ms" 记为 1
+    const firstRtt = probes.map((p) => p.match(/^<?(\d+)/)).find(Boolean);
+    const rtt = firstRtt ? parseFloat(firstRtt[1]) : null;
+    const hostname = bracketed ? bracketed[1] : ip;
 
-    // 主机名: 剥掉行尾的 IP 之后, 取**最后一个** token。
-    //
-    // ⚠️ 不能用 /ms\s+(\S+)/ —— Windows 格式里 "ms" 后面紧跟的是**下一个时间值**
-    // ("12 ms    12 ms    12 ms  example.com"), 不是主机名。
-    const withoutIp = ipMatch ? line.slice(0, line.lastIndexOf(ipMatch[0])).trim() : line;
-    const tokens = withoutIp.split(/\s+/).filter(Boolean);
-    // 剥掉末尾的时间 token 们("12", "ms", "<1", ...)
-    while (
-      tokens.length > 0 &&
-      (tokens[tokens.length - 1] === 'ms' || /^<?\d+$/.test(tokens[tokens.length - 1]))
-    ) {
-      tokens.pop();
-    }
-    const hostnameCandidate = tokens[tokens.length - 1];
-
-    if (ipMatch) {
-      const ip = ipMatch[1];
-      const hostname =
-        hostnameCandidate && hostnameCandidate !== ip ? hostnameCandidate : ip;
-      const rtt = timeMatch ? parseFloat(timeMatch[1]) : null;
-
-      hops.push({
-        hop: hopNum,
-        ip,
-        hostname,
-        rtt,
-      });
-    }
+    hops.push({ hop: hopNum, ip, hostname, rtt });
   }
 
   return hops;
