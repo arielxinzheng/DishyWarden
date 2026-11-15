@@ -29,6 +29,7 @@ import {
 } from '../lib/webhookTemplate';
 import { dishLocationFailureText, geolocationFailureText } from '../lib/locationMessages';
 import { resolveLocation } from '../lib/locationFallback';
+import { HintTip, buildTipText } from '../components/HintTip';
 import { requestGeolocation } from '../lib/geolocation';
 import { requestIpLocation } from '../lib/ipLocation';
 
@@ -451,8 +452,10 @@ export default function Settings() {
         <CardContent>
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm font-medium">{t('settings:appearance.language')}</div>
-              <p className="text-xs text-muted-foreground">{t('settings:appearance.language_hint')}</p>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium">{t('settings:appearance.language')}</span>
+                <HintTip text={t('settings:appearance.language_hint')} label={t('settings:appearance.language')} />
+              </div>
             </div>
             <LanguageSwitcher variant="label" />
           </div>
@@ -479,7 +482,7 @@ export default function Settings() {
                 }
                 placeholder={t('settings:collector.dish_address_placeholder')}
               />
-              <p className="text-xs text-muted-foreground">{t('settings:collector.dish_address_hint')}</p>
+              <HintTip text={t('settings:collector.dish_address_hint')} label={t('settings:collector.dish_address')} />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('settings:collector.dish_port')}</label>
@@ -509,9 +512,7 @@ export default function Settings() {
                 }
                 placeholder={t('settings:collector.router_address_placeholder')}
               />
-              <p className="text-xs text-muted-foreground">
-                {t('settings:collector.router_address_hint')}
-              </p>
+              <HintTip text={t('settings:collector.router_address_hint')} label={t('settings:collector.router_address')} />
             </div>
           </div>
 
@@ -533,7 +534,7 @@ export default function Settings() {
                 min="10"
                 max="300"
               />
-              <p className="text-xs text-muted-foreground">{t('settings:collector.interval_hint')}</p>
+              <HintTip text={t('settings:collector.interval_hint')} label={t('settings:collector.interval')} />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('settings:collector.buffer_size')}</label>
@@ -547,7 +548,7 @@ export default function Settings() {
                   })
                 }
               />
-              <p className="text-xs text-muted-foreground">{t('settings:collector.buffer_size_hint')}</p>
+              <HintTip text={t('settings:collector.buffer_size_hint')} label={t('settings:collector.buffer_size')} />
             </div>
           </div>
         </CardContent>
@@ -558,8 +559,22 @@ export default function Settings() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <MapPin className="w-5 h-5" />
-            <div>
+            <div className="flex items-center gap-1.5">
               <CardTitle>{t('settings:location.title')}</CardTitle>
+              {/* 使用说明改成悬浮帮助 ⓘ —— 原来是一整块常驻 Alert，占版面 */}
+              <HintTip
+                title={t('settings:location.usage_title')}
+                text={buildTipText([
+                  `1. ${t('settings:location.usage_1')}`,
+                  `2. ${t('settings:location.usage_2')}`,
+                  `3. ${t('settings:location.usage_3')}`,
+                  t('settings:location.rdp_hint'),
+                  t('settings:location.privacy'),
+                ])}
+                label={t('settings:location.usage_title')}
+              />
+            </div>
+            <div>
               <CardDescription>{t('settings:location.description')}</CardDescription>
             </div>
           </div>
@@ -660,23 +675,6 @@ export default function Settings() {
             </p>
           )}
 
-          <Alert className="border-blue-500/50 bg-blue-500/10">
-            <AlertCircle className="h-4 w-4 text-blue-500" />
-            <AlertDescription className="ml-7 text-sm">
-              <strong>{t('settings:location.usage_title')}</strong>
-              <br />
-              1. {t('settings:location.usage_1')}
-              <br />
-              2. {t('settings:location.usage_2')}
-              <br />
-              3. {t('settings:location.usage_3')}
-              <br />
-              <span className="text-xs opacity-80">{t('settings:location.rdp_hint')}</span>
-              <br />
-              <br />
-              <span className="text-xs opacity-80">{t('settings:location.privacy')}</span>
-            </AlertDescription>
-          </Alert>
         </CardContent>
       </Card>
 
@@ -709,9 +707,7 @@ export default function Settings() {
               min="10"
               max="1000"
             />
-            <p className="text-xs text-muted-foreground mt-1">
-              {t('settings:thresholds.high_latency_hint')}
-            </p>
+            <HintTip text={t('settings:thresholds.high_latency_hint')} label={t('settings:thresholds.high_latency')} />
           </div>
 
           <div>
@@ -736,9 +732,7 @@ export default function Settings() {
               max="50"
               step="0.1"
             />
-            <p className="text-xs text-muted-foreground mt-1">
-              {t('settings:thresholds.high_packet_loss_hint')}
-            </p>
+            <HintTip text={t('settings:thresholds.high_packet_loss_hint')} label={t('settings:thresholds.high_packet_loss')} />
           </div>
         </CardContent>
       </Card>
@@ -821,9 +815,7 @@ export default function Settings() {
                   }
                   placeholder={t('settings:notifications.bot_token_placeholder')}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t('settings:notifications.bot_token_hint')}
-                </p>
+                <HintTip text={t('settings:notifications.bot_token_hint')} label={t('settings:notifications.bot_token')} />
               </div>
 
               <div className="space-y-2">
@@ -844,17 +836,16 @@ export default function Settings() {
                   }
                   placeholder={t('settings:notifications.chat_id_placeholder')}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t('settings:notifications.chat_id_hint')}
-                </p>
+                <HintTip text={t('settings:notifications.chat_id_hint')} label={t('settings:notifications.chat_id')} />
               </div>
             </>
           )}
 
           {/* 公网通道行为说明: 断网期间发不出去, 恢复后聚合补发, 避免用户误以为能实时收到 */}
-          <p className="text-xs text-muted-foreground">
-            {t('settings:notifications.public_channel_offline_hint')}
-          </p>
+          <HintTip
+            text={t('settings:notifications.public_channel_offline_hint')}
+            label={t('settings:notifications.public_channel_offline_hint')}
+          />
         </CardContent>
       </Card>
 
@@ -971,9 +962,7 @@ export default function Settings() {
                   spellCheck={false}
                   className="flex w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 font-mono text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t('settings:notifications.webhook_headers_hint')}
-                </p>
+                <HintTip text={t('settings:notifications.webhook_headers_hint')} label={t('settings:notifications.webhook_headers_label')} />
                 {parseWebhookHeaders(webhookHeadersText).ok ? null : (
                   <p className="text-xs text-destructive">
                     {t('settings:notifications.webhook_headers_invalid')}
@@ -1029,9 +1018,7 @@ export default function Settings() {
                   spellCheck={false}
                   className="flex w-full min-h-[180px] rounded-md border border-input bg-background px-3 py-2 font-mono text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t('settings:notifications.webhook_template_hint')}
-                </p>
+                <HintTip text={t('settings:notifications.webhook_template_hint')} label={t('settings:notifications.webhook_template_label')} />
                 {isValidWebhookTemplate(webhookPayloadText) ? null : (
                   <p className="text-xs text-destructive">
                     {t('settings:notifications.webhook_template_invalid')}
@@ -1238,9 +1225,10 @@ export default function Settings() {
 
       {/* 底部固定操作条：重置 / 保存放在这里，更醒目 */}
       <div className="sticky bottom-0 z-20 -mx-8 px-8 py-4 bg-background/95 backdrop-blur border-t border-border">
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-xs text-muted-foreground">{t('settings:save.footer_hint')}</p>
-          <div className="flex gap-3">
+        <div className="flex items-center justify-end gap-4">
+          <div className="flex items-center gap-3">
+            {/* 保存/重置的说明改成悬浮帮助 ⓘ（放在「重置」左侧） */}
+            <HintTip text={t('settings:save.footer_hint')} label={t('settings:save.footer_hint')} />
             <Button variant="outline" size="lg" onClick={handleReset} disabled={saving}>
               <RotateCcw className="w-4 h-4 mr-2" />
               {t('settings:save.reset')}
