@@ -36,6 +36,7 @@ function makeManager(opts: {
   config?: AppConfig;
   packaged?: boolean;
   reports?: CloudUpgradeRecord[];
+  platform?: NodeJS.Platform;
 }) {
   const states: UpdateState[] = [];
   const reports = opts.reports ?? [];
@@ -46,6 +47,9 @@ function makeManager(opts: {
     onState: (state) => states.push(state),
     report: (record) => reports.push(record),
     firstCheckDelayMs: 10_000_000, // 不让测试真的等首查
+    // 默认 'linux' —— 本机开发环境是 darwin, 其余用例都隐含假设"非 mac"
+    // 行为, 不显式固定会在本机和 CI(ubuntu)上跑出不同结果。
+    platform: opts.platform ?? 'linux',
   });
   return { manager, states, reports };
 }
@@ -64,6 +68,19 @@ describe('UpdateManager', () => {
 
   it('未配置更新源时应判定为 disabled 且不打网络', async () => {
     const { manager, reports } = makeManager({ config: makeConfig({ updateFeedUrl: '' }) });
+
+    const state = await manager.check(false);
+
+    expect(state.status).toBe('disabled');
+    expect(state.error).toBeUndefined();
+    expect(reports).toHaveLength(0);
+  });
+
+  it('macOS 上即使配了 updateFeedUrl 也应判定为 disabled（未签名应用, 不支持 OTA）', async () => {
+    const { manager, reports } = makeManager({
+      platform: 'darwin',
+      config: makeConfig({ updateFeedUrl: 'https://example.com/latest-mac.yml' }),
+    });
 
     const state = await manager.check(false);
 

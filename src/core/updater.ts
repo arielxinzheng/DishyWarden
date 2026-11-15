@@ -63,6 +63,14 @@ export interface UpdateManagerOptions {
   intervalHours?: number;
   /** 单次检查超时（毫秒） */
   checkTimeoutMs?: number;
+  /**
+   * 运行平台，默认 process.platform。
+   * ⚠️ 测试里必须用这个注入, 不要用 Object.defineProperty(process, 'platform', ...)
+   *    —— 本机开发环境就是 darwin, 篡改全局 process.platform 会污染同文件
+   *    里所有「非 darwin」假设的其他用例(踩过一次：改完这个测试, 隔壁一条
+   *    完全无关的用例莫名其妙断言失败)。
+   */
+  platform?: NodeJS.Platform;
 }
 
 const DEFAULT_FIRST_CHECK_DELAY_MS = 30_000;
@@ -142,6 +150,15 @@ export class UpdateManager {
 
   /** 更新源地址（空 = 不检查） */
   private feedUrl(): string {
+    // macOS 没有自动升级支持：应用未签名（无付费 Apple Developer 证书），
+    // electron-updater 的 MacUpdater 走 Squirrel.Mac，校验新旧签名一致才能
+    // 更新——未签名应用这一步不可靠（版本间行为不一致，常直接失败或被
+    // Gatekeeper 拦截）。发行包里也没有 latest-mac.yml 要求的 .zip
+    // （package.json 的 mac.target 只有 dmg，故意不加 zip）。
+    // 返回空字符串 ⇒ 走 disabled 分支，不会假装"有更新"再在下载时报错。
+    // mac 用户走手动下载 dmg 升级（见 README/设置页"检查更新"文案）。
+    const platform = this.options.platform ?? process.platform;
+    if (platform === 'darwin') return '';
     const raw = this.options.getConfig()?.cloud?.updateFeedUrl ?? '';
     return raw.trim();
   }

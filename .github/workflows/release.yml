@@ -129,7 +129,7 @@ jobs:
   #   串行后 mac 只是往已存在的 Release 里**追加**资产。
   # ─────────────────────────────────────────────────────────────
   build-mac:
-    name: macOS · DMG (no auto-update)
+    name: macOS · DMG (手动下载安装, 无自动升级)
     needs: [build-win]
     runs-on: macos-latest
     steps:
@@ -159,18 +159,27 @@ jobs:
       - name: Build main process
         run: npm run electron:build
 
-      - name: Build and publish dmg
-        run: npx electron-builder --mac dmg --publish always
+      - name: Build and publish dmg (两个架构, 仅手动下载安装)
+        # ⚠️ 不传 --x64 --arm64 时, electron-builder 只构建 **runner 自身架构**
+        #    (GitHub macos-latest 现在是 arm64) —— package.json 里 arch:[arm64,x64]
+        #    只是声明"这些架构都该有", 不会让它自动都构建。
+        #
+        # ⚠️ mac 没有自动升级(OTA)! electron-updater 的 MacUpdater 用 Squirrel.Mac,
+        #    它要求新旧 app bundle 的代码签名一致才能更新 —— 而这个应用未签名
+        #    (identity: null), 没有付费 Apple Developer 证书。即使补上 zip target
+        #    让清单格式对, 真正跑更新时大概率在签名校验这一步失败或被 Gatekeeper
+        #    拦截, 行为还因 macOS 版本而不同, 不可靠。
+        #    ⇒ mac 用户走"设置页手动下载 dmg"而不是自动升级(见 README/设置页文案)。
+        run: npx electron-builder --mac dmg --x64 --arm64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 自检 —— 两个架构的 dmg 可下载
+      - name: 自检 —— 两个架构的 dmg 都可下载
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           base="https://github.com/${{ github.repository }}/releases/latest/download"
           # artifactName = ${productName}-${version}-${os}-${arch}.${ext}
-          # mac.target 的 arch 是 [arm64, x64] ⇒ 两个包都要在
           for arch in arm64 x64; do
             url="$base/DishyWarden-${version}-mac-${arch}.dmg"
             code="$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)"
