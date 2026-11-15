@@ -75,21 +75,33 @@ jobs:
           $base = "https://github.com/${{ github.repository }}/releases/latest/download"
           $version = "${{ github.ref_name }}".TrimStart('v')
 
-          # latest.yml 必须 200 且能解析出 version
-          $r = Invoke-WebRequest -Uri "$base/latest.yml" -UseBasicParsing
-          if ($r.StatusCode -ne 200) { Write-Error "latest.yml HTTP $($r.StatusCode)"; exit 1 }
+          # ⚠️ 用 curl 而不是 Invoke-WebRequest:
+          #    PowerShell 7 的 Invoke-WebRequest -UseBasicParsing 返回的 .Content
+          #    是 **byte 数组**而不是字符串 ⇒ -notmatch 按数组语义匹配, 永远不中
+          #    (实测 v1.0.0 那次 CI 就是这么误报的: 内容明明是 "version: 1.0.0")
+          $yml = curl -fsSL "$base/latest.yml"
+          if ($LASTEXITCODE -ne 0) { Write-Error "::error::latest.yml 取不到"; exit 1 }
           Write-Host "latest.yml OK:"
-          Write-Host $r.Content
-          if ($r.Content -notmatch "version:\s*$([regex]::Escape($version))") {
+          Write-Host $yml
+
+          # 清单里的 version 必须与 tag 一致
+          if ($yml -notmatch "version:\s*$([regex]::Escape($version))\s*$") {
             Write-Error "::error::latest.yml version != $version"
             exit 1
           }
 
-          # 安装器 HEAD 必须 200 且有 Content-Length
+          # 清单里的文件名必须与命名约定一致(nsis.artifactName)
           $exe = "DishyWarden-Setup-$version.exe"
-          $h = Invoke-WebRequest -Uri "$base/$exe" -Method Head -UseBasicParsing
-          if ($h.StatusCode -ne 200) { Write-Error "$exe HTTP $($h.StatusCode)"; exit 1 }
-          Write-Host "$exe OK: $($h.Headers['Content-Length']) bytes"
+          if ($yml -notmatch [regex]::Escape($exe)) {
+            Write-Error "::error::latest.yml 里没有 $exe"
+            exit 1
+          }
+
+          # 安装器必须可下载(跟随重定向到 CDN 后取最终状态与大小)
+          $info = curl -sIL -o NUL -w "%{http_code} %{size_download} %{url_effective}" "$base/$exe"
+          $code = ($info -split " ")[0]
+          if ($code -ne "200") { Write-Error "::error::$exe HTTP $code"; exit 1 }
+          Write-Host "$exe OK: $info"
 
   # ─────────────────────────────────────────────────────────────
   # macOS: dmg（无 OTA —— MacUpdater 要 latest-mac.yml + zip,
@@ -173,11 +185,12 @@ jobs:
           grep -qE "^version:\s*${version}\s*$" /tmp/latest.yml \
             || { echo "::error::latest.yml version mismatch"; exit 1; }
 
-      - name: 安装器 HEAD 可取
+      - name: 安装器可下载
         run: |
           set -euo pipefail
           GH="https://github.com/${{ github.repository }}/releases/latest/download"
           version="${GITHUB_REF_NAME#v}"
-          code="$(curl -sIL -o /dev/null -w '%{http_code}' "$GH/DishyWarden-Setup-${version}.exe")"
+          # -L 跟随重定向到 CDN; 取最终状态码
+          code="$(curl -sL -o /dev/null -w '%{http_code}' "$GH/DishyWarden-Setup-${version}.exe")"
           echo "installer HTTP $code"
           [ "$code" = "200" ] || { echo "::error::installer not reachable"; exit 1; }
