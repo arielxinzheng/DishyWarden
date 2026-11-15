@@ -14,10 +14,11 @@
  * 用法（打包版）：
  *   DishyWarden.exe --dump-dish-api --enable-logging
  *   DishyWarden.exe --dump-dish-api --dish-ip 192.168.100.1 --dish-port 9200
- * 输出走 stdout（配 --enable-logging 会同时进日志文件）。
+ * 输出同时写 stdout 与 %APPDATA%\DishyWarden\logs\dishywarden-<yyyyMMdd>.log（UTF-8）。
  */
 
 import { DishGrpcClient } from '../core/dishGrpc';
+import { dualLine } from './logger';
 
 /** 常见分支名候选（覆盖 get* / dishGet* 两种命名风格） */
 const CANDIDATES = [
@@ -37,9 +38,16 @@ const CANDIDATES = [
   'dishGetInfo',
 ];
 
+/**
+ * 每行同时写 stdout 与 UTF-8 日志文件：双击启动没有控制台，
+ * 只写 stdout 用户什么也看不到（见 logger.ts）。
+ */
 function line(s = ''): void {
-  console.log(s);
+  dualLine(s);
 }
+
+/** 应用实际采集用到的三个分支：兜底通道只验证这几个，不再把 14 个候选全跑一遍 */
+const CORE_BRANCHES = ['getStatus', 'getHistory', 'dishGetObstructionMap'];
 
 export interface DishApiDumpOptions {
   host: string;
@@ -67,10 +75,14 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   line('=== Dish API 探测 (--dump-dish-api) ===');
   line(`address: ${opts.host}:${opts.port}`);
   line(
-    'ports: ' + opts.port + ' = 原生 gRPC (HTTP/2, reflection 在这里) | ' +
-    (opts.webPort ?? 9201) + ' = grpc-web (HTTP/1.1, Handle 兜底)',
+    'ports: ' + opts.port + ' = 原生 gRPC (HTTP/2, reflection 在这里, Handle 兜底) | ' +
+    (opts.webPort ?? 9201) + ' = grpc-web (HTTP/1.1, Handle 主通道)',
   );
-  line('设置页请填 ' + opts.port + '（原生端口）；9201 由应用自动兜底，不需要手填。');
+  line('设置页「端口」请填 ' + opts.port + '（reflection 用）；grpc-web 端口默认 9201，一般不用改。');
+  line('');
+
+  line('传输优先级: grpc-web(9201) 主 / 原生 gRPC(9200) 兜底');
+  line('  （与 dishylink 一致：真机 9200 Handle 全回 UNIMPLEMENTED，9201 才可用）');
   line('');
 
   line('[1] reflection：取设备自己的 proto 描述符');
@@ -106,16 +118,16 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   // 只看"有没有报错"会把空响应误判成成功。
   const DATA_KEYS = ['dishGetStatus', 'dishGetHistory', 'dishGetObstructionMap'];
 
-  const runPass = async (transport: 'native' | 'web', label: string) => {
+  const runPass = async (transport: 'native' | 'web', label: string, list: string[]) => {
     line(`[2] 逐个尝试候选分支 —— ${label}`);
     let results: Awaited<ReturnType<DishGrpcClient['probeBranches']>> = [];
     try {
       // 预算吃紧就少试几个候选，别让诊断挂住
       const remaining = deadline - Date.now();
       const candidates = remaining < timeoutMs * 2
-        ? CANDIDATES.slice(0, 3)
-        : CANDIDATES;
-      if (candidates.length < CANDIDATES.length) {
+        ? list.slice(0, 3)
+        : list;
+      if (candidates.length < list.length) {
         line('    (时间预算不够，只试前 ' + candidates.length + ' 个候选)');
       }
       results = await client.probeBranches(candidates, timeoutMs, transport);
@@ -137,8 +149,9 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     return results;
   };
 
-  const native = await runPass('native', '原生 gRPC (9200, HTTP/2)');
-  const web = await runPass('web', 'grpc-web (9201, HTTP/1.1)');
+  // 主通道先跑全量候选；兜底通道只验证应用实际用到的分支
+  const web = await runPass('web', `grpc-web (${opts.webPort ?? 9201}, HTTP/1.1) —— 主通道`, CANDIDATES);
+  const native = await runPass('native', `原生 gRPC (${opts.port}, HTTP/2) —— 兜底，只验证核心分支`, CORE_BRANCHES);
 
   line('[3] 结论');
   const usableOf = (rs: typeof native) =>
@@ -149,10 +162,11 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   if (nativeOk.length === 0 && webOk.length === 0) {
     line('    两条通道都没有拿到数据 —— 先查网络/代理（见 verify-dish.ps1 的三条判据）。');
   } else {
-    if (nativeOk.length) line('    原生 gRPC(9200) 可用分支: ' + nativeOk.join(', '));
-    else line('    原生 gRPC(9200) 没有可用分支（很可能就是 UNIMPLEMENTED 那个问题）');
-    if (webOk.length) line('    grpc-web(9201)  可用分支: ' + webOk.join(', '));
-    line('    ⇒ 应用会自动优先用原生通道，失败时自动切 grpc-web（已内置）。');
+    if (webOk.length) line('    grpc-web(主)  可用分支: ' + webOk.join(', '));
+    else line('    grpc-web(主)  没有可用分支');
+    if (nativeOk.length) line('    原生(兜底)    可用分支: ' + nativeOk.join(', '));
+    else line('    原生(兜底)    没有可用分支（这台固件 9200 的 Handle 回 UNIMPLEMENTED 属已知现象）');
+    line('    ⇒ 传输优先级：应用先走 grpc-web，失败才试原生；原生成功后改为原生优先。');
   }
 
   client.close();

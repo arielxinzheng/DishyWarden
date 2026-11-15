@@ -14,9 +14,14 @@ import { createGrafanaManager, GrafanaManager } from '../prometheus/grafana';
 import { CloudClient } from '../core/cloudClient';
 import { UpdateManager, UpdateState } from '../core/updater';
 import { runDishApiDump } from './dishApiDump';
+import { initFileLogger, installProcessHandlers, getLogFilePath, showFatalDialog } from './logger';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// 进程异常捕获必须**最早**挂：模块初始化阶段抛的错（原生模块加载失败等）
+// 没有它就会静默吃掉 ⇒ 窗口不出现、也看不到任何现场。
+installProcessHandlers();
 
 let mainWindow: BrowserWindow | null = null;
 let collector: DataCollector | null = null;
@@ -76,6 +81,11 @@ function pinUserDataDir(): void {
 }
 
 pinUserDataDir();
+
+// userData 路径定下来以后立刻开日志：下面任何模块级的 console 就会同时落盘。
+// 这一行是"窗口为什么没出来"的生命线 —— 没有它，Windows GUI 双击启动的
+// 异常连堆栈都看不到（没控制台 + 没捕获 + 没文件 = 彻底静默）。
+initFileLogger();
 
 /**
  * 初始化云端相关能力（上报客户端 + 升级管理器）。
@@ -976,22 +986,43 @@ app.whenReady().then(async () => {
     const cfg = configManager.getConfig().collector;
     const host = ipIdx >= 0 && argv[ipIdx + 1] ? argv[ipIdx + 1] : cfg.dishAddress;
     const port = portIdx >= 0 && argv[portIdx + 1] ? Number(argv[portIdx + 1]) : cfg.dishPort;
+    const logPath = getLogFilePath();
+    // 用户双击跑诊断时**没有 stdout**：不告诉他日志路径等于没跑。
+    console.log(`[DishApiDump] 诊断模式，输出同步写入日志: ${logPath ?? '(日志文件不可用)'}`);
     try {
       await runDishApiDump({ host, port, webPort: configManager.getConfig().collector.dishWebPort });
     } catch (err) {
       console.error('[DishApiDump] 探测失败:', err);
     }
+    console.log('[DishApiDump] 诊断模式结束，即将退出 (app.exit(0))。日志见上面路径。');
     app.exit(0);
+    return;
+  }
+
+  // 窗口先起：**不等**后台服务。采集器/Prometheus/告警有自己的失败处理，
+  // 之前「await startBackgroundServices() → createWindow()」的顺序让任何一个
+  // 慢启动（Prometheus 最长 30s 等 ready）或静默异常都会让窗口迟到甚至永不出现 ——
+  // 用户看到的就是"双击没反应"。窗口先起之后再启后台，UI 有空态可显。
+  try {
+    createWindow();
+  } catch (err) {
+    console.error('[Main] createWindow 失败:', err);
+    showFatalDialog('DishyWarden 启动失败', `无法创建主窗口：${(err as Error).message}`);
+    app.exit(1);
     return;
   }
 
   // 后台预热种子数据, 不阻塞窗口显示
   warmupTLESeed();
 
-  initCloudServices();
+  try { initCloudServices(); } catch (err) {
+    console.error('[Main] initCloudServices 失败（不影响主流程）:', err);
+  }
 
-  await startBackgroundServices();
-  createWindow();
+  // 后台服务失败不拉垮窗口 —— 异常只写日志，用户仍能看到界面与空态提示。
+  startBackgroundServices().catch((err) => {
+    console.error('[Main] startBackgroundServices 失败:', err);
+  });
 
   // 升级嗅探：延迟首查 + 之后按间隔轮询（12h ± 抖动）。
   // 任何失败都在 UpdateManager 内部降级，绝不影响监控主职。
