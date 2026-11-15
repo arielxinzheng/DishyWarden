@@ -79,14 +79,28 @@ jobs:
           #    PowerShell 7 的 Invoke-WebRequest -UseBasicParsing 返回的 .Content
           #    是 **byte 数组**而不是字符串 ⇒ -notmatch 按数组语义匹配, 永远不中
           #    (实测 v1.0.0 那次 CI 就是这么误报的: 内容明明是 "version: 1.0.0")
-          $yml = curl -fsSL "$base/latest.yml"
+          # ⚠️ 两个坑叠在一起, 踩了两次才定位:
+          #
+          #   ① curl 的输出在 PowerShell 里是**行数组**。对数组做 -notmatch
+          #      返回的是"不匹配的元素数组", if(非空数组) 恒为真 ⇒ 走进错误分支。
+          #      ⇒ 必须 -join 成单个字符串。
+          #
+          #   ② 即使是单个多行字符串, 正则里的 `$` 默认匹配**整个串末尾**
+          #      (PowerShell 的 -match 没有 MULTILINE), 而清单里
+          #      "version: 1.0.0" 后面还跟着换行 ⇒ `$` 不中 ⇒ 整串不匹配。
+          #      ⇒ 必须加 (?m) 让 ^/$ 按**行**锚定。
+          #
+          # 用 ^version:...$ 把版本行完整锚定 —— 这样 "1.0.0-alpha" 不会被
+          # 误判成 "1.0.0"(只去掉 $ 是不够的, 那样反而会误判)。
+          $yml = (curl -fsSL "$base/latest.yml") -join "`n"
           if ($LASTEXITCODE -ne 0) { Write-Error "::error::latest.yml 取不到"; exit 1 }
           Write-Host "latest.yml OK:"
           Write-Host $yml
 
           # 清单里的 version 必须与 tag 一致
-          if ($yml -notmatch "version:\s*$([regex]::Escape($version))\s*$") {
+          if ($yml -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
             Write-Error "::error::latest.yml version != $version"
+            Write-Host "实际内容: $yml"
             exit 1
           }
 
@@ -94,6 +108,7 @@ jobs:
           $exe = "DishyWarden-Setup-$version.exe"
           if ($yml -notmatch [regex]::Escape($exe)) {
             Write-Error "::error::latest.yml 里没有 $exe"
+            Write-Host "实际内容: $yml"
             exit 1
           }
 
