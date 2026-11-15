@@ -27,6 +27,7 @@ import {
   parseWebhookHeaders,
   parseWebhookTimeout,
 } from '../lib/webhookTemplate';
+import { dishLocationFailureText, geolocationFailureText } from '../lib/locationMessages';
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -37,6 +38,7 @@ export default function Settings() {
   const [grafanaChecking, setGrafanaChecking] = useState(false);
   const [grafanaProvisioning, setGrafanaProvisioning] = useState(false);
   const [geoLoading, setGeoLoading] = useState(false);
+  const [dishLoading, setDishLoading] = useState(false);
   
   // 位置状态
   /** 升级与反馈卡片把自己的保存能力交出来，由页面底部的总保存按钮统一提交 */
@@ -246,7 +248,36 @@ export default function Settings() {
     }
   };
 
-  // 获取当前地理位置
+  // 从星链终端读取位置（dish 自带 GPS，不依赖本机定位服务）
+  const handleGetDishLocation = async () => {
+    if (!window.electronAPI?.getDishLocation) {
+      setMessage({ type: 'error', text: t('settings:location.dish_other') });
+      return;
+    }
+    setDishLoading(true);
+    setMessage(null);
+    try {
+      const result = await window.electronAPI.getDishLocation();
+      if (result.ok && result.location) {
+        const lat = result.location.lat.toFixed(6);
+        const lon = result.location.lon.toFixed(6);
+        setLatitude(lat);
+        setLongitude(lon);
+        setMessage({ type: 'success', text: t('settings:location.got_dish_position', { lat, lon }) });
+      } else {
+        setMessage({ type: 'error', text: dishLocationFailureText(t, result) });
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: dishLocationFailureText(t, { reason: 'other', error: (error as Error).message }),
+      });
+    } finally {
+      setDishLoading(false);
+    }
+  };
+
+  // 获取当前地理位置（浏览器定位 —— 远程桌面 / 系统定位服务关闭时不可用）
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
       setMessage({ type: 'error', text: t('settings:location.not_supported') });
@@ -270,19 +301,9 @@ export default function Settings() {
       },
       (error) => {
         setGeoLoading(false);
-        let errorMsg = t('settings:location.fetch_failed');
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMsg = t('settings:location.permission_denied');
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMsg = t('settings:location.position_unavailable');
-            break;
-          case error.TIMEOUT:
-            errorMsg = t('settings:location.timeout');
-            break;
-        }
-        setMessage({ type: 'error', text: errorMsg });
+        // 带上真实错误码 + Chromium 原文，用户/我们才分得清是哪一种失败
+        console.warn('[Settings] geolocation failed', error.code, error.message);
+        setMessage({ type: 'error', text: geolocationFailureText(t, error) });
       },
       {
         enableHighAccuracy: true,
@@ -493,7 +514,6 @@ export default function Settings() {
                 step="0.000001"
                 value={latitude}
                 onChange={(e) => setLatitude(e.target.value)}
-                placeholder={t('settings:location.latitude_placeholder')}
                 min="-90"
                 max="90"
               />
@@ -506,7 +526,6 @@ export default function Settings() {
                 step="0.000001"
                 value={longitude}
                 onChange={(e) => setLongitude(e.target.value)}
-                placeholder={t('settings:location.longitude_placeholder')}
                 min="-180"
                 max="180"
               />
@@ -514,7 +533,28 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {/* dish 侧读取优先放在前面：真机远程桌面 / 系统定位服务关闭时浏览器定位必然失败，
+                dish 自带 GNSS，不依赖用户机器，是更稳的数据源 */}
+            <Button
+              variant="default"
+              onClick={handleGetDishLocation}
+              disabled={dishLoading}
+              className="flex-1"
+              title={t('settings:location.dish_source_tooltip')}
+            >
+              {dishLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {t('settings:location.fetching')}
+                </>
+              ) : (
+                <>
+                  <MapPin className="w-4 h-4 mr-2" />
+                  {t('settings:location.get_from_dish')}
+                </>
+              )}
+            </Button>
             <Button
               variant="outline"
               onClick={handleGetCurrentLocation}
@@ -569,11 +609,16 @@ export default function Settings() {
             <AlertDescription className="ml-7 text-sm">
               <strong>{t('settings:location.usage_title')}</strong>
               <br />
-              1. {t('settings:location.usage_1')}
+              1. {t('settings:location.usage_dish')}
               <br />
-              2. {t('settings:location.usage_2')}
+              2. {t('settings:location.usage_1')}
               <br />
-              3. {t('settings:location.usage_3')}
+              3. {t('settings:location.usage_2')}
+              <br />
+              4. {t('settings:location.usage_3')}
+              <br />
+              <span className="text-xs opacity-80">{t('settings:location.rdp_hint')}</span>
+              <br />
               <br />
               <span className="text-xs opacity-80">{t('settings:location.privacy')}</span>
             </AlertDescription>

@@ -100,7 +100,69 @@ const KNOWN_FIELD_NUMBERS: Record<string, number> = {
   dishGetObstructionMap: 2008,
   getDeviceInfo: 1008,
   getNetworkInterfaces: 1015,
+  // 公开 proto（starlink-grpc-tools / sparky8512 整理）：Request.get_location = 1017，
+  // 响应 GetLocationResponse { lla { lat, lon, alt }, sigma_m, source }。
+  // 只在描述符里**没有** Request 类型时才会用到这个字段号。
+  getLocation: 1017,
 };
+
+/** dish 自带 GPS 给出的位置 */
+export interface DishLocation {
+  lat: number;
+  lon: number;
+  /** 海拔(m)，设备不给时缺省 */
+  alt?: number;
+  /** 水平误差(m) */
+  sigmaM?: number;
+  /** 定位来源（如 GNSS_ONLY / STARLINK_ONLY），原样透传 */
+  source?: string;
+}
+
+/**
+ * 从 Handle 响应里取位置。
+ *
+ * 字段：`getLocation.lla.{lat,lon,alt}`（json_name）。兼容 `dishGetLocation` 键与
+ * 下划线命名，免得固件换个名字就整体失效。(0,0) 视为无效 —— 设备未定位时会回全 0。
+ */
+export function parseDishLocation(res: Record<string, unknown>): DishLocation | null {
+  const body = (res.getLocation ?? res.dishGetLocation ?? res.get_location) as
+    | Record<string, unknown>
+    | undefined;
+  if (!body || typeof body !== 'object') return null;
+  const lla = (body.lla ?? body) as Record<string, unknown>;
+  const lat = Number(lla.lat);
+  const lon = Number(lla.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  if (lat === 0 && lon === 0) return null;
+  const out: DishLocation = { lat, lon };
+  const alt = Number(lla.alt);
+  if (lla.alt !== undefined && Number.isFinite(alt)) out.alt = alt;
+  const sigma = Number(body.sigmaM ?? body.sigma_m);
+  if ((body.sigmaM ?? body.sigma_m) !== undefined && Number.isFinite(sigma)) out.sigmaM = sigma;
+  if (body.source !== undefined) out.source = String(body.source);
+  return out;
+}
+
+/**
+ * dish 位置拿不到时的原因分类 —— 界面按它给出**可操作**的提示。
+ *
+ *   permission_denied：code 7。dish 默认**不对局域网开放位置**，要在 Starlink App
+ *                      里打开「允许本地网络访问位置/调试数据」开关。
+ *   unsupported      ：code 12，或描述符里根本没有该分支 ⇒ 固件不支持。
+ *   unreachable      ：连不上设备（超时 / 拒绝连接 / 14 UNAVAILABLE / 4 DEADLINE）。
+ *   no_fix           ：调用成功，但设备还没定位（全 0 或缺字段）。
+ */
+export type DishLocationFailure = 'permission_denied' | 'unsupported' | 'unreachable' | 'no_fix' | 'other';
+
+export function classifyDishLocationError(message: string): DishLocationFailure {
+  if (/\(code 7\)|PERMISSION_DENIED/i.test(message)) return 'permission_denied';
+  if (/\(code 12\)|UNIMPLEMENTED|不认任何一个候选分支|没有已知字段号/i.test(message)) return 'unsupported';
+  if (/\(code (4|14)\)|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|timeout|超时|不可达/i.test(message)) {
+    return 'unreachable';
+  }
+  return 'other';
+}
 
 /** reflection 失败后多久内不再重试（小于采集周期 30s，下一轮会重新尝试） */
 const DESCRIPTOR_RETRY_MS = 15000;
@@ -1014,6 +1076,24 @@ export class DishGrpcClient {
         `响应里没有 dishGetHistory (分支 ${branch}, 顶层键: ${Object.keys(res).join(', ')})`);
     }
     return history;
+  }
+
+  /**
+   * 读 dish 自带 GPS 的位置（Request.get_location）。
+   *
+   * 为什么要它：用户机器的浏览器定位依赖 Windows 定位服务 —— 远程桌面会话 / 定位服务关闭时
+   * 必然拿不到。dish 本身就有 GNSS，位置不依赖用户机器。
+   *
+   * 返回 null = 调用成功但设备还没定位；设备不支持/未授权会**抛错**（原因交给
+   * classifyDishLocationError 分类）。
+   */
+  async getLocation(timeoutMs = 6000): Promise<DishLocation | null> {
+    const { res } = await this.callWithFallback(
+      await this.candidateBranches(['getLocation', 'dishGetLocation'], 'location'),
+      timeoutMs,
+      '读取 dish 位置',
+    );
+    return parseDishLocation(res);
   }
 
   close(): void {

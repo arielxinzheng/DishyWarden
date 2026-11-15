@@ -999,6 +999,31 @@ ipcMain.handle('run-traceroute', async (_event, target?: string) => {
   });
 });
 
+/**
+ * 读 dish 自带 GPS 的位置（设置页「从星链终端读取」）。
+ *
+ * 为什么不只靠 navigator.geolocation：Chromium 在 Windows 上走系统定位服务，
+ * 远程桌面会话 / 定位服务关闭时必然 POSITION_UNAVAILABLE —— 改权限代码救不回来。
+ * dish 自己有 GNSS，不依赖用户机器。
+ *
+ * 不抛错：失败也返回 { ok:false, reason, error }，界面按 reason 给可操作的提示。
+ */
+ipcMain.handle('get-dish-location', async () => {
+  const { classifyDishLocationError } = await import('../core/dishGrpc');
+  if (!collector) {
+    return { ok: false, reason: 'unreachable', error: 'collector 未初始化' };
+  }
+  try {
+    const location = await collector.getDishLocation();
+    if (!location) return { ok: false, reason: 'no_fix', error: '设备返回了空位置（尚未定位）' };
+    return { ok: true, location };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[Main] 读取 dish 位置失败:', message);
+    return { ok: false, reason: classifyDishLocationError(message), error: message.slice(0, 300) };
+  }
+});
+
 app.whenReady().then(async () => {
   // ── 诊断模式：--dump-dish-api ─────────────────────────────
   // 打印完就退出，不开窗口、不启动采集。用来问设备「支持哪些 oneof 分支」。

@@ -620,6 +620,11 @@ export class DataCollector extends EventEmitter {
   getRouterProbeResult(): RouterProbeResult | null {
     return this.lastRouterProbe;
   }
+
+  /** 读 dish 自带 GPS 的位置（设置页用；失败直接抛，原因交给界面） */
+  getDishLocation(): ReturnType<DishClient['getDishLocation']> {
+    return this.client.getDishLocation();
+  }
   
   /**
    * 获取检测到的卫星切换事件

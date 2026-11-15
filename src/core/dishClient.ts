@@ -6,7 +6,7 @@
  */
 
 import { createConnectTransport } from '@connectrpc/connect-web';
-import { DishGrpcClient } from './dishGrpc';
+import { DishGrpcClient, type DishLocation } from './dishGrpc';
 
 /**
  * 把「可能是数字」的值解析成 number，解析不出来返回 undefined。
@@ -840,6 +840,23 @@ export class DishClient {
    */
   getGrpcClient(): DishGrpcClient | null {
     return this.grpc;
+  }
+
+  /**
+   * 读 dish 自带 GPS 的位置（设置页「从星链终端读取」用）。
+   *
+   * 不吞错：失败原因要原样给到界面（尤其是 PERMISSION_DENIED ⇒ 要提示用户去 App 里开开关）。
+   */
+  async getDishLocation(): Promise<DishLocation | null> {
+    if (!this.grpc) {
+      this.grpc = new DishGrpcClient(
+        this.config.address,
+        this.config.grpcPort,
+        this.config.grpcWebPort,
+        this.config.descriptorCachePath,
+      );
+    }
+    return this.grpc.getLocation(this.config.timeout);
   }
 
   /** 正在进行的 / 最近一次的 history 响应（一个采集周期内共享） */

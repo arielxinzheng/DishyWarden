@@ -36,6 +36,9 @@ const CANDIDATES = [
   'dishGetObstructionMap',
   'getInfo',
   'dishGetInfo',
+  // 设置页「从星链终端读取」位置用：诊断时直接看到它是可用 / PERMISSION_DENIED(7) / 不支持
+  'getLocation',
+  'getDeviceInfo',
 ];
 
 /**
