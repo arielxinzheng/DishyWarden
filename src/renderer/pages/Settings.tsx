@@ -802,6 +802,13 @@ export default function Settings() {
             <label htmlFor="telegram-enabled" className="text-sm font-medium">
               {t('settings:notifications.telegram_enable')}
             </label>
+            {/* 公网通道行为说明: 断网期间发不出去, 恢复后聚合补发, 避免用户误以为能实时收到。
+                挂在「启用 Telegram 通知」旁边 —— 原来它是卡片末尾的一个独立段落,
+                换成 ⓘ 后没有依托、只能独占一行, 看起来像掉行了。 */}
+            <HintTip
+              text={t('settings:notifications.public_channel_offline_hint')}
+              label={t('settings:notifications.telegram_enable')}
+            />
           </div>
 
           {config.notifications.telegram?.enabled && (
@@ -855,11 +862,6 @@ export default function Settings() {
             </>
           )}
 
-          {/* 公网通道行为说明: 断网期间发不出去, 恢复后聚合补发, 避免用户误以为能实时收到 */}
-          <HintTip
-            text={t('settings:notifications.public_channel_offline_hint')}
-            label={t('settings:notifications.public_channel_offline_hint')}
-          />
         </CardContent>
       </Card>
 
