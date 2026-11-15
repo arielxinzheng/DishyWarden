@@ -88,6 +88,35 @@ pinUserDataDir();
 initFileLogger();
 
 /**
+ * 让 Chromium 自己的日志也落到我们的日志目录。
+ *
+ * ## 为什么需要
+ *
+ * 有些问题只发生在 Chromium 内部，应用层看不到任何线索 —— 定位功能就是典型：
+ * `navigator.geolocation` 走哪条 provider 链路、为什么回调不触发，
+ * 这些信息只在 Chromium 的日志里（"Network location provider ... No response
+ * received" / "provider_manager_mode_ is initialized to ..."）。
+ *
+ * 没有它，这类问题只能靠猜（这次就猜错了好几轮）。
+ *
+ * `--log-file` 必须是**绝对路径**（Chromium 不认相对路径）。
+ */
+function enableChromiumLogging(): void {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    app.commandLine.appendSwitch('enable-logging');
+    app.commandLine.appendSwitch('log-file', path.join(dir, 'chromium.log'));
+    app.commandLine.appendSwitch('v', '1');
+    console.log('[Main] Chromium 日志已开启:', path.join(dir, 'chromium.log'));
+  } catch (err) {
+    console.warn('[Main] 开启 Chromium 日志失败:', err);
+  }
+}
+
+enableChromiumLogging();
+
+/**
  * 初始化云端相关能力（上报客户端 + 升级管理器）。
  *
  * 两者都**默认静默**：

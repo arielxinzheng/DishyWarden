@@ -29,6 +29,7 @@ import {
 } from '../lib/webhookTemplate';
 import { dishLocationFailureText, geolocationFailureText } from '../lib/locationMessages';
 import { resolveLocation } from '../lib/locationFallback';
+import { requestGeolocation } from '../lib/geolocation';
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -259,22 +260,19 @@ export default function Settings() {
    * 用户点一次按钮就够了，不用再点第二个。
    */
   const requestBrowserLocation = (): Promise<{ lat: string; lon: string }> =>
-    new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error(t('settings:location.not_supported')));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          resolve({
-            lat: position.coords.latitude.toFixed(6),
-            lon: position.coords.longitude.toFixed(6),
-          });
-        },
-        (error) => reject(error),
-        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
-      );
-    });
+    requestGeolocation()
+      .then(({ lat, lon }) => ({
+        lat: lat.toFixed(6),
+        lon: lon.toFixed(6),
+      }))
+      .catch((err) => {
+        // 不支持 geolocation 的情况统一成 code 2（位置不可用），
+        // 让下游的失败格式化走同一套错误码路径。
+        if (!err || typeof err.code !== 'number') {
+          throw { code: 2, message: t('settings:location.not_supported') };
+        }
+        throw err;
+      });
 
   // 获取当前地理位置（浏览器定位 —— 远程桌面 / 系统定位服务关闭时不可用）
   const handleGetCurrentLocation = async () => {
