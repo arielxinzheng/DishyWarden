@@ -6,6 +6,7 @@
  *   3. 标题与正文都原样带出去（多行用 \n 分隔，浮层按 pre-line 显示）。
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HintTip, buildTipText } from './HintTip';
@@ -52,5 +53,20 @@ describe('buildTipText', () => {
 
   it('空数组 ⇒ 空串', () => {
     expect(buildTipText([])).toBe('');
+  });
+});
+
+describe('HintTip 的浮层挂载点（防回归）', () => {
+  it('⭐ 浮层必须用 portal 挂到 body，不能留在原 DOM 位置', () => {
+    // 祖先元素只要有 transform / filter / backdrop-filter，就会成为
+    // position:fixed 的包含块 ⇒ 浮层会被限制在那个祖先里。
+    // 底部操作条正好有 backdrop-blur ⇒ 不挂 portal 的话，
+    // 「重置」左边的 ⓘ 就会**显示不出提示文字**（实测踩过）。
+    const src = readFileSync(
+      new URL('./HintTip.tsx', import.meta.url),
+      'utf-8',
+    );
+    expect(src).toContain('createPortal');
+    expect(src).toMatch(/createPortal\([\s\S]*document\.body/);
   });
 });

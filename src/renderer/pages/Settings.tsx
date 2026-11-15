@@ -807,8 +807,10 @@ export default function Settings() {
           {config.notifications.telegram?.enabled && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t('settings:notifications.bot_token')}</label>
-                <HintTip text={t('settings:notifications.bot_token_hint')} label={t('settings:notifications.bot_token')} />
+                <div className="flex items-center gap-1.5">
+                  <label className="text-sm font-medium">{t('settings:notifications.bot_token')}</label>
+                  <HintTip text={t('settings:notifications.bot_token_hint')} label={t('settings:notifications.bot_token')} />
+                </div>
                 <Input
                   type="password"
                   value={config.notifications.telegram.botToken}
@@ -829,8 +831,10 @@ export default function Settings() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t('settings:notifications.chat_id')}</label>
-                <HintTip text={t('settings:notifications.chat_id_hint')} label={t('settings:notifications.chat_id')} />
+                <div className="flex items-center gap-1.5">
+                  <label className="text-sm font-medium">{t('settings:notifications.chat_id')}</label>
+                  <HintTip text={t('settings:notifications.chat_id_hint')} label={t('settings:notifications.chat_id')} />
+                </div>
                 <Input
                   value={config.notifications.telegram.chatId}
                   onChange={(e) =>

@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Info } from 'lucide-react';
 
 interface TipContent {
@@ -198,25 +199,31 @@ export function HintTip({ text, title, label, className }: HintTipProps) {
       >
         <Info className="w-full h-full" aria-hidden="true" />
       </button>
-      {content && (
-        <div
-          ref={tipRef}
-          role="tooltip"
-          className="fixed z-50 pointer-events-none rounded-md border border-border
-                     bg-popover/95 px-2.5 py-1.5 text-[11px] leading-relaxed text-foreground
-                     shadow-lg backdrop-blur-sm whitespace-pre-line"
-          style={{
-            left: pos?.x ?? -9999,
-            top: pos?.y ?? -9999,
-            maxWidth: MAX_WIDTH,
-            opacity: pos ? 1 : 0,
-            transition: 'opacity 80ms',
-          }}
-        >
-          {content.title && <div className="font-semibold mb-0.5">{content.title}</div>}
-          {content.text}
-        </div>
-      )}
+      {content &&
+        // ⭐ 必须用 portal 挂到 body：
+        // 祖先元素只要有 transform / filter / backdrop-filter，就会成为
+        // position:fixed 的**包含块** ⇒ 浮层会被限制在那个祖先里
+        // （底部操作条就有 backdrop-blur）⇒ 表现为"提示文字不显示"。
+        createPortal(
+          <div
+            ref={tipRef}
+            role="tooltip"
+            className="fixed z-[9999] pointer-events-none rounded-md border border-border
+                       bg-popover/95 px-2.5 py-1.5 text-[11px] leading-relaxed text-foreground
+                       shadow-lg backdrop-blur-sm whitespace-pre-line"
+            style={{
+              left: pos?.x ?? -9999,
+              top: pos?.y ?? -9999,
+              maxWidth: MAX_WIDTH,
+              opacity: pos ? 1 : 0,
+              transition: 'opacity 80ms',
+            }}
+          >
+            {content.title && <div className="font-semibold mb-0.5">{content.title}</div>}
+            {content.text}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
