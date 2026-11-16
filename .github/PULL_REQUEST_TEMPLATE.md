@@ -18,4 +18,5 @@
 - [ ] `README.md` / `PRIVACY.md` were **not edited directly** — if they need
       changes, edit the sources under `docs/readme/` / `docs/privacy/` and run
       `npm run docs:generate`
-- [ ] No machine-local absolute paths (`/Users/...`) and no credentials in the diff
+- [ ] No machine-local absolute paths (home-directory prefixes) and no credentials
+      in the diff
