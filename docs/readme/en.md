@@ -9,6 +9,30 @@ and tells you the moment something goes wrong.
 
 ---
 
+## 🌟 Why DishyWarden?
+
+Starlink monitoring today usually means an account-tied app or a web dashboard
+that holds your telemetry on someone else's server. DishyWarden is a third option:
+
+- **Local-first, account-free.** Every sample lands in SQLite on your machine.
+  No Starlink login, no cloud dependency — and the only two outbound channels are
+  documented field by field in [PRIVACY.md](PRIVACY.md).
+- **Alerting is the point, not an afterthought.** 28 built-in rules across
+  connectivity, signal, hardware and weather, delivered over Telegram or webhook,
+  with an offline queue that re-sends whatever was raised during an outage.
+- **It tells you *where* it broke.** A three-type probe fleet (ICMP / DNS / TLS)
+  and a parsed per-hop route map separate dish, router, resolver and path
+  failures — DNS dual-track probing even distinguishes a broken local resolver
+  from broken upstream DNS.
+- **Open source, auditable.** MIT-licensed; you can read exactly what talks to
+  your terminal instead of trusting a black box.
+- **Anonymous feedback that tunes the rules.** Flag a false positive once
+  (opt-in) and the alert rules improve for everyone.
+- **Fits your stack.** Prometheus export with a ready-made Grafana dashboard,
+  five UI languages, auto-update on Windows.
+
+---
+
 ## 📸 Screenshots
 
 | Dashboard | Obstruction map |
@@ -33,11 +57,11 @@ and tells you the moment something goes wrong.
 
 **Alerts that mean something**
 
-- **27 built-in rules** — antenna offline, PoP latency, severe packet loss,
+- **28 built-in rules** — antenna offline, PoP latency, severe packet loss,
   obstruction, thermal throttling, mis-pointing, motor fault, GNSS trouble,
   icing, PoE/power, router offline, flapping, WiFi quality, weather, and more
-- Three delivery channels: **Telegram**, **E-mail**, **Webhook** (with template
-  variables and a reusable payload template)
+- Two delivery channels: **Telegram** and **Webhook** (with template variables
+  and a reusable payload template)
 - Offline queue: alerts raised while the link is down are delivered once it recovers
 - Probe suppression: an alert caused by a failing probe does not fire twice
 
@@ -133,6 +157,9 @@ Download the latest asset from the [releases page](%REPO_URL%/releases):
 Upgrades are delivered by [electron-updater](https://github.com/electron-userland/electron-builder)
 through the manifest at `%FEED_URL%`; the app checks on startup and roughly every
 12 hours, silently degrading if the network is unavailable.
+
+Auto-update is currently **Windows-only**. On macOS, download the new `.dmg`
+from the releases page and replace the app manually.
 
 ---
 

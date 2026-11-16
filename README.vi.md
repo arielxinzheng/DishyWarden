@@ -26,6 +26,31 @@ thành thông tin dùng được, và báo ngay khi có gì bất ổn.
 
 ---
 
+## 🌟 Vì sao chọn DishyWarden?
+
+Giám sát Starlink hiện nay thường chỉ có hai dạng: ứng dụng chính thức buộc phải
+đăng nhập tài khoản, hoặc bảng điều khiển web giữ dữ liệu telemetry của bạn trên
+máy chủ của người khác. DishyWarden là lựa chọn thứ ba:
+
+- **Cục bộ là ưu tiên, không cần tài khoản.** Mọi mẫu đều nằm trong SQLite trên
+  máy bạn. Không đăng nhập Starlink, không phụ thuộc đám mây — hai kênh đi ra
+  ngoài duy nhất được ghi rõ từng trường trong [PRIVACY.md](PRIVACY.md).
+- **Cảnh báo là trọng tâm, không phải phần phụ.** 28 quy tắc tích hợp phủ
+  kết nối, tín hiệu, phần cứng và thời tiết, gửi qua Telegram hoặc webhook;
+  hàng đợi ngoại tuyến gửi lại những gì phát sinh trong lúc mất mạng.
+- **Cho bạn biết hỏng ở tầng nào.** Ba loại probe (ICMP / DNS / TLS) cùng sơ đồ
+  đường đi phân tích từng chặng tách lỗi đầu cuối, bộ định tuyến, resolver và
+  đường truyền — probe DNS hai luồng còn phân biệt "resolver cục bộ hỏng" với
+  "DNS thượng nguồn hỏng".
+- **Mã nguồn mở, kiểm chứng được.** Giấy phép MIT — bạn đọc được toàn bộ mã
+  chạy trên đầu cuối của mình.
+- **Phản hồi ẩn danh tinh chỉnh bộ luật.** Đánh dấu một báo động giả (cần
+  đồng ý) và bộ luật được cải thiện cho tất cả mọi người.
+- **Khớp với hệ sinh thái của bạn.** Xuất Prometheus kèm bảng điều khiển
+  Grafana, 5 ngôn ngữ giao diện, tự cập nhật trên Windows.
+
+---
+
 ## 📸 Ảnh chụp màn hình
 
 | Bảng điều khiển | Bản đồ che chắn |
@@ -50,12 +75,12 @@ thành thông tin dùng được, và báo ngay khi có gì bất ổn.
 
 **Cảnh báo đáng tin**
 
-- **27 quy tắc tích hợp** — ăn-tenh mất kết nối, độ trễ PoP, mất gói nặng,
+- **28 quy tắc tích hợp** — ăn-tenh mất kết nối, độ trễ PoP, mất gói nặng,
   che chắn tầm nhìn, giảm tần số do quá nhiệt, lệch hướng, lỗi động cơ,
   bất thường GNSS, đóng băng và sấy băng, PoE/nguồn, bộ định tuyến offline,
   mất kết nối liên tục, chất lượng WiFi, thời tiết xấu, tài khoản bất thường,
   chuyển vùng vệ tinh và nhiều hơn nữa
-- Ba kênh gửi: **Telegram**, **Email**, **Webhook**
+- Hai kênh gửi: **Telegram** và **Webhook**
   (có biến mẫu và mẫu payload dùng lại được)
 - Hàng đợi ngoại tuyến: cảnh báo phát sinh lúc mất mạng sẽ được gửi lại khi
   kết nối trở lại
@@ -153,6 +178,9 @@ Tải bản mới nhất từ [trang phát hành](https://github.com/arielxinzhe
 Bản cập nhật do [electron-updater](https://github.com/electron-userland/electron-builder)
 phát qua manifest `https://github.com/arielxinzheng/DishyWarden/releases/latest/download/latest.yml`; ứng dụng kiểm tra lúc khởi động và sau đó khoảng
 mỗi 12 giờ, và im lặng bỏ qua nếu mạng không sẵn dụng.
+
+Tự cập nhật hiện **chỉ dành cho Windows**. Trên macOS, hãy tải `.dmg` mới từ
+trang phát hành và thay thế thủ công.
 
 ---
 
