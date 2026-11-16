@@ -37,8 +37,8 @@
     "enabled": false,
     "url": "http://localhost:3000",
     "apiKey": "",
-    "username": "admin",
-    "password": "admin"
+    "username": "changeme",
+    "password": "changeme"
   },
   "version": "0.1.0"
 }
