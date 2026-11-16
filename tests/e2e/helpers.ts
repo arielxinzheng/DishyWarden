@@ -1,7 +1,11 @@
 /**
  * E2E 测试辅助函数
  */
-import { _electron as electron, ElectronApplication, Page } from '@playwright/test';
+import { _electron as electron } from '@playwright/test';
+// 类型专用导入：ElectronApplication / Page 只是类型，运行时没有这个导出。
+// 写成值导入时 Playwright 的转译器会原样保留它，报
+// "does not provide an export named 'ElectronApplication'"。
+import type { ElectronApplication, Page } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
