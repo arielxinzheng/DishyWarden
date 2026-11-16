@@ -357,11 +357,15 @@ ${emoji} <b>[${alert.severity.toUpperCase()}]</b> ${alert.summary}
 
 
   /**
-   * 邮件通知 (占位,需要 nodemailer)
+   * 邮件通道 v1.0 未实现 —— 显式抛错而非假成功。
+   *
+   * 假成功的危害：sendTo 返回 ok:true ⇒ 分发器认为已投递，不重试、
+   * 不入离线队列、日志无异常 —— 手工在 config.json 里启用 email 的用户
+   * 会静默收不到任何告警。抛错后走失败路径，日志可见
+   * 「email 发送失败: Email notifications are not implemented」。
    */
   private async sendEmail(_context: NotificationContext): Promise<void> {
-    // TODO: 实现邮件发送
-    console.log('Email notification not implemented yet');
+    throw new Error('Email notifications are not implemented');
   }
 
   /**
