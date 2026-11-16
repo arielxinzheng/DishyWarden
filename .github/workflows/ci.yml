@@ -56,10 +56,20 @@ jobs:
         run: node scripts/gen-readme.mjs --check
 
   e2e:
-    name: E2E (advisory)
+    name: E2E (disabled — Playwright/Electron incompatibility, see docs/E2E-STATUS.md)
     runs-on: ubuntu-latest
-    # Non-blocking for now: the suite talks to a mocked renderer and is still
-    # being stabilised. Promote to blocking once it is green on every push.
+    # Disabled on purpose: the suite cannot start the app at all.
+    #
+    # playwright-core's Electron launcher passes --remote-debugging-port=0
+    # *before* the app path; Electron 33's Node CLI rejects unknown options
+    # there ("bad option"), so the app never starts and every test fails at
+    # launch. Every Playwright release from 1.30 to 1.64 does this, so it is
+    # not a version regression. Electron 33 does accept the switch *after* the
+    # app path, which is the basis of the fix options in docs/E2E-STATUS.md.
+    #
+    # Kept here (disabled) rather than deleted, so the work stays visible and
+    # the intended setup is one `if: false` away from being restored.
+    if: false
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -74,11 +84,17 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
+      - name: Build renderer and main process
+        run: |
+          npx vite build
+          npm run electron:build
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Run E2E suite
-        run: npm run test:e2e
+      - name: Run E2E suite under a virtual display
+        # Electron needs an X server on Linux.
+        run: xvfb-run -a npm run test:e2e
 
   hygiene:
     name: Repository hygiene
