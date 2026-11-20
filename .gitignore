@@ -30,26 +30,5 @@ coverage/
 # 云端服务独立仓库（git 独立于本仓库，勿作为子目录提交）
 CloudServer/
 
-# ─────────────────────────────────────────────────────────────
-# 内部材料（需求文档 / 真机证据 / 原型素材 / 内部交接）
-#
-# 这些文件已实际移出工作树，存放在 ../SLMonitorBackup/：
-#   changelog/      1.0 之前 19 份迭代变更记录
-#   dev-notes/      开发过程快照（排障记录、布局说明、交接文档）
-#   testing/        测试说明文档
-#   docs-internal/  真机档案、API 对照、Windows 打包、位置调研
-#   prototypes/     原型 HTML 与演示页
-#
-# 下面保留几条**防御规则**：万一这些文件被放回工作树，不要误提交。
-# ─────────────────────────────────────────────────────────────
+# 给 AI agent 的工作规范（本地保留，不进公开仓库）
 AGENTS.md
-DEVELOPMENT-STATUS.md
-FIX_ELECTRON.sh
-docs/HANDOFF-PROMPTS.md
-docs/REAL-DEVICE-EVIDENCE-*.md
-docs/VERIFY-2026-11-15.md
-docs/VERIFY-TRACE-LOCATION-2026-11-15.md
-SLMonitor-Prototype.html
-StarlinkMonitor.html
-alert-demo.html
-*.itmz

@@ -1553,7 +1553,7 @@ export class AlertManager extends EventEmitter {
     const baselineOk = dualDns.baseline.ok;
 
     // 归因分析
-    let summary = '⚠️ 网页无法加载 (域名解析失败)';
+    const summary = '⚠️ 网页无法加载 (域名解析失败)';
     let description = '';
     const recommendations: string[] = [];
 

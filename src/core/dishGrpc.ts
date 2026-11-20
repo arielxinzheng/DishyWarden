@@ -1183,7 +1183,7 @@ export function qualifyTypeNames(set: { file: FileDesc[] }): void {
     // 同时补 import：@grpc/reflection 发出的文件 dependency 为空，
     // 而 bufbuild 只在声明过的 import 里找跨文件类型
     const deps = new Set(f.dependency);
-    const use = (name: string): string => {
+    const trackDep = (name: string): string => {
       const owner = defined.get(name);
       if (owner && owner !== f.name) deps.add(owner);
       return name;
@@ -1191,7 +1191,7 @@ export function qualifyTypeNames(set: { file: FileDesc[] }): void {
     const fix = (scope: string, m: MsgDesc): void => {
       const full = `${scope}.${m.name}`;
       for (const fd of m.field) {
-        if (fd.typeName) fd.typeName = use(resolve(full, fd.typeName));
+        if (fd.typeName) fd.typeName = trackDep(resolve(full, fd.typeName));
         // 有的 reflection 实现（如 @grpc/reflection）发的描述符不带 json_name ⇒
         // bufbuild 的 jsonName 是 "" ⇒ toJson 把所有字段都写到 "" 键下、
         // getStatus 看到的顶层键只有一个空串。按 protoc 的规则补上。
@@ -1203,8 +1203,8 @@ export function qualifyTypeNames(set: { file: FileDesc[] }): void {
     for (const m of f.messageType) fix(pkg, m);
     for (const sv of f.service) {
       for (const md of sv.method) {
-        md.inputType = use(resolve(pkg, md.inputType));
-        md.outputType = use(resolve(pkg, md.outputType));
+        md.inputType = trackDep(resolve(pkg, md.inputType));
+        md.outputType = trackDep(resolve(pkg, md.outputType));
       }
     }
     for (const d of deps) if (!f.dependency.includes(d)) f.dependency.push(d);

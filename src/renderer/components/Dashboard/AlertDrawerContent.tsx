@@ -133,7 +133,7 @@ export function AlertDrawerContent({ alerts, onAlertsChange }: AlertDrawerConten
       
       // 显示 Toast 提示
       if (typeof window !== 'undefined' && 'toast' in window) {
-        // @ts-ignore
+        // @ts-expect-error window.toast 由宿主页面注入，是可选全局，未纳入 TS 声明
         window.toast?.success(t('dashboard:alert_drawer.toast_false_positive'));
       }
 

@@ -40,6 +40,15 @@ jobs:
       - name: Typecheck (electron main process)
         run: npx tsc --noEmit -p tsconfig.electron.json
 
+      # 只拦 error, 不拦 warning。
+      #   为什么不用 --max-warnings 0: 存量还有 ~147 条 warning, 绝大多数是历史遗留的
+      #   no-explicit-any（集中在测试文件和各种 any 兜底处）。把它设成 0 会让这一步
+      #   从第一天就红, 于是大家学会无视它 —— 那还不如没有。
+      #   现在的契约是: **error 一律阻塞, warning 全量打印当债务清单**。
+      #   债清完后删掉这行注释, 改用 `npm run lint:strict`（带 --max-warnings 0）。
+      - name: Lint
+        run: npm run lint
+
       - name: Unit tests
         run: npx vitest run
 
