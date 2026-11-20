@@ -26,6 +26,7 @@ import {
   HOURLY_RETENTION_DAYS,
   HANDOFF_RETENTION_DAYS,
 } from './schema';
+import { ESTIMATED_BYTES_SQL } from './summarySql';
 import type {
   HistoryQuery,
   HistorySample,
@@ -128,6 +129,7 @@ export class TelemetryStore {
   private readonly selectBucketed: Database.Statement;
   private readonly selectHourly: Database.Statement;
   private readonly selectSummary: Database.Statement;
+  private readonly selectEstimatedBytes: Database.Statement;
   private readonly selectOutages: Database.Statement;
 
   private readonly appendTx: (point: TimestampedTelemetry) => void;
@@ -304,6 +306,8 @@ export class TelemetryStore {
       FROM telemetry_samples
       WHERE ts >= ? AND ts <= ?
     `);
+
+    this.selectEstimatedBytes = this.db.prepare(ESTIMATED_BYTES_SQL);
 
     this.selectOutages = this.db.prepare(`
       SELECT COUNT(*) AS outages FROM (
@@ -569,9 +573,10 @@ export class TelemetryStore {
 
   /**
    * 区间统计摘要。
-   * 流量按实际采样跨度反推平均间隔估算, 比写死 30s 更贴近真实。
+   * 流量按**每拍的实际采样间隔**计入（间隔封顶 2 × 标称间隔），
+   * 跨停机/重启的大间隙不会被外推成持续流量。详见 summarySql.ts。
    */
-  summarize(fromMs: number, toMs: number = Date.now()): HistorySummary {
+  summarize(fromMs: number, toMs: number = Date.now(), nominalIntervalSec: number = SAMPLE_INTERVAL_MS / 1000): HistorySummary {
     const row = this.selectSummary.get(fromMs, toMs) as {
       n: number;
       latency_avg: number;
@@ -605,7 +610,11 @@ export class TelemetryStore {
 
     if (!row || row.n === 0) return empty;
 
-    const intervalSec = resolveIntervalSec(row.n, row.first_ts, row.last_ts);
+    const capSec = nominalIntervalSec * 2;
+    const bytes = this.selectEstimatedBytes.get(nominalIntervalSec, capSec, fromMs, toMs) as {
+      down_bytes: number;
+      up_bytes: number;
+    };
     const outages = this.selectOutages.get(fromMs, toMs) as { outages: number } | undefined;
 
     return {
@@ -618,8 +627,8 @@ export class TelemetryStore {
       avgUpBps: row.up_avg,
       availability: row.online_n / row.n,
       outageCount: outages?.outages ?? 0,
-      estimatedDownBytes: (row.down_sum * intervalSec) / 8,
-      estimatedUpBytes: (row.up_sum * intervalSec) / 8,
+      estimatedDownBytes: bytes.down_bytes,
+      estimatedUpBytes: bytes.up_bytes,
       firstTs: row.first_ts,
       lastTs: row.last_ts,
     };
@@ -966,11 +975,4 @@ function finalizeEvent(event: {
     avgFractionObstructed,
     maxFractionObstructed,
   };
-}
-
-function resolveIntervalSec(count: number, firstTs: number | null, lastTs: number | null): number {
-  if (count > 1 && firstTs !== null && lastTs !== null && lastTs > firstTs) {
-    return (lastTs - firstTs) / (count - 1) / 1000;
-  }
-  return SAMPLE_INTERVAL_MS / 1000;
 }

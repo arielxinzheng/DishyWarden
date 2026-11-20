@@ -427,7 +427,8 @@ export class DataCollector extends EventEmitter {
    */
   getSummary(seconds: number) {
     const now = Date.now();
-    return this.store?.summarize(now - seconds * 1000, now) ?? null;
+    // 把采集间隔传给 summarize：流量按样本间隔计，间隔封顶 2×标称。
+    return this.store?.summarize(now - seconds * 1000, now, this.config.interval / 1000) ?? null;
   }
 
   /**
