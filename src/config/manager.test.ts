@@ -46,7 +46,7 @@ describe('ConfigManager · cloud 段落兼容', () => {
 
     expect(cloud.endpoint).toBe(CLOUD_ENDPOINT); // 后台常量, 用户不可改
     expect(cloud.clientId).toBe('');
-    expect(cloud.feedbackEnabled).toBe(false);
+    expect(cloud.feedbackEnabled).toBe(true);
     expect(cloud.updateFeedUrl).toBe(UPDATE_FEED_URL);
     expect(cloud.checkIntervalHours).toBe(12);
   });

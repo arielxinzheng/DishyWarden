@@ -15,6 +15,7 @@ import { CloudClient } from '../core/cloudClient';
 import { UpdateManager, UpdateState } from '../core/updater';
 import { runDishApiDump } from './dishApiDump';
 import { initFileLogger, installProcessHandlers, getLogFilePath, showFatalDialog } from './logger';
+import { resolveAppVersion } from './appVersion';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,13 +140,15 @@ function initCloudServices(): void {
 
   cloudClient = new CloudClient({
     getConfig: () => configManager.getConfig(),
-    getAppVersion: () => app.getVersion(),
+    // 版本号统一走 resolveAppVersion：开发态 app.getVersion() 会返回 Electron
+    // 的版本（33.4.11），上报到云端会把版本分布统计搅乱
+    getAppVersion: () => resolveAppVersion(),
     getPlatform: () => process.platform,
   });
 
   updateManager = new UpdateManager({
     getConfig: () => configManager.getConfig(),
-    getAppVersion: () => app.getVersion(),
+    getAppVersion: () => resolveAppVersion(),
     isPackaged: () => app.isPackaged,
     onState: (state: UpdateState) => {
       sendToRenderer('update-state', state);
@@ -682,7 +685,7 @@ ipcMain.handle('mark-false-positive', (_event, params: {
  */
 ipcMain.handle('get-update-state', () => {
   if (!updateManager) {
-    return { status: 'disabled', currentVersion: app.getVersion() };
+    return { status: 'disabled', currentVersion: resolveAppVersion() };
   }
   return updateManager.getState();
 });
@@ -692,7 +695,7 @@ ipcMain.handle('get-update-state', () => {
  */
 ipcMain.handle('check-for-update', async () => {
   if (!updateManager) {
-    return { status: 'disabled', currentVersion: app.getVersion() };
+    return { status: 'disabled', currentVersion: resolveAppVersion() };
   }
   return await updateManager.check(true);
 });

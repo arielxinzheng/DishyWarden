@@ -277,10 +277,11 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   cloud: {
     // endpoint / updateFeedUrl 由后台常量固定，设置页不再暴露（见文件上方注释）。
-    // feedbackEnabled 默认 false —— 隐私红线：误报上报必须 opt-in。
+    // feedbackEnabled 默认 true —— 误报样本是训练告警规则的主要来源，
+    // 用户可在设置页随时关闭（opt-out）。
     endpoint: CLOUD_ENDPOINT,
     clientId: '',
-    feedbackEnabled: false,
+    feedbackEnabled: true,
     updateFeedUrl: UPDATE_FEED_URL,
     checkIntervalHours: 12,
   },

@@ -70,11 +70,11 @@ export const UpdateFeedbackCard = forwardRef<UpdateFeedbackCardHandle, UpdateFee
   // 表单本地状态：设置页的总保存按钮是分段保存（不含 cloud 段），
   // 所以这块自己管一份，保存走独立的 update-cloud-config。
   // 端点/更新源不在表单里（后台固定），这里只管用户意愿。
-  const [feedbackEnabled, setFeedbackEnabled] = useState(cloud?.feedbackEnabled ?? false);
+  const [feedbackEnabled, setFeedbackEnabled] = useState(cloud?.feedbackEnabled ?? true);
 
   // 配置被重新加载（首次加载 / 点重置）时同步一次
   useEffect(() => {
-    setFeedbackEnabled(cloud?.feedbackEnabled ?? false);
+    setFeedbackEnabled(cloud?.feedbackEnabled ?? true);
   }, [cloud?.feedbackEnabled]);
 
   // 拉一次初始状态 + 订阅后续变化

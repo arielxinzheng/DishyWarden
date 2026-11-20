@@ -143,11 +143,14 @@ export default function Settings() {
         cloud: {
           endpoint: '',
           clientId: '',
-          feedbackEnabled: false,
+          feedbackEnabled: true,
           updateFeedUrl: '',
           checkIntervalHours: 12,
         },
-        version: '0.1.0',
+        // 这个字段只是结构占位，没有任何展示用途（真版本号见 __APP_VERSION__ /
+        // 主进程 resolveAppVersion），但别在这里写死数字 —— 会变成下一个
+        // 「改了一处、忘了另一处」的源头。
+        version: __APP_VERSION__,
       } as AppConfig);
     }
     setLoading(false);

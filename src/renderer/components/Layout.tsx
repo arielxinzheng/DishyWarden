@@ -2,7 +2,6 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { Activity, Compass, Radio, Satellite, Bell, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
-import { LanguageSwitcher } from './LanguageSwitcher';
 
 /** 导航项只存「路径 + 图标 + 翻译键」，文案一律由 i18n 提供 */
 const navItems = [
@@ -51,13 +50,12 @@ export default function Layout() {
           })}
         </ul>
 
-        {/* 语言切换器：全局可达，结果持久化到 localStorage */}
-        <div className="pt-4 pb-3 border-t border-ink-700">
-          <LanguageSwitcher variant="label" className="w-full justify-between" />
-        </div>
+        {/* 语言切换只保留右上角那一处（各页面 header 的 LanguageSwitcher），
+            侧边栏不再放第二个入口 —— 同一个设置在两处出现，只会让人怀疑
+            「这两个是不是分别控制不同范围」。 */}
 
         <div className="pt-3 border-t border-ink-700 text-xs text-muted-foreground">
-          <p>{t('common:version', { version: '0.1.0' })}</p>
+          <p>{t('common:version', { version: __APP_VERSION__ })}</p>
           <p className="mt-1">{t('common:copyright')}</p>
         </div>
       </nav>
