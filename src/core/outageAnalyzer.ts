@@ -217,14 +217,19 @@ export function analyzeOutages(
   // 诊断日志: 真机 outages 的单位没有权威文档, 这行日志能让远程实测机上
   // 一眼看出设备发的是秒/毫秒/微秒/纳秒, 以及到底有没有带 outages。
   // 只打印数量级与计数, 不打印原始条目(避免把设备标识带进日志)。
-  if (outages.length > 0) {
+  // 只在异常时打印: 数量为 0, 或单位不是毫秒 —— 正常情况不刷屏。
+  if (outages.length === 0) {
+    console.log('[outage] outages=0 设备没有返回任何中断记录');
+  } else {
     const first = normalizeOutage(outages[0]);
     const unit = detectTimestampUnit(first.startTimestamp);
-    console.log(
-      `[outage] outages=${outages.length} unit=${unit ?? 'unknown'} ` +
-        `first_ts_magnitude=${first.startTimestamp.toExponential(2)} ` +
-        `first_duration_ms=${toDurationMs(first.durationMs, unit)}`
-    );
+    if (unit !== 'ms') {
+      console.log(
+        `[outage] outages=${outages.length} unit=${unit} ` +
+          `first_ts_magnitude=${first.startTimestamp.toExponential(2)} ` +
+          `first_duration_ms=${toDurationMs(first.durationMs, unit)}`
+      );
+    }
   }
 
   const totalOutages = outages.length;
