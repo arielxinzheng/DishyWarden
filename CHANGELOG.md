@@ -11,8 +11,25 @@ format and adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.0.1] — 2026-11-23
+
 ### Fixed
 
+- **The "24H usage" figure no longer counts traffic that never happened.**
+  The estimate multiplied the summed throughput by the average gap between
+  samples, so any idle stretch (the app closed, a laptop asleep, a restart)
+  was charged traffic for the whole gap. With 128 samples spread over 22.4
+  hours that average gap was derived as 635 s instead of 30 s, and the
+  reported usage came out roughly 21 times above the traffic actually
+  observed. Traffic is now accumulated per sample from the real gap to the
+  previous sample, capped at twice the nominal interval: a missed tick is
+  still counted in full, an idle stretch is not billed.
+- **The browser mock reported eight times the traffic of the real app.**
+  The mock path computed bytes as `avgBps * seconds`, i.e. bits labelled as
+  bytes, while the SQLite path always divided by 8. The mock now uses the
+  same convention as the stored history.
 - **E-mail notifications no longer advertised as a supported channel.**
   v1.0.0 shipped a stub that logged "not implemented" but still reported
   *success* to the dispatcher, so a hand-configured e-mail channel would
@@ -23,6 +40,20 @@ format and adheres to [Semantic Versioning](https://semver.org/).
   from 27 to 28; the README now states that auto-update is Windows-only; a
   "Why DishyWarden?" section was added; Korean grammar particles around the
   app name were fixed; all five language versions were regenerated.
+
+### Changed
+
+- **One version number for the whole product.** The application version is
+  no longer typed in several places: it is injected at build time from the
+  single source in the package manifest, so the footer of the running app,
+  the installer file name, the disk image file name and the release tag can
+  no longer disagree.
+- **The duplicate language switch in the sidebar was removed.** The switch in
+  the top bar is the only one; the sidebar copy is gone.
+- **CI now runs eslint.** The check job had no lint step, so lint could stay
+  red on `main` while CI stayed green. Errors now block the build. Warnings
+  are printed as a debt list instead of blocking, and a stricter variant is
+  available for when that debt is paid off.
 
 ---
 
