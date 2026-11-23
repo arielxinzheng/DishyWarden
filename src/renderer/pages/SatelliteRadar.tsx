@@ -46,6 +46,12 @@ const ERROR_KEYS: Record<RadarErrorCode, string> = {
   load_failed: 'satellite:error.load_failed',
 };
 
+/**
+ * 与服务卫星夹角小于这个值的算「候选卫星」(橙色)。
+ * 之前是硬编码的 25, 提到常量是为了让分层规则只有一处。
+ */
+const RUNNER_SEPARATION_DEG = 25;
+
 /** 估算原因语义码 → 字典键（数值由页面从 estimate 里取，不在逻辑模块里拼） */
 const ESTIMATE_REASON_KEYS: Record<ServingReason | 'device_id', string> = {
   no_boresight: 'satellite:est.no_boresight',
@@ -147,14 +153,18 @@ export default function SatelliteRadar() {
     pos: SatellitePosition,
     serving: SatellitePosition | null
   ): SatelliteData => {
-    const separation = serving ? calculateAngularSeparation(pos, serving) : 0;
+    // ⚠️ 没有服务卫星时 separation 必须留空 —— 写成 0 会让**每一颗**卫星
+    // 都满足「与波束夹角 < 25°」, 于是候选卫星层会塞满整片天空,
+    // 而真正贴着波束的那几颗反而淹没在里面。
+    const separation =
+      serving === null ? '' : `${calculateAngularSeparation(pos, serving).toFixed(1)}°`;
 
     return {
       name: pos.name,
       norad: pos.noradId,
       azimuth: pos.azimuth,
       elevation: pos.elevation,
-      separation: `${separation.toFixed(1)}°`,
+      separation,
       range: `${Math.round(pos.range)} km`,
       // 时间格式跟随当前语言（原来固定 zh-CN，英文界面会出现中文日期顺序）
       firstSeen: new Date().toLocaleTimeString(i18n.language, { hour12: false }),
@@ -372,7 +382,12 @@ export default function SatelliteRadar() {
     const chart = chartRef.current;
 
     // 分组数据
-    const servingData = satellites
+    // 服务卫星标记。
+    //
+    // 正常情况: 它就在 satellites 里, 带 serving 标记。
+    // 兜底: 估算结果里的那颗星被过滤掉了(异常轨道/仰角为负)时, 用估算值
+    // 单独画一个 —— 右上角的卡片有它, 天空图上却没有, 是最让人困惑的状态。
+    const servingFromList = satellites
       .filter((s) => s.serving)
       .map((s) => ({
         value: [s.azimuth, 90 - s.elevation], // 极坐标系统: 半径使用 90-仰角
@@ -381,8 +396,29 @@ export default function SatelliteRadar() {
         az: s.azimuth.toFixed(0),
       }));
 
+    const servingData =
+      servingFromList.length > 0
+        ? servingFromList
+        : estimate?.satellite
+          ? [
+              {
+                value: [
+                  estimate.satellite.azimuth,
+                  90 - estimate.satellite.elevation,
+                ] as [number, number],
+                name: estimate.satellite.name,
+                el: estimate.satellite.elevation.toFixed(1),
+                az: estimate.satellite.azimuth.toFixed(0),
+              },
+            ]
+          : [];
+
+    // separation 为空 = 还没有服务卫星 ⇒ 不分「候选/可见」, 全部当可见卫星画。
+    const sepOf = (s: SatelliteData): number =>
+      s.separation ? parseFloat(s.separation) : Number.NaN;
+
     const runnersData = satellites
-      .filter((s) => !s.serving && parseFloat(s.separation) < 25)
+      .filter((s) => !s.serving && sepOf(s) < RUNNER_SEPARATION_DEG)
       .map((s) => ({
         value: [s.azimuth, 90 - s.elevation],
         name: s.name,
@@ -391,7 +427,11 @@ export default function SatelliteRadar() {
       }));
 
     const visibleData = satellites
-      .filter((s) => !s.serving && parseFloat(s.separation) >= 25)
+      .filter(
+        (s) =>
+          !s.serving &&
+          (Number.isNaN(sepOf(s)) || sepOf(s) >= RUNNER_SEPARATION_DEG)
+      )
       .map((s) => ({
         value: [s.azimuth, 90 - s.elevation],
         name: s.name,

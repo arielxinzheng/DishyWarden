@@ -542,8 +542,21 @@ export class DishClient {
       obstructionMapSource: prev?.obstructionMapSource,
       obstructionMapTimestamp: prev?.obstructionMapTimestamp,
 
-      boresightAzimuthDeg: status.boresightAzimuthDeg === undefined ? prev?.boresightAzimuthDeg : gauge(status.boresightAzimuthDeg),
-      boresightElevationDeg: status.boresightElevationDeg === undefined ? prev?.boresightElevationDeg : gauge(status.boresightElevationDeg),
+      // 设备波束指向
+      //
+      // ⚠️ dishGetStatus **没有**顶层的 boresightAzimuthDeg 字段；波束指向藏在
+      // `alignmentStats.desiredBoresightAzimuthDeg` / `...ElevationDeg` 里。
+      // 只读顶层字段的话，真实设备上这两个值永远是 undefined，卫星雷达页因此
+      // 既画不出波束十字，也只能给出"置信度低"的服务卫星估算。
+      // 这里两个来源都取：顶层字段优先（mock 与未来协议），否则用 alignmentStats。
+      boresightAzimuthDeg:
+        parseFiniteNumber(status.boresightAzimuthDeg) ??
+        parseFiniteNumber(alignment.desiredBoresightAzimuthDeg) ??
+        prev?.boresightAzimuthDeg,
+      boresightElevationDeg:
+        parseFiniteNumber(status.boresightElevationDeg) ??
+        parseFiniteNumber(alignment.desiredBoresightElevationDeg) ??
+        prev?.boresightElevationDeg,
       attitudeEstimationState:
         typeof alignment.attitudeEstimationState === 'string'
           ? alignment.attitudeEstimationState
