@@ -32,28 +32,119 @@ export interface HandoffEvent {
 }
 
 /**
+ * outage 时间戳 / 时长的单位
+ *
+ * - `s`  秒
+ * - `ms` 毫秒
+ * - `us` 微秒
+ * - `ns` 纳秒
+ */
+export type TimestampUnit = 's' | 'ms' | 'us' | 'ns';
+
+/**
+ * 把一个数值按给定单位换算成毫秒。
+ *
+ * 秒要**乘** 1000（1 秒 = 1000 毫秒），微秒/纳秒要**除**（它们比毫秒更细）。
+ */
+function scaleToMs(value: number, unit: TimestampUnit): number {
+  switch (unit) {
+    case 's':
+      return value * 1000;
+    case 'ms':
+      return value;
+    case 'us':
+      return value / 1000;
+    case 'ns':
+      return value / 1000000;
+  }
+}
+
+/**
+ * 判定一个**绝对** epoch 时间戳的单位。
+ *
+ * ## 为什么按数量级判定
+ *
+ * 绝对时间戳的数量级天然带着单位信息 —— 今天的 epoch 大约是：
+ *
+ * | 单位 | 今天的值 | 覆盖到 5138 年的上界 |
+ * |------|----------|----------------------|
+ * | 秒   | ~1.8e9   | 1e11                 |
+ * | 毫秒 | ~1.8e12  | 1e14                 |
+ * | 微秒 | ~1.8e15  | 1e17                 |
+ * | 纳秒 | ~1.8e18  | —                    |
+ *
+ * 过去这个函数把 **≥1e11 一律当毫秒**，于是纳秒(1.8e18)和微秒(1.8e15)
+ * 都被当成毫秒 —— 时间戳落到公元 5 万多年，事件永远在查询窗口之外，
+ * 仪表盘上的卫星切换标记一个都不出现。
+ *
+ * 真机到底发哪种单位没有权威文档（`outageTypes.ts` 里那句「真实设备也用毫秒」
+ * 是照着 mock 推的，没在真机上验证过），所以这里**不写死假设**，按数量级自适应。
+ *
+ * @param value - 时间戳（number 或 protobuf int64 序列化出的字符串）
+ * @returns 判定出的单位；值非法时返回 null
+ */
+export function detectTimestampUnit(value: unknown): TimestampUnit | null {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n < 1e11) return 's';
+  if (n < 1e14) return 'ms';
+  if (n < 1e17) return 'us';
+  return 'ns';
+}
+
+/**
  * 把 outage 的开始时间戳规整成**毫秒级 epoch**。
  *
- * ## 单位约定
+ * 单位按上面的数量级自适应（秒 / 毫秒 / 微秒 / 纳秒都能正确落到毫秒）。
  *
- * DishyMock 的 `outages[].startTimestamp` 发的是**毫秒**
- * （其 `src/state/types.ts` 明确写着「若 ≤1e12 会被被测方乘 1000, 所以必须填毫秒」）。
- * 真实设备也用毫秒。
- *
- * 所以这里**不能再乘 1000** —— 之前乘了一次,
- * 时间戳变成 `1793671076044000`（公元 58000 年）,
- * 于是所有事件都落在时间窗之外, 图表上一个点都没有。
- *
- * 防御：若拿到的是**秒**级（< 1e11 约 1973 年后到 5138 年前的秒级时间戳
- * 数量级会落在 1e9 ~ 1e11），补齐到毫秒。
+ * @param startTimestamp - 原始时间戳（number 或字符串）
+ * @returns 毫秒级 epoch；值非法时返回 0
  */
 export function toEpochMs(startTimestamp: unknown): number {
   const n = typeof startTimestamp === 'number'
     ? startTimestamp
     : Number(startTimestamp);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  // 秒级时间戳量级: 1e9 (2001年) ~ 1e11 (5138年); 毫秒级: 1e12 以上
-  return n < 1e11 ? n * 1000 : n;
+  const unit = detectTimestampUnit(n);
+  if (!unit) return 0;
+  return scaleToMs(n, unit);
+}
+
+/**
+ * 把 outage 的持续时长规整成**毫秒**。
+ *
+ * ## 为什么时长也要判定单位
+ *
+ * 同一个设备的时钟单位在时间戳和时长上是一致的，所以**以时间戳判出的单位为准**。
+ * 但真机上存在「时间戳是毫秒、时长却是纳秒」这种字段各自为政的情况，
+ * 于是加一条兜底：时间戳单位是秒/毫秒、而时长却落在纳秒/微秒量级时，
+ * 时长按更细的单位换算。
+ *
+ * 判据（时长是相对量，没有 epoch 锚点，只能按量级）：
+ * - ≥1e9 ⇒ 纳秒（今天的 2 秒 = 2e9 ns）
+ * - ≥1e6 ⇒ 微秒（今天的 2 秒 = 2e6 µs）
+ * - 其余  ⇒ 毫秒（今天的 2 秒 = 2000 ms）
+ *
+ * @param duration - 原始时长
+ * @param timestampUnit - 时间戳判出的单位，作为主判据
+ * @returns 毫秒级时长；值非法时返回 0
+ */
+export function toDurationMs(duration: unknown, timestampUnit: TimestampUnit | null): number {
+  const d = typeof duration === 'number' ? duration : Number(duration);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+
+  // 主判据: 时间戳判出的单位(同一设备同一时钟)
+  const byTimestamp = timestampUnit ? scaleToMs(d, timestampUnit) : d;
+
+  // 合理的中断时长区间: 1 毫秒 ~ 1 小时
+  const plausible = (ms: number) => ms >= 1 && ms <= 3600000;
+  if (plausible(byTimestamp)) return byTimestamp;
+
+  // 回落: 字段名就是 durationMs, 契约上是毫秒。
+  // 真机上可能出现「时间戳是纳秒、时长却是毫秒」这种字段各自为政的情况。
+  if (plausible(d)) return d;
+
+  return byTimestamp;
 }
 
 /**
@@ -85,13 +176,22 @@ export function analyzeOutages(
   for (const raw of outages) {
     // 规整数值字段(protobuf 的 int64 序列化成字符串)
     const normalized: Outage = normalizeOutage(raw);
-    const startTimestamp = normalized.startTimestamp;
-    const durationMs = normalized.durationMs;
 
-    if (isHandoffOutage(normalized)) {
-      // 规整成毫秒级 epoch(原始数据已是毫秒, 不要再乘 1000)
-      const timestampMs = toEpochMs(startTimestamp);
+    // 单位自适应: 绝对时间戳按数量级判单位, 时长以该单位为主判据
+    const unit = detectTimestampUnit(normalized.startTimestamp);
+    const timestampMs = toEpochMs(normalized.startTimestamp);
+    const durationMs = toDurationMs(normalized.durationMs, unit);
 
+    // 用归一化后的时间戳与时长做后续判断 —— 时长单位不对会让
+    // `durationMs <= 10000` 的判定失手(纳秒时长永远 > 10s),
+    // 于是切换事件全被判成"其他中断"。
+    const normalizedOutage: Outage = {
+      ...normalized,
+      startTimestamp: timestampMs,
+      durationMs,
+    };
+
+    if (isHandoffOutage(normalizedOutage)) {
       // 兼容 DishyMock (triggered) 和真实设备 (cause)
       const causeStr = normalized.cause || normalized.triggered || 'UNKNOWN';
 
@@ -110,8 +210,21 @@ export function analyzeOutages(
         isExplicit,
       });
     } else {
-      otherOutages.push(normalized);
+      otherOutages.push(normalizedOutage);
     }
+  }
+
+  // 诊断日志: 真机 outages 的单位没有权威文档, 这行日志能让远程实测机上
+  // 一眼看出设备发的是秒/毫秒/微秒/纳秒, 以及到底有没有带 outages。
+  // 只打印数量级与计数, 不打印原始条目(避免把设备标识带进日志)。
+  if (outages.length > 0) {
+    const first = normalizeOutage(outages[0]);
+    const unit = detectTimestampUnit(first.startTimestamp);
+    console.log(
+      `[outage] outages=${outages.length} unit=${unit ?? 'unknown'} ` +
+        `first_ts_magnitude=${first.startTimestamp.toExponential(2)} ` +
+        `first_duration_ms=${toDurationMs(first.durationMs, unit)}`
+    );
   }
 
   const totalOutages = outages.length;
