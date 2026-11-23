@@ -432,8 +432,13 @@ export default function SatelliteRadar() {
     const servingFromList = satellites
       .filter((s) => s.serving)
       .map((s) => ({
-        // 极坐标半径用 90-仰角；方位角必须落在 [0,360)，负数会被角度轴静默丢弃
-        value: [normalizeAzimuth(s.azimuth), 90 - s.elevation],
+        // ECharts 极坐标的 data 是 **[radius, angle]** 顺序（见 echarts/lib/coord/polar/Polar.js:
+        // "the first element is radius and the second is angle"）。
+        // 半径轴 = 仰角，配合 radiusAxis.inverse=true 让 90°(天顶) 落在圆心。
+        // ⚠️ 旧实现写成 [方位角, 90-仰角]：方位角 304° 被当成半径、远超 max=90，
+        // 点被画到圆外裁掉 —— 服务卫星与波束十字就这么"消失"的（蓝点能显示
+        // 只是因为方位角小的卫星碰巧落在半径范围内）。
+        value: [s.elevation, normalizeAzimuth(s.azimuth)],
         name: s.name,
         el: s.elevation.toFixed(1),
         az: s.azimuth.toFixed(0),
@@ -446,8 +451,8 @@ export default function SatelliteRadar() {
           ? [
               {
                 value: [
+                  estimate.satellite.elevation,
                   normalizeAzimuth(estimate.satellite.azimuth),
-                  90 - estimate.satellite.elevation,
                 ] as [number, number],
                 name: estimate.satellite.name,
                 el: estimate.satellite.elevation.toFixed(1),
@@ -463,7 +468,7 @@ export default function SatelliteRadar() {
     const runnersData = satellites
       .filter((s) => !s.serving && sepOf(s) < RUNNER_SEPARATION_DEG)
       .map((s) => ({
-        value: [normalizeAzimuth(s.azimuth), 90 - s.elevation],
+        value: [s.elevation, normalizeAzimuth(s.azimuth)],
         name: s.name,
         el: s.elevation.toFixed(1),
         az: s.azimuth.toFixed(0),
@@ -476,7 +481,7 @@ export default function SatelliteRadar() {
           (Number.isNaN(sepOf(s)) || sepOf(s) >= RUNNER_SEPARATION_DEG)
       )
       .map((s) => ({
-        value: [normalizeAzimuth(s.azimuth), 90 - s.elevation],
+        value: [s.elevation, normalizeAzimuth(s.azimuth)],
         name: s.name,
         el: s.elevation.toFixed(1),
         az: s.azimuth.toFixed(0),
@@ -503,7 +508,7 @@ export default function SatelliteRadar() {
       bsAz !== undefined && bsEl !== undefined
         ? [
             {
-              value: [bsAz, 90 - bsEl],
+              value: [bsEl, bsAz],
               name: boresightSeriesName,
               el: bsEl.toFixed(1),
               az: bsAz.toFixed(0),
@@ -547,8 +552,11 @@ export default function SatelliteRadar() {
       },
       radiusAxis: {
         min: 0,
-        max: 90, // 0° 在中心(天顶), 90° 在边缘(地平线)
-        inverse: true, // 反转, 让天顶在中心
+        max: 90,
+        // 半径轴的数据就是**仰角**（series value 的第一个元素）。
+        // inverse=true 让数据值大 ⇒ 半径小 ⇒ 仰角 90°(天顶) 落在圆心，
+        // 仰角 0°(地平线) 落在边缘 —— 与「圆心 = 天顶」的说明一致。
+        inverse: true,
         axisLine: { show: false },
         axisLabel: {
           color: '#64748b',
@@ -584,11 +592,8 @@ export default function SatelliteRadar() {
           coordinateSystem: 'polar',
           data: runnersData,
           symbolSize: 11,
-          // ⚠️ **极坐标的 series 绝对不能设 `z`** ——
-          // 极坐标下 `z` 是**半径轴索引**, 不是绘制层级。
-          // 写成 z: 9/10/11 等于把这几个 series 挂到不存在的半径轴上,
-          // ECharts 会**整个不画**(蓝点照常, 红点/橙点/紫十字全部消失)。
-          // 层级由 series 在数组里的先后顺序决定(后面的盖在上面)。
+          // 层级由 series 在数组里的先后决定（后面的盖在上面），不需要 z。
+          // 曾误判为「polar 下 z 是半径轴索引」——真正原因是 data 维度顺序，见上方注释。
           itemStyle: {
             color: '#f59e0b',
             shadowBlur: 8,
