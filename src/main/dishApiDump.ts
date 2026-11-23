@@ -17,9 +17,13 @@
  * 输出同时写 stdout 与 %APPDATA%\DishyWarden\logs\dishywarden-<yyyyMMdd>.log（UTF-8）。
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { DishGrpcClient } from '../core/dishGrpc';
+import { DishClient } from '../core/dishClient';
 import { analyzeOutages } from '../core/outageAnalyzer';
-import { dualLine } from './logger';
+import { dualLine, getLogFilePath } from './logger';
 
 /** 常见分支名候选（覆盖 get* / dishGet* 两种命名风格） */
 const CANDIDATES = [
@@ -47,7 +51,78 @@ const CANDIDATES = [
  * 只写 stdout 用户什么也看不到（见 logger.ts）。
  */
 function line(s = ''): void {
+  collected.push(s);
   dualLine(s);
+}
+
+/**
+ * 本轮诊断的完整输出。
+ *
+ * 用户要把它发回来 —— 日志文件里混着采集器/告警/Chromium 的噪声,
+ * 从头翻很难滤。所以单独攒一份, 结束时写到桌面上的一个 txt。
+ */
+const collected: string[] = [];
+
+/** 把整份输出写成一个独立文件, 返回路径（失败返回 null）。 */
+function writeReport(): string | null {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[-:T]/g, '')
+    .slice(0, 14);
+  const name = `dishywarden-diagnostics-${stamp}.txt`;
+  // 桌面最方便用户找到；桌面不可写（企业策略/沙箱）时退到日志目录，再退到临时目录
+  const candidates = [path.join(os.homedir(), 'Desktop'), path.dirname(getLogFilePath() ?? ''), os.tmpdir()];
+  for (const dir of candidates) {
+    if (!dir) continue;
+    try {
+      if (!fs.existsSync(dir)) continue;
+      const target = path.resolve(dir, name);
+      fs.writeFileSync(target, collected.join('\n') + '\n', 'utf8');
+      return target;
+    } catch {
+      // 换下一个候选目录
+    }
+  }
+  return null;
+}
+
+/**
+ * 递归打印一个响应对象，供「设备到底发了哪些字段」这类问题破案用。
+ *
+ * 只展开到 depth 层：gRPC 响应可能很深（历史数组里几千个采样点），
+ * 全展开会把日志刷爆。数组取前 5 项 —— 波束/时间戳这类标量都在顶层附近。
+ */
+function dumpValue(value: unknown, indent: string, depth: number): void {
+  const clip = (s: string) => (s.length > 160 ? s.slice(0, 160) + '…' : s);
+  if (value === null) {
+    line(`${indent}null`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    line(`${indent}[${value.length} 项]`);
+    if (depth >= 3) return;
+    for (const item of value.slice(0, 5)) {
+      dumpValue(item, indent + '  ', depth + 1);
+    }
+    if (value.length > 5) line(`${indent}  … 其余 ${value.length - 5} 项省略`);
+    return;
+  }
+  if (typeof value === 'object') {
+    if (depth >= 3) {
+      line(clip(indent + JSON.stringify(value)));
+      return;
+    }
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== null && typeof v === 'object') {
+        line(`${indent}${k}:`);
+        dumpValue(v, indent + '  ', depth + 1);
+      } else {
+        line(`${indent}${k} = ${clip(JSON.stringify(v))}`);
+      }
+    }
+    return;
+  }
+  line(clip(`${indent}${JSON.stringify(value)}`));
 }
 
 /** 应用实际采集用到的三个分支：兜底通道只验证这几个，不再把 14 个候选全跑一遍 */
@@ -181,8 +256,71 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     } else {
       line('    (status 里没有 alignmentStats 对象)');
     }
+
+    // ---- 3a-2. 应用**实际会读到**的值 ----
+    //
+    // 这一段是整份报告的核心：它复刻 dishClient.parseStatus 的取值规则，
+    // 直接回答「雷达页拿到的波束是 undefined 还是数」。
+    // 只打原始键名不够 —— 字段可能藏在别的分支里。
+    const readNum = (v: unknown): number | undefined => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim() !== '') {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      }
+      return undefined;
+    };
+    const align = (status.alignmentStats ?? status.alignment_stats ?? {}) as Record<string, unknown>;
+    const az =
+      readNum(status.boresightAzimuthDeg) ??
+      readNum(align.desiredBoresightAzimuthDeg) ??
+      readNum(align.desired_boresight_azimuth_deg);
+    const el =
+      readNum(status.boresightElevationDeg) ??
+      readNum(align.desiredBoresightElevationDeg) ??
+      readNum(align.desired_boresight_elevation_deg);
+    line('');
+    line(`    ★ 应用会读到: 方位 ${az ?? 'undefined'} / 仰角 ${el ?? 'undefined'}`);
+    if (az === undefined || el === undefined) {
+      line('    ⇒ 雷达图不会画紫色十字, 也不会估算服务卫星。');
+      line('    ⇒ 下面「status 完整内容」里找波束真正的字段名。');
+    } else {
+      line('    ⇒ 有波束值: 图上应该有紫色十字; 若没有, 是渲染问题不是数据问题。');
+    }
+
+    line('');
+    line('    —— status 完整内容 (深度 3, 数组取前 5 项, 值超 160 字截断) ——');
+    dumpValue(status, '      ', 0);
   } catch (err) {
     line('    读 status 失败: ' + (err instanceof Error ? err.message : String(err)));
+  }
+  line('');
+
+  // ---- 3c. 应用解析后的 telemetry ----
+  //
+  // 这是**渲染层通过 IPC 真正拿到的对象**。前面 3a 看的是设备原始响应，
+  // 这里看的是解析结果 —— 两者不一致时，问题就在 dishClient.parseStatus。
+  try {
+    const dc = new DishClient({
+      address: opts.host,
+      grpcPort: opts.port,
+      grpcWebPort: opts.webPort,
+      timeout: timeoutMs,
+    });
+    const t = await dc.getTelemetry();
+    line('    —— 应用解析后的 telemetry（渲染层拿到的对象）——');
+    line(`      boresightAzimuthDeg   = ${t.boresightAzimuthDeg ?? 'undefined'}`);
+    line(`      boresightElevationDeg = ${t.boresightElevationDeg ?? 'undefined'}`);
+    line(`      satelliteId           = ${t.satelliteId ?? 'undefined'}`);
+    line(`      alignmentStats        = ${JSON.stringify(t.alignmentStats ?? null)}`);
+        if (t.boresightAzimuthDeg === undefined || t.boresightElevationDeg === undefined) {
+      line('    ⇒ 渲染层拿到的波束是 undefined —— 火箭图不画十字、也不估算服务卫星。');
+      line('    ⇒ 问题在 dishClient.parseStatus: 设备发的字段名和解析代码对不上。');
+    } else {
+      line('    ⇒ 渲染层能拿到波束。若图上仍无紫色十字, 是渲染层问题。');
+    }
+  } catch (err) {
+    line('    解析 telemetry 失败: ' + (err instanceof Error ? err.message : String(err)));
   }
   line('');
 
@@ -234,6 +372,15 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     if (nativeOk.length) line('    原生(兜底)    可用分支: ' + nativeOk.join(', '));
     else line('    原生(兜底)    没有可用分支（这台固件 9200 的 Handle 回 UNIMPLEMENTED 属已知现象）');
     line('    ⇒ 传输优先级：应用先走 grpc-web，失败才试原生；原生成功后改为原生优先。');
+  }
+
+  line('');
+  const reportPath = writeReport();
+  if (reportPath) {
+    line('=== 这份报告已保存到: ' + reportPath + ' ===');
+    line('    把这个文件发回来，里面已经包含设备原始响应、解析结果和中断事件。');
+  } else {
+    line('=== 报告文件写入失败，请从上面的日志文件里复制 ===');
   }
 
   client.close();

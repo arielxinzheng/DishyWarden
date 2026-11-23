@@ -355,6 +355,15 @@ export default function SatelliteRadar() {
     loadSatelliteData(false);
   }, [bsAz, bsEl]);
 
+  // 卸载时销毁图表实例 —— 不销毁的话, 每次进出这个页面都留下一个
+  // 绑在脱离文档的 div 上的实例(带 resize 监听), 越积越多。
+  useEffect(() => {
+    return () => {
+      chartRef.current?.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
   // 监听位置更新事件和页面可见性变化
   useEffect(() => {
     const handleLocationUpdate = () => {
@@ -398,7 +407,12 @@ export default function SatelliteRadar() {
     if (!radarRef.current || satellites.length === 0) return;
 
     // 初始化或获取图表实例
-    if (!chartRef.current) {
+    //
+    // ⚠️ 容器被 React 换掉过(重挂载/换 key)时, 旧实例还挂在**已经脱离文档**的
+    // 那个 div 上 —— 后续 setOption 全画在看不见的画布上, 页面看上去就是
+    // "数据在变、图不动"。所以每次都核对实例绑的容器是不是当前这个。
+    if (!chartRef.current || chartRef.current.getDom() !== radarRef.current) {
+      chartRef.current?.dispose();
       chartRef.current = echarts.init(radarRef.current);
     }
 
@@ -564,7 +578,11 @@ export default function SatelliteRadar() {
           coordinateSystem: 'polar',
           data: runnersData,
           symbolSize: 11,
-          z: 9,
+          // ⚠️ **极坐标的 series 绝对不能设 `z`** ——
+          // 极坐标下 `z` 是**半径轴索引**, 不是绘制层级。
+          // 写成 z: 9/10/11 等于把这几个 series 挂到不存在的半径轴上,
+          // ECharts 会**整个不画**(蓝点照常, 红点/橙点/紫十字全部消失)。
+          // 层级由 series 在数组里的先后顺序决定(后面的盖在上面)。
           itemStyle: {
             color: '#f59e0b',
             shadowBlur: 8,
@@ -578,7 +596,6 @@ export default function SatelliteRadar() {
           coordinateSystem: 'polar',
           data: servingData,
           symbolSize: 17,
-          z: 10,
           rippleEffect: { scale: 3, brushType: 'stroke' },
           itemStyle: {
             // 置信度低时用警示色，别让绿脉冲看起来像"确知的"
@@ -600,7 +617,6 @@ export default function SatelliteRadar() {
           data: boresightData,
           symbolSize: 13,
           symbol: 'cross',
-          z: 11,
           itemStyle: { color: '#a78bfa', opacity: 0.9 },
         },
       ],
