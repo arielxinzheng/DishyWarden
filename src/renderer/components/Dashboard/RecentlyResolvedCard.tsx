@@ -65,14 +65,18 @@ export function RecentlyResolvedCard({
   };
 
   /**
-   * 场景名。已知规则用字典里的短场景名；未收录的规则退回后端 summary
-   * —— 硬编码全量映射会随规则演进腐坏。
+   * 场景名。已知规则用字典里的短场景名；其余规则用**本地化的告警类型标题**。
+   *
+   * ⚠️ 不要再回退到 `alert.summary` —— 那是主进程写进数据库的中文原文
+   * （例如「丢包率 5.0%」），会让英文界面里混进中文。
+   * 类型标题在 `alerts:types.<alert_type>.title`，与规则 id 一一对应。
    */
   const scenarioText = (alert: ResolvedAlertLike): string => {
     const code = scenarioOf(alert);
     if (code) return t(`dashboard:recently_resolved.scenario_${code}`);
-    const summary = (alert.summary || '').trim();
-    return summary || t('dashboard:recently_resolved.scenario_unknown');
+    const typeTitle = t(`alerts:types.${alert.alert_type}.title`, { defaultValue: '' });
+    if (typeTitle) return typeTitle;
+    return t('dashboard:recently_resolved.scenario_unknown');
   };
 
   /** `刚才经历了一次网络中断（14:05 - 14:10，持续 5 分钟），现已自动恢复正常` */
