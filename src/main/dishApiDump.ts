@@ -17,6 +17,7 @@
  * 输出同时写 stdout 与 %APPDATA%\DishyWarden\logs\dishywarden-<yyyyMMdd>.log（UTF-8）。
  */
 
+import { app, dialog, shell } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,8 +71,25 @@ function writeReport(): string | null {
     .replace(/[-:T]/g, '')
     .slice(0, 14);
   const name = `dishywarden-diagnostics-${stamp}.txt`;
-  // 桌面最方便用户找到；桌面不可写（企业策略/沙箱）时退到日志目录，再退到临时目录
-  const candidates = [path.join(os.homedir(), 'Desktop'), path.dirname(getLogFilePath() ?? ''), os.tmpdir()];
+  // 候选目录按「用户容易找到」排序。
+  //
+  // ⚠️ 桌面必须问 Electron 要 `app.getPath('desktop')`：
+  // Windows 上桌面常被 OneDrive 重定向到 `%USERPROFILE%\OneDrive\Desktop`，
+  // 自己拼 `os.homedir()/Desktop` 会指向一个不存在的路径，
+  // 结果报告静默落到日志目录 —— 用户以为脚本没跑成功。
+  const candidates: string[] = [];
+  try {
+    candidates.push(app.getPath('desktop'));
+  } catch {
+    /* 极端情况下拿不到 */
+  }
+  candidates.push(
+    path.dirname(process.execPath), // 免安装版解压目录：一定可写，用户就在这
+    path.join(os.homedir(), 'Desktop'), // app.getPath 拿不到时的兜底
+    path.dirname(getLogFilePath() ?? ''),
+    os.tmpdir(),
+  );
+
   for (const dir of candidates) {
     if (!dir) continue;
     try {
@@ -151,7 +169,10 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   // 必须把 webPort 传进去：不传就固定打 9201，设置里改过 grpc-web 端口时诊断测的不是应用实际用的端口
   const client = new DishGrpcClient(opts.host, opts.port, opts.webPort);
 
-  line('=== Dish API 探测 (--dump-dish-api) ===');
+  line('=== Dish API 诊断报告 (--dump-dish-api) ===');
+  // 版本放第一行：报告是从旧版本跑出来的话，后面所有结论都不能用
+  line(`版本 ${app.getVersion()} · Electron ${process.versions.electron} · ${process.platform}`);
+  line(`exe ${process.execPath}`);
   line(`address: ${opts.host}:${opts.port}`);
   line(
     'ports: ' + opts.port + ' = 原生 gRPC (HTTP/2, reflection 在这里, Handle 兜底) | ' +
@@ -375,13 +396,43 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   }
 
   line('');
+
+  // 版本号写进报告：先确认「这份报告是新版跑出来的」再谈数据
+  line(`版本: ${app.getVersion()} · Electron ${process.versions.electron} · ${process.platform}`);
+
   const reportPath = writeReport();
+  const logPath = getLogFilePath();
   if (reportPath) {
     line('=== 这份报告已保存到: ' + reportPath + ' ===');
     line('    把这个文件发回来，里面已经包含设备原始响应、解析结果和中断事件。');
   } else {
-    line('=== 报告文件写入失败，请从上面的日志文件里复制 ===');
+    line('=== 报告文件写入失败，请从日志文件里复制: ' + (logPath ?? '(不可用)') + ' ===');
   }
 
   client.close();
+
+  // ⚠️ 这是 GUI 程序：双击/批处理都**看不到 stdout**。
+  // 不弹窗的话，"报告在哪" 用户只能靠猜 —— 所以必须用系统弹窗把路径摆出来。
+  try {
+    if (reportPath) {
+      shell.showItemInFolder(reportPath);
+      dialog.showMessageBoxSync({
+        type: 'info',
+        title: '诊断完成',
+        message: '报告已生成',
+        detail: `${reportPath}\n\n把这个 txt 文件发给开发者即可。`,
+        buttons: ['好'],
+      });
+    } else {
+      dialog.showMessageBoxSync({
+        type: 'error',
+        title: '诊断完成，但报告没写出来',
+        message: '报告文件写入失败',
+        detail: `请把这个日志文件发回来：\n${logPath ?? '(日志路径不可用)'}`,
+        buttons: ['好'],
+      });
+    }
+  } catch {
+    /* 无桌面环境（远程/无头）时弹窗会失败，内容已经写进日志了 */
+  }
 }
