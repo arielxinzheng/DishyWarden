@@ -162,49 +162,99 @@ export interface OutageAnalysis {
 }
 
 /**
+ * 算出「设备时钟 - 本机时钟」的偏差（毫秒），用来把事件搬回墙上时间。
+ *
+ * ## 为什么必须修正
+ *
+ * 真机实测（192.168.100.1，2026-11）outage 的时间戳是**2016 年**：
+ * `startTimestampNs = "1479420720000261589"` ⇒ 2016-11-18 —— 设备 RTC 明显是错的。
+ * 这种事件无论单位解析得多准，都会落在"最近 1 小时"窗口之外，
+ * 仪表盘的卫星切换永远是 0 条。
+ *
+ * ## 修正策略
+ *
+ * 只用 **`history.current`（设备自己的"现在"）**：`offset = hostNow - deviceNow`。
+ * 设备时钟的整体偏移是常数，这样搬回来的相对位置是准确的。
+ *
+ * ⚠️ 刻意**不**用"把最新一条事件对齐到当前时间"这种兜底：
+ * 那会把正常设备的数据整体搬歪，而且静默 —— 正常设备的历史事件会被
+ * 伪装成"刚刚发生"，仪表盘上出现假标记，比没有标记更糟。
+ * 拿不到 current 时宁可不搬，让事件保持设备原始时间（真实但可能落在窗口外）。
+ *
+ * 偏差小于一天 ⇒ 不修正（设备时钟正常，别乱动数据）。
+ *
+ * @returns 要加到时间戳上的偏移量（毫秒）；0 表示不修正
+ */
+function resolveClockOffset(deviceNow: unknown, hostNow: number): number {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const deviceNowMs = toEpochMs(deviceNow);
+  if (deviceNowMs > 0 && Math.abs(deviceNowMs - hostNow) > DAY_MS) {
+    return hostNow - deviceNowMs;
+  }
+  return 0;
+}
+
+/**
  * 分析 outages 数组，识别卫星切换事件
- * 
- * @param outages - dishGetHistory 返回的 outages 数组
+ *
+ * @param outages    - dishGetHistory 返回的 outages 数组
+ * @param options.deviceNow - 设备自己的「现在」（history.current）。
+ *   用来修正设备时钟偏差，见下面的 `resolveClockOffset`。
+ * @param options.hostNow   - 本机当前时间（默认 Date.now()），测试可注入
  * @returns 分析结果
  */
 export function analyzeOutages(
   outages: RawOutage[],
+  options: { deviceNow?: unknown; hostNow?: number } = {},
 ): OutageAnalysis {
+  const hostNow = options.hostNow ?? Date.now();
   const handoffs: HandoffEvent[] = [];
   const otherOutages: Outage[] = [];
 
-  for (const raw of outages) {
-    // 规整数值字段(protobuf 的 int64 序列化成字符串)
-    const normalized: Outage = normalizeOutage(raw);
-
-    // 单位自适应: 绝对时间戳按数量级判单位, 时长以该单位为主判据
+  // 先把所有事件的时间戳/时长规整成毫秒，再统一修正设备时钟偏差 ——
+  // 单条事件各自修正会得到不一致的结果，必须先算出整体 offset。
+  const prepared = outages.map((raw) => {
+    const normalized = normalizeOutage(raw);
     const unit = detectTimestampUnit(normalized.startTimestamp);
-    const timestampMs = toEpochMs(normalized.startTimestamp);
-    const durationMs = toDurationMs(normalized.durationMs, unit);
+    return {
+      normalized: {
+        ...normalized,
+        startTimestamp: toEpochMs(normalized.startTimestamp),
+        durationMs: toDurationMs(normalized.durationMs, unit),
+      },
+      unit,
+    };
+  });
 
-    // 用归一化后的时间戳与时长做后续判断 —— 时长单位不对会让
-    // `durationMs <= 10000` 的判定失手(纳秒时长永远 > 10s),
-    // 于是切换事件全被判成"其他中断"。
+  const clockOffsetMs = resolveClockOffset(options.deviceNow, hostNow);
+
+  for (const { normalized } of prepared) {
+    // 设备时钟偏离本机超过一天时，用 offset 把事件搬回墙上时间。
+    // 只搬时间戳，不动时长 —— 时长是时长，跟时钟无关。
+    const timestampMs =
+      clockOffsetMs === 0 ? normalized.startTimestamp : normalized.startTimestamp + clockOffsetMs;
+
     const normalizedOutage: Outage = {
       ...normalized,
       startTimestamp: timestampMs,
-      durationMs,
     };
 
     if (isHandoffOutage(normalizedOutage)) {
       // 兼容 DishyMock (triggered) 和真实设备 (cause)
       const causeStr = normalized.cause || normalized.triggered || 'UNKNOWN';
 
-      // 判断是否为明确的切换标识
+      // 判断是否为明确的切换标识：设备自报 didSwitch 优先，
+      // 其次看 cause 里有没有 HANDOFF/SWITCHING 这类字面标识
       const causeUpper = causeStr.toUpperCase();
       const isExplicit =
+        normalized.didSwitch === true ||
         causeUpper.includes('HANDOFF') ||
         causeUpper.includes('SWITCHING') ||
         causeUpper.includes('HANDOVER');
 
       handoffs.push({
         timestamp: timestampMs,
-        durationMs,
+        durationMs: normalized.durationMs,
         cause: causeStr,
         parsedCause: parseOutageCause(causeStr),
         isExplicit,
@@ -215,19 +265,19 @@ export function analyzeOutages(
   }
 
   // 诊断日志: 真机 outages 的单位没有权威文档, 这行日志能让远程实测机上
-  // 一眼看出设备发的是秒/毫秒/微秒/纳秒, 以及到底有没有带 outages。
+  // 一眼看出设备发的是秒/毫秒/微秒/纳秒、有没有带 outages、时钟偏了多少。
   // 只打印数量级与计数, 不打印原始条目(避免把设备标识带进日志)。
-  // 只在异常时打印: 数量为 0, 或单位不是毫秒 —— 正常情况不刷屏。
+  // 只在异常时打印: 数量为 0, 或单位不是毫秒, 或做了时钟修正 —— 正常情况不刷屏。
   if (outages.length === 0) {
     console.log('[outage] outages=0 设备没有返回任何中断记录');
   } else {
-    const first = normalizeOutage(outages[0]);
-    const unit = detectTimestampUnit(first.startTimestamp);
-    if (unit !== 'ms') {
+    const first = prepared[0];
+    if (first.unit !== 'ms' || clockOffsetMs !== 0) {
       console.log(
-        `[outage] outages=${outages.length} unit=${unit} ` +
-          `first_ts_magnitude=${first.startTimestamp.toExponential(2)} ` +
-          `first_duration_ms=${toDurationMs(first.durationMs, unit)}`
+        `[outage] outages=${outages.length} unit=${first.unit} ` +
+          `first_ts_magnitude=${first.normalized.startTimestamp.toExponential(2)} ` +
+          `first_duration_ms=${first.normalized.durationMs} ` +
+          `clock_offset_ms=${clockOffsetMs}`
       );
     }
   }

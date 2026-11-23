@@ -563,7 +563,11 @@ export class DataCollector extends EventEmitter {
       const outages = Array.isArray(history.outages) ? (history.outages as Outage[]) : [];
 
       // 分析所有 outages
-      const analysis = analyzeOutages(outages);
+      //
+      // 把 `history.current` 一起传进去：真机 RTC 可能是错的（实测发 2016 年的
+      // 时间戳），分析器要用设备自己的"现在"把事件搬回墙上时间，
+      // 否则切换事件永远落在查询窗口之外，仪表盘一条都显示不出来。
+      const analysis = analyzeOutages(outages, { deviceNow: history.current });
 
       // 发出非切换类的 outage 事件（供告警系统使用）
       //

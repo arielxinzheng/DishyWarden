@@ -350,14 +350,22 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     const history = await client.getHistory(timeoutMs);
     const outages = Array.isArray(history.outages) ? (history.outages as unknown[]) : [];
     line(`    history 顶层键: ${Object.keys(history).join(', ')}`);
+    line(`    current = ${JSON.stringify(history.current ?? null)}（设备自己的"现在"）`);
     line(`    outages 事件数: ${outages.length}`);
+    // 字段名是这次真机排查的关键：设备发的是 startTimestampNs/durationNs，
+    // 不是 startTimestamp/durationMs。把这套名字打出来，下次不用再猜。
+    const firstOutage = outages[0] as Record<string, unknown> | undefined;
+    if (firstOutage && typeof firstOutage === 'object') {
+      line(`    第一条事件的字段名: ${Object.keys(firstOutage).join(', ')}`);
+      line(`    其中 didSwitch = ${JSON.stringify(firstOutage.didSwitch ?? null)}`);
+    }
     for (const o of outages.slice(0, 3)) {
       line('      原始: ' + JSON.stringify(o));
     }
     if (outages.length > 0) {
       // 用应用同一套判定跑一遍, 直接看出「有没有被认成卫星切换」
       try {
-        const analysis = analyzeOutages(outages as never);
+        const analysis = analyzeOutages(outages as never, { deviceNow: history.current });
         line(`    判定结果: 切换 ${analysis.handoffs.length} 条 / 其他中断 ${analysis.otherOutages.length} 条`);
         for (const h of analysis.handoffs.slice(0, 5)) {
           line(`      切换 @${h.timestamp} 时长 ${h.durationMs}ms 原因 ${h.cause}`);

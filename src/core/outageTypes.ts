@@ -16,6 +16,13 @@ export interface Outage {
   /** 中断原因标识符（DishyMock 字段名为 triggered，真实设备可能为 cause） */
   triggered?: string;
   cause?: string;
+  /**
+   * 设备自报「这次中断期间发生了卫星切换」。
+   *
+   * ⚠️ 真机实测会带这个布尔字段（`"didSwitch":true`），比按持续时长猜可靠得多：
+   * 切换和短时遮挡在时长上完全重叠，但设备自己知道到底换没换卫星。
+   */
+  didSwitch?: boolean;
 }
 
 /**
@@ -29,24 +36,41 @@ export interface Outage {
  * - `sum + h.durationMs` 变成**字符串拼接** ⇒ 平均时长算出 `3.77e+222`
  * - `durationMs <= 10000` 的比较会因字符串参与而走出错结果
  *
- * 所以类型上放宽成 `number | string`, 由 `normalizeOutage()` 统一转成 number。
+ * ## 为什么还要认 `*Ns` 两个字段
+ *
+ * 真机（192.168.100.1，2026-11 实测）发的不是 `startTimestamp`，
+ * 而是 **`startTimestampNs` / `durationNs`（纳秒，字符串）**：
+ *
+ * ```json
+ * {"cause":"NO_DOWNLINK","startTimestampNs":"1479420720000261589",
+ *  "durationNs":"560167119","didSwitch":true}
+ * ```
+ *
+ * 只认 `startTimestamp` 时这两个字段全变 0 ⇒ 时间戳 0、时长 0 ⇒
+ * 事件时间落在任何查询窗口之外，仪表盘的"卫星切换"永远 0 条。
  */
 export type RawOutage = Omit<Outage, 'startTimestamp' | 'durationMs'> & {
-  startTimestamp: number | string;
-  durationMs: number | string;
+  startTimestamp?: number | string;
+  durationMs?: number | string;
+  /** 真机字段：开始时间（纳秒） */
+  startTimestampNs?: number | string;
+  /** 真机字段：持续时长（纳秒） */
+  durationNs?: number | string;
 };
 
 /** 把 raw outage 规整成字段类型正确的 Outage */
 export function normalizeOutage(raw: RawOutage): Outage {
-  const num = (v: number | string): number => {
+  const num = (v: unknown): number => {
+    if (v === undefined || v === null) return 0;
     if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
   };
+  // 保留原始数量级（纳秒仍是纳秒），由上层 detectTimestampUnit 统一判单位
   return {
     ...raw,
-    startTimestamp: num(raw.startTimestamp),
-    durationMs: num(raw.durationMs),
+    startTimestamp: num(raw.startTimestamp) || num(raw.startTimestampNs),
+    durationMs: num(raw.durationMs) || num(raw.durationNs),
   };
 }
 
@@ -142,7 +166,12 @@ export const HANDOFF_MAX_DURATION_MS = 10000; // 10 秒
 export function isHandoffOutage(outage: Outage): boolean {
   const causeStr = outage.cause || outage.triggered || '';
   const { durationMs } = outage;
-  
+
+  // 0. 设备自己说这次中断换了卫星 —— 最可靠的判据，压过所有启发式
+  if (outage.didSwitch === true) {
+    return true;
+  }
+
   // 1. 明确的切换标识符
   if (HANDOFF_INDICATORS.some(indicator => 
     causeStr.toUpperCase().includes(indicator)
