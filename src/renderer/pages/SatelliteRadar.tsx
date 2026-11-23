@@ -24,6 +24,7 @@ import {
   filterVisibleSatellites,
   getObserverLocation,
   calculateAngularSeparation,
+  normalizeAzimuth,
   type SatellitePosition,
 } from '../utils/satelliteCalculator';
 import {
@@ -115,8 +116,12 @@ export default function SatelliteRadar() {
   const pendingReloadRef = useRef(false);
   // 设备波束指向 —— 提到组件层, chart effect 与重算 effect 都要依赖它
   // (telemetry 每次 refresh 都是新对象, 所以取具体字段值而非对象)
-  const bsAz = telemetry?.boresightAzimuthDeg;
+  const bsAzRaw = telemetry?.boresightAzimuthDeg;
   const bsEl = telemetry?.boresightElevationDeg;
+  // ⚠️ 设备报的方位角可能是负的（实测真机给出 -55.7°）。
+  // 极坐标角度轴是固定区间 0..360，负数会落在轴外被静默丢弃 ——
+  // 紫色十字和当前服务卫星就是这么"消失"的。统一归一化到 [0, 360)。
+  const bsAz = bsAzRaw === undefined ? undefined : normalizeAzimuth(bsAzRaw);
 
   /**
    * 最新一次已知的设备波束指向。
@@ -427,7 +432,8 @@ export default function SatelliteRadar() {
     const servingFromList = satellites
       .filter((s) => s.serving)
       .map((s) => ({
-        value: [s.azimuth, 90 - s.elevation], // 极坐标系统: 半径使用 90-仰角
+        // 极坐标半径用 90-仰角；方位角必须落在 [0,360)，负数会被角度轴静默丢弃
+        value: [normalizeAzimuth(s.azimuth), 90 - s.elevation],
         name: s.name,
         el: s.elevation.toFixed(1),
         az: s.azimuth.toFixed(0),
@@ -440,7 +446,7 @@ export default function SatelliteRadar() {
           ? [
               {
                 value: [
-                  estimate.satellite.azimuth,
+                  normalizeAzimuth(estimate.satellite.azimuth),
                   90 - estimate.satellite.elevation,
                 ] as [number, number],
                 name: estimate.satellite.name,
@@ -457,7 +463,7 @@ export default function SatelliteRadar() {
     const runnersData = satellites
       .filter((s) => !s.serving && sepOf(s) < RUNNER_SEPARATION_DEG)
       .map((s) => ({
-        value: [s.azimuth, 90 - s.elevation],
+        value: [normalizeAzimuth(s.azimuth), 90 - s.elevation],
         name: s.name,
         el: s.elevation.toFixed(1),
         az: s.azimuth.toFixed(0),
@@ -470,7 +476,7 @@ export default function SatelliteRadar() {
           (Number.isNaN(sepOf(s)) || sepOf(s) >= RUNNER_SEPARATION_DEG)
       )
       .map((s) => ({
-        value: [s.azimuth, 90 - s.elevation],
+        value: [normalizeAzimuth(s.azimuth), 90 - s.elevation],
         name: s.name,
         el: s.elevation.toFixed(1),
         az: s.azimuth.toFixed(0),

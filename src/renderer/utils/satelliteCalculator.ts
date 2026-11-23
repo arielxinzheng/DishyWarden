@@ -145,7 +145,7 @@ export function calculateSatellitePosition(
     return {
       name: tle.name,
       noradId,
-      azimuth: radiansToDegrees(lookAngles.azimuth),
+      azimuth: normalizeAzimuth(radiansToDegrees(lookAngles.azimuth)),
       elevation: radiansToDegrees(lookAngles.elevation),
       range: lookAngles.rangeSat,
       velocity: velocityMagnitude,
@@ -157,6 +157,21 @@ export function calculateSatellitePosition(
     console.error(`Error calculating position for ${tle.name}:`, error);
     return null;
   }
+}
+
+/**
+ * 把任意角度归一化到 [0, 360)。
+ *
+ * ⚠️ 必须做这一步：`satellite.js` 的 lookAngles.azimuth 是 **-π..π**，
+ * 转成度数是 **-180..180**；而方位角（罗盘方位）的语义是 0..360。
+ * 天空视图的极坐标角度轴是固定区间 `0..360`，负数会**落在轴范围外被静默丢弃** ——
+ * 表现为「一半卫星不显示」「设备波束十字和当前服务卫星怎么都不出现」，
+ * 因为服务/候选/波束往往都在同一个负方位角附近。
+ */
+export function normalizeAzimuth(degrees: number): number {
+  if (!Number.isFinite(degrees)) return degrees;
+  const wrapped = degrees % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
 }
 
 /**
