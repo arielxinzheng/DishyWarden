@@ -45,7 +45,8 @@
     "desc": "Polar radar · centre is the zenith (90°)",
     "note_base": "Centre = zenith | edge = horizon | purple cross = dish beam pointing",
     "note_estimated_suffix": " | pulse marker = estimated serving satellite",
-    "note_serving_suffix": " | green pulse = current serving satellite"
+    "note_serving_suffix": " | green pulse = current serving satellite",
+    "diag": "Beam {{boresight}} · serving {{serving}} · candidates {{runners}} · visible {{visible}}"
   },
   "serving": {
     "estimated": "Current serving satellite (estimated)",

@@ -59,6 +59,7 @@
     "handoff_legend": "★ Handoff",
     "handoff_show": "Click to show handoff markers",
     "handoff_hide": "Click to hide handoff markers",
+    "handoff_no_records": "No satellite handoff records in this window",
     "mode_unavailable": "This dimension has no data source yet",
     "mode_public": "Public",
     "mode_pop": "PoP",

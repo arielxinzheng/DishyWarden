@@ -18,6 +18,7 @@
  */
 
 import { DishGrpcClient } from '../core/dishGrpc';
+import { analyzeOutages } from '../core/outageAnalyzer';
 import { dualLine } from './logger';
 
 /** 常见分支名候选（覆盖 get* / dishGet* 两种命名风格） */
@@ -156,7 +157,70 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
   const web = await runPass('web', `grpc-web (${opts.webPort ?? 9201}, HTTP/1.1) —— 主通道`, CANDIDATES);
   const native = await runPass('native', `原生 gRPC (${opts.port}, HTTP/2) —— 兜底，只验证核心分支`, CORE_BRANCHES);
 
-  line('[3] 结论');
+  line('[3] 波束指向（卫星雷达的紫色十字）与中断事件（卫星切换的来源）');
+  line('');
+
+  // ---- 3a. status 里的波束指向字段 ----
+  try {
+    const status = await client.getStatus(timeoutMs);
+    const keys = Object.keys(status);
+    line(`    status 顶层键共 ${keys.length} 个`);
+    const hit = keys.filter((k) => /bore|point|align|azim|elev|beam/i.test(k));
+    if (hit.length) {
+      line('    与波束指向相关的顶层字段:');
+      for (const k of hit) {
+        line(`      ${k} = ${JSON.stringify(status[k])}`);
+      }
+    } else {
+      line('    (顶层没有 bore/point/align/azim/elev/beam 相关字段)');
+    }
+    // alignmentStats 是设备实际放波束的地方, 整个对象打出来
+    const stats = status.alignmentStats ?? status.alignment_stats;
+    if (stats && typeof stats === 'object') {
+      line('    alignmentStats = ' + JSON.stringify(stats));
+    } else {
+      line('    (status 里没有 alignmentStats 对象)');
+    }
+  } catch (err) {
+    line('    读 status 失败: ' + (err instanceof Error ? err.message : String(err)));
+  }
+  line('');
+
+  // ---- 3b. history 里的中断事件 ----
+  try {
+    const history = await client.getHistory(timeoutMs);
+    const outages = Array.isArray(history.outages) ? (history.outages as unknown[]) : [];
+    line(`    history 顶层键: ${Object.keys(history).join(', ')}`);
+    line(`    outages 事件数: ${outages.length}`);
+    for (const o of outages.slice(0, 3)) {
+      line('      原始: ' + JSON.stringify(o));
+    }
+    if (outages.length > 0) {
+      // 用应用同一套判定跑一遍, 直接看出「有没有被认成卫星切换」
+      try {
+        const analysis = analyzeOutages(outages as never);
+        line(`    判定结果: 切换 ${analysis.handoffs.length} 条 / 其他中断 ${analysis.otherOutages.length} 条`);
+        for (const h of analysis.handoffs.slice(0, 5)) {
+          line(`      切换 @${h.timestamp} 时长 ${h.durationMs}ms 原因 ${h.cause}`);
+        }
+        for (const o of analysis.otherOutages.slice(0, 3)) {
+          line(`      其他中断 @${o.startTimestamp} (${o.cause})`);
+        }
+        if (analysis.handoffs.length === 0) {
+          line('    ⇒ 没有一条被认成卫星切换 —— 上面的「原始」行里就是原因。');
+        }
+      } catch (err) {
+        line('    判定失败: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    } else {
+      line('    ⇒ 设备没有上报任何中断事件 —— 卫星切换无从产生。');
+    }
+  } catch (err) {
+    line('    读 history 失败: ' + (err instanceof Error ? err.message : String(err)));
+  }
+  line('');
+
+  line('[4] 结论');
   const usableOf = (rs: typeof native) =>
     rs.filter((r) => r.ok && r.keys.some((k) => DATA_KEYS.includes(k))).map((r) => r.name);
 

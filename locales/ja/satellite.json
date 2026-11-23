@@ -45,7 +45,8 @@
     "desc": "極座標レーダー · 中心は天頂 (90°)",
     "note_base": "中心 = 天頂 | 外周 = 地平線 | 紫の十字 = デバイスのビーム方向",
     "note_estimated_suffix": " | パルス表示は推定されたサービング衛星です",
-    "note_serving_suffix": " | 緑のパルス = 現在のサービング衛星"
+    "note_serving_suffix": " | 緑のパルス = 現在のサービング衛星",
+    "diag": "ビーム {{boresight}} · サービス {{serving}} · 候補 {{runners}} · 可視 {{visible}}"
   },
   "serving": {
     "estimated": "現在のサービング衛星（推定）",

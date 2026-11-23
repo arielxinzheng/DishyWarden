@@ -45,7 +45,8 @@
     "desc": "극좌표 레이더 · 중앙은 천정(90°)",
     "note_base": "중심 = 천정 | 가장자리 = 지평선 | 보라색 십자 = 장비 빔 방향",
     "note_estimated_suffix": " | 펄스 표시는 추정된 서빙 위성입니다",
-    "note_serving_suffix": " | 녹색 펄스 = 현재 서빙 위성"
+    "note_serving_suffix": " | 녹색 펄스 = 현재 서빙 위성",
+    "diag": "빔 {{boresight}} · 서비스 {{serving}} · 후보 {{runners}} · 가시 {{visible}}"
   },
   "serving": {
     "estimated": "현재 서빙 위성 (추정)",

@@ -45,7 +45,8 @@
     "desc": "极坐标雷达 · 中心为天顶(90°)",
     "note_base": "圆心 = 天顶 | 边缘 = 地平线 | 紫色十字 = 设备波束指向",
     "note_estimated_suffix": " | 脉冲标记为估算的服务卫星",
-    "note_serving_suffix": " | 绿色脉冲 = 当前服务卫星"
+    "note_serving_suffix": " | 绿色脉冲 = 当前服务卫星",
+    "diag": "波束 {{boresight}} · 服务 {{serving}} · 候选 {{runners}} · 可见 {{visible}}"
   },
   "serving": {
     "estimated": "当前服务卫星 (估算)",

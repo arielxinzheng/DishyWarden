@@ -648,6 +648,17 @@ export function LatencyChart({
             {t('dashboard:chart.handoff_legend')}
           </button>
         )}
+        {/*
+          开关打开但**一条记录都没有**时, 明说「是没数据」而不是「开关坏了」。
+          没有这句, 用户点开开关看到空图, 只会以为开关没生效。
+        */}
+        {showsSatelliteHandoffs(mode) &&
+          handoffsVisible &&
+          handoffs.length === 0 && (
+            <span className="self-center text-[11px] text-muted-foreground/70 ml-1">
+              {t('dashboard:chart.handoff_no_records')}
+            </span>
+          )}
       </div>
 
       {/* ECharts图表 */}

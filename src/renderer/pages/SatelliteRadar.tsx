@@ -111,10 +111,25 @@ export default function SatelliteRadar() {
   const [estimateReason, setEstimateReason] = useState<ServingReason | 'device_id' | null>(null);
   // 上一帧的服务卫星, 用于时间连续性判断 (交接瞬间相邻候选难分, 连续性可破)
   const servingSatRef = useRef<{ norad: string; name: string } | null>(null);
+  // 「已有加载在跑」时挂起一次重载, 跑完补上
+  const pendingReloadRef = useRef(false);
   // 设备波束指向 —— 提到组件层, chart effect 与重算 effect 都要依赖它
   // (telemetry 每次 refresh 都是新对象, 所以取具体字段值而非对象)
   const bsAz = telemetry?.boresightAzimuthDeg;
   const bsEl = telemetry?.boresightElevationDeg;
+
+  /**
+   * 最新一次已知的设备波束指向。
+   *
+   * ⚠️ 必须用 ref 而不是直接读 bsAz/bsEl ——
+   * `loadSatelliteData` 被 30 秒定时器、页面可见性事件、遥测 effect 反复调用,
+   * 而这些回调捕获的是**创建那一帧**的 bsAz/bsEl。遥测是异步到的,
+   * 首帧时它还是 undefined ⇒ 定时器永远拿着「没有波束」的旧闭包去重算,
+   * 于是紫色十字与服务卫星标记永远出不来。
+   */
+  const boresightRef = useRef<{ azimuthDeg: number; elevationDeg: number } | null>(null);
+  boresightRef.current =
+    bsAz !== undefined && bsEl !== undefined ? { azimuthDeg: bsAz, elevationDeg: bsEl } : null;
 
   /** 星历新鲜度语义码 → 当前语言文案 */
   const freshnessText = (freshness: TLEFreshness): string => {
@@ -178,7 +193,12 @@ export default function SatelliteRadar() {
   const loadSatelliteData = async (forceRefresh: boolean = false) => {
     // 防止重复加载
     if (loadingRef.current) {
-      console.log('Already loading, skipping...');
+      // ⚠️ 已经在跑 —— 但**不能直接丢掉**这次请求。
+      // 「遥测到了 → 重算」这个 effect 正好会撞上首次 TLE 加载,
+      // 撞上了就等于把唯一一次带波束的重算吞掉, 服务卫星与紫色十字永远出不来。
+      // ⇒ 记一个 pending, 当前这轮结束后补跑一次。
+      pendingReloadRef.current = true;
+      console.log('Already loading, queueing a reload...');
       return;
     }
 
@@ -265,10 +285,8 @@ export default function SatelliteRadar() {
 
       // 没有设备 ID 就用波束估算
       if (!servingPosition) {
-        const boresight =
-          bsAz !== undefined && bsEl !== undefined
-            ? { azimuthDeg: bsAz, elevationDeg: bsEl }
-            : null;
+        // 从 ref 读**当前**的波束, 而不是闭包里那一帧的值 (见 boresightRef 注释)
+        const boresight = boresightRef.current;
 
         estimate = estimateServingSatellite(
           plausiblePositions,
@@ -305,6 +323,11 @@ export default function SatelliteRadar() {
     } finally {
       loadingRef.current = false;
       setLoading(false);
+      // 撞上「已在加载」而挂起的那次重载, 现在补上
+      if (pendingReloadRef.current) {
+        pendingReloadRef.current = false;
+        void loadSatelliteData(false);
+      }
     }
   };
 
@@ -541,6 +564,7 @@ export default function SatelliteRadar() {
           coordinateSystem: 'polar',
           data: runnersData,
           symbolSize: 11,
+          z: 9,
           itemStyle: {
             color: '#f59e0b',
             shadowBlur: 8,
@@ -554,6 +578,7 @@ export default function SatelliteRadar() {
           coordinateSystem: 'polar',
           data: servingData,
           symbolSize: 17,
+          z: 10,
           rippleEffect: { scale: 3, brushType: 'stroke' },
           itemStyle: {
             // 置信度低时用警示色，别让绿脉冲看起来像"确知的"
@@ -563,23 +588,36 @@ export default function SatelliteRadar() {
           },
         },
         // 设备波束指向 —— 估算的参照物
-        ...(boresightData.length > 0
-          ? [
-              {
-                name: boresightSeriesName,
-                type: 'scatter' as const,
-                coordinateSystem: 'polar' as const,
-                data: boresightData,
-                symbolSize: 13,
-                symbol: 'cross' as const,
-                itemStyle: { color: '#a78bfa', opacity: 0.9 },
-              },
-            ]
-          : []),
+        //
+        // ⚠️ 这个 series **始终**建, 即使没有数据。
+        // ECharts 的 setOption 是按 series 名字合并的, 序列会随时增删时
+        // 合并结果难以预测 —— 固定四个 series, 空的用空 data,
+        // 图表结构就不会随数据到达/消失而变。
+        {
+          name: boresightSeriesName,
+          type: 'scatter',
+          coordinateSystem: 'polar',
+          data: boresightData,
+          symbolSize: 13,
+          symbol: 'cross',
+          z: 11,
+          itemStyle: { color: '#a78bfa', opacity: 0.9 },
+        },
       ],
     };
 
-    chart.setOption(option);
+    // notMerge: 整份替换, 不跟上一份 option 合并 ——
+    // 合并会让「上一轮有、这一轮没有」的 series 残留下来,
+    // 或者让新 series 拿不到数据。
+    chart.setOption(option, { notMerge: true });
+
+    // 诊断: 图上到底画了几个点。真机上看不见标记时, 这一行能立刻说明
+    // 是「数据没到」还是「画不出来」。
+    console.log(
+      `[SatelliteRadar] chart: visible=${visibleData.length} runners=${runnersData.length} ` +
+      `serving=${servingData.length} boresight=${boresightData.length} ` +
+      `bsAz=${bsAz ?? 'undefined'} bsEl=${bsEl ?? 'undefined'}`
+    );
 
     // 响应式
     const handleResize = () => chart.resize();
@@ -754,6 +792,19 @@ export default function SatelliteRadar() {
                   {estimate
                     ? t('satellite:sky.note_estimated_suffix')
                     : t('satellite:sky.note_serving_suffix')}
+                </p>
+                {/* 诊断行: 图上少画了什么, 一眼能看出来。遥测没有波束时
+                    这里会显示 "波束 —", 提醒用户是设备没上报而不是图坏了。 */}
+                <p className="text-[11px] text-muted-foreground/70 text-center mt-1 font-mono">
+                  {t('satellite:sky.diag', {
+                    boresight:
+                      bsAz !== undefined && bsEl !== undefined
+                        ? `${bsAz.toFixed(1)}° / ${bsEl.toFixed(1)}°`
+                        : '—',
+                    serving: satellites.filter((s) => s.serving).length,
+                    runners: runners.length,
+                    visible: satellites.length,
+                  })}
                 </p>
               </CardContent>
             </Card>

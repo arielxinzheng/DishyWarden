@@ -45,7 +45,8 @@
     "desc": "Radar tọa độ cực · tâm là thiên đỉnh (90°)",
     "note_base": "Tâm = thiên đỉnh | rìa = đường chân trời | dấu thập tím = hướng chùm tia của thiết bị",
     "note_estimated_suffix": " | dấu nhấp nháy là vệ tinh phục vụ ước lượng",
-    "note_serving_suffix": " | xung xanh lá = vệ tinh phục vụ hiện tại"
+    "note_serving_suffix": " | xung xanh lá = vệ tinh phục vụ hiện tại",
+    "diag": "Chùm {{boresight}} · phục vụ {{serving}} · ứng viên {{runners}} · nhìn thấy {{visible}}"
   },
   "serving": {
     "estimated": "Vệ tinh phục vụ hiện tại (ước lượng)",

@@ -59,6 +59,7 @@
     "handoff_legend": "★ 衛星切り替え",
     "handoff_show": "クリックすると衛星切り替えマーカーを表示します",
     "handoff_hide": "クリックすると衛星切り替えマーカーを非表示にします",
+    "handoff_no_records": "この時間範囲に衛星 handover 記録はありません",
     "mode_unavailable": "この項目はまだ収集ソースに接続されていません",
     "mode_public": "公衆網",
     "mode_pop": "PoP",

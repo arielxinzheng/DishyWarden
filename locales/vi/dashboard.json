@@ -59,6 +59,7 @@
     "handoff_legend": "★ Chuyển vệ tinh",
     "handoff_show": "Nhấn để hiện dấu chuyển vệ tinh",
     "handoff_hide": "Nhấn để ẩn dấu chuyển vệ tinh",
+    "handoff_no_records": "Không có bản ghi chuyển vệ tinh trong khoảng thời gian này",
     "mode_unavailable": "Chiều dữ liệu này chưa được kết nối nguồn thu thập",
     "mode_public": "Internet công cộng",
     "mode_pop": "PoP",
