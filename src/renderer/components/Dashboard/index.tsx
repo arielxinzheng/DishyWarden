@@ -18,6 +18,11 @@ import { useDish, useDishHistory, useHistorySummary, type ObstructionData } from
 import { useHandoffs } from '../../hooks/useHandoffs';
 import { useElementWidth } from '../../hooks/useElementWidth';
 import {
+  TIME_RANGE_OPTIONS,
+  TIME_RANGE_SECONDS,
+  usePersistentTimeRange,
+} from '../../hooks/usePersistentTimeRange';
+import {
   analyzeObstructionMap,
   assessObstructionImpact,
   describeObstructionAge,
@@ -48,18 +53,7 @@ import { isFirstInstallFailure, type ZeroDataStorageStats } from './firstInstall
 import SetupGuide from './SetupGuide';
 import { LanguageSwitcher } from '../../components/LanguageSwitcher';
 
-type TimeRange = '15m' | '1h' | '6h';
 type RefreshInterval = '30s' | '1m' | 'manual';
-
-/**
- * 时间范围 → 查询秒数。
- * 页面上的选择器和图表查询从这里派生, 不再各自写死时间窗。
- */
-const TIME_RANGE_SECONDS: Record<TimeRange, number> = {
-  '15m': 15 * 60,
-  '1h': 60 * 60,
-  '6h': 6 * 60 * 60,
-};
 
 // 字节 → GB 数值（保留 2 位），单位由 UI 单独渲染
 const toGb = (bytes: number) => (bytes / 1024 ** 3).toFixed(2);
@@ -107,7 +101,9 @@ export default function Dashboard() {
   const { telemetry, isConnected, isLoading, error, refresh, obstruction } = useDish();
   // 24h 统计摘要：来自 SQLite 历史库，替代此前的硬编码值
   const summary24h = useHistorySummary(86400);
-  const [timeRange, setTimeRange] = useState<TimeRange>('1h');
+  // 周期选择是**用户偏好**：切页往返、重启应用后都要保持不变（#12）。
+  // 读写与非法值回落收在 usePersistentTimeRange 里，组件只消费。
+  const [timeRange, setTimeRange] = usePersistentTimeRange();
   // 路由跟踪卡片的折叠/展开 —— 提升到外层：折叠时右列整体要与
   // 左侧「吞吐量」卡片等高，这个约束在下面的 grid 容器上。
   const [traceExpanded, setTraceExpanded] = useState(false);
@@ -428,7 +424,7 @@ export default function Dashboard() {
 
           {/* Time range selector */}
           <div className="hidden sm:flex items-center gap-1 bg-muted/40 border border-border rounded-md p-1">
-            {(['15m', '1h', '6h'] as TimeRange[]).map((range) => (
+            {TIME_RANGE_OPTIONS.map((range) => (
               <button
                 key={range}
                 onClick={() => setTimeRange(range)}
