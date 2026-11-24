@@ -367,6 +367,58 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     for (const o of outages.slice(0, 3)) {
       line('      原始: ' + JSON.stringify(o));
     }
+    // 最后一条 + 总跨度：outage 列表是有上限的滚动窗口，
+    // 只有"最新一条的原始值"才能把设备时钟和真实时间对上。
+    const lastOutage = outages[outages.length - 1] as Record<string, unknown> | undefined;
+    if (lastOutage && typeof lastOutage === 'object') {
+      line('      最后一条: ' + JSON.stringify(lastOutage));
+    }
+
+    // ⚠️ history 里还有几个我们从来没看过的数组：
+    //   popPingLatencyMs / popPingDropRate / downlinkThroughputBps /
+    //   uplinkThroughputBps / powerIn —— 都是**设备自己维护的历史序列（带时间戳）**，
+    //   eventLog —— 设备事件日志。
+    // 它们的时间戳基准如果和 outages 不同，就能直接给出"设备时钟 → 真实时间"的换算；
+    // 而且 popPingLatencyMs 本身就是设备侧的延迟历史（延迟反推换星要用）。
+    for (const key of [
+      'popPingLatencyMs',
+      'popPingDropRate',
+      'downlinkThroughputBps',
+      'uplinkThroughputBps',
+      'powerIn',
+    ]) {
+      const arr = (history as unknown as Record<string, unknown>)[key];
+      if (!Array.isArray(arr)) {
+        line(`    ${key}: 非数组 (${typeof arr})`);
+        continue;
+      }
+      line(`    ${key}: ${arr.length} 项`);
+      for (const [label, idx] of [
+        ['首', 0],
+        ['尾', arr.length - 1],
+      ] as Array<[string, number]>) {
+        if (arr.length === 0 || idx < 0 || idx >= arr.length) continue;
+        const v = arr[idx];
+        const text = JSON.stringify(v);
+        line(`      ${label}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}`);
+      }
+    }
+    {
+      const ev = (history as unknown as Record<string, unknown>).eventLog;
+      if (Array.isArray(ev)) {
+        line(`    eventLog: ${ev.length} 项`);
+        for (const [label, idx] of [
+          ['首', 0],
+          ['尾', ev.length - 1],
+        ] as Array<[string, number]>) {
+          if (ev.length === 0 || idx < 0 || idx >= ev.length) continue;
+          const text = JSON.stringify(ev[idx]);
+          line(`      ${label}: ${text.length > 300 ? text.slice(0, 300) + '…' : text}`);
+        }
+      } else {
+        line(`    eventLog: 非数组 (${typeof ev}) = ${JSON.stringify(ev)?.slice(0, 300) ?? 'null'}`);
+      }
+    }
     if (outages.length > 0) {
       // 用应用同一套判定跑一遍, 直接看出「有没有被认成卫星切换」
       try {
