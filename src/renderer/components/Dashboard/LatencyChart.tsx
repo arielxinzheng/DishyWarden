@@ -25,6 +25,7 @@ import {
   type HandoffOverrides,
   type TimeRangeKey,
 } from './handoffVisibility';
+import { describeHandoffAge, handoffAgeKey } from './handoffAge';
 import { buildTimeGrid, findNullRuns, gapMarkArea, type IndexRun } from './dataGaps';
 import { useEffect, useRef, useState } from 'react';
 
@@ -65,6 +66,8 @@ interface LatencyChartProps {
    * NO_DOWNLINK 等), 这才是「切换事件」的权威来源。
    */
   handoffs?: HandoffEvent[];
+  /** 最近一次卫星切换的时间戳（可为窗口外的旧事件），用于空态提示 */
+  lastHandoffAt?: number | null;
 }
 
 export function LatencyChart({
@@ -74,6 +77,7 @@ export function LatencyChart({
   fromMs,
   toMs,
   handoffs = [],
+  lastHandoffAt = null,
   timeRange = '1h',
 }: LatencyChartProps) {
   const { t } = useTranslation();
@@ -656,7 +660,12 @@ export function LatencyChart({
           handoffsVisible &&
           handoffs.length === 0 && (
             <span className="self-center text-[11px] text-muted-foreground/70 ml-1">
-              {t('dashboard:chart.handoff_no_records')}
+              {lastHandoffAt
+                ? (() => {
+                    const age = describeHandoffAge(lastHandoffAt);
+                    return t(handoffAgeKey(age), { count: age.count });
+                  })()
+                : t('dashboard:chart.handoff_no_records')}
             </span>
           )}
       </div>

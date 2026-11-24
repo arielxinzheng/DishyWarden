@@ -22,6 +22,14 @@ import {
   TIME_RANGE_SECONDS,
   usePersistentTimeRange,
 } from '../../hooks/usePersistentTimeRange';
+
+/**
+ * 卫星切换事件的回看窗口（秒）。
+ *
+ * 比最大的视图时间窗（6H）还长，用来回答「最近一次切换是多久以前」——
+ * 消息本身不在任何视图窗内时，这句提示是区分「没数据」和「功能坏了」的唯一线索。
+ */
+const HANDOFF_LOOKBACK_SECONDS = 24 * 3600;
 import {
   analyzeObstructionMap,
   assessObstructionImpact,
@@ -109,8 +117,22 @@ export default function Dashboard() {
   const [traceExpanded, setTraceExpanded] = useState(false);
   // 图表数据在这里取一次, 两个图表共用 —— 避免各自发起 IPC 查询
   const { history, isLoading: historyLoading } = useDishHistory(TIME_RANGE_SECONDS[timeRange]);
-  // 卫星切换事件(★ 标记点) —— 来自 dishGetHistory 的 outages, 与 history 同一个时间窗
-  const handoffs = useHandoffs(TIME_RANGE_SECONDS[timeRange]);
+  // 卫星切换事件(★ 标记点) —— 来自 dishGetHistory 的 outages
+  //
+  // ⚠️ 取**固定 24 小时**再在本地按当前时间窗裁剪，而不是按 timeRange 取：
+  //   只取当前窗口的话，「窗口内没有切换」和「采集链路坏了」在界面上长得一模一样。
+  //   真机就踩过这个坑 —— 最近一次切换在 6.4 小时前，1H/6H 视图都空着，
+  //   看起来像功能没修好，其实数据是好的。
+  //   多取一点，界面才能说出「最近一次切换在多久之前」。
+  const allHandoffs = useHandoffs(HANDOFF_LOOKBACK_SECONDS);
+  const handoffs = useMemo(() => {
+    const cutoff = Date.now() - TIME_RANGE_SECONDS[timeRange] * 1000;
+    return allHandoffs.filter((h) => h.timestamp >= cutoff);
+  }, [allHandoffs, timeRange]);
+  const lastHandoffAt = useMemo(
+    () => (allHandoffs.length > 0 ? Math.max(...allHandoffs.map((h) => h.timestamp)) : null),
+    [allHandoffs]
+  );
   // 六张指标卡的走势序列：和图表共用同一份 history, 各取一条指标
   const metricSeries = useMemo(() => buildMetricSeries(history), [history]);
 
@@ -833,6 +855,7 @@ export default function Dashboard() {
                 fromMs={chartWindow.from}
                 toMs={chartWindow.to}
                 handoffs={handoffs}
+                lastHandoffAt={lastHandoffAt}
                 timeRange={timeRange}
               />
             </CardContent>
