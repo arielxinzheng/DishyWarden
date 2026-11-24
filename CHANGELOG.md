@@ -13,7 +13,7 @@ format and adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.0.1] — 2026-11-23
+## [1.0.1] — 2026-11-24
 
 ### Fixed
 
@@ -40,6 +40,55 @@ format and adheres to [Semantic Versioning](https://semver.org/).
   from 27 to 28; the README now states that auto-update is Windows-only; a
   "Why DishyWarden?" section was added; Korean grammar particles around the
   app name were fixed; all five language versions were regenerated.
+- **The sky view no longer dropped the serving satellite, the candidates and the
+  beam.** A real terminal reported its beam azimuth as a negative angle, and the
+  polar chart has a fixed 0 to 360 degree axis, so every point outside that
+  range was dropped without an error. Since the serving satellite, the
+  candidates and the beam sit at almost the same bearing, a negative bearing
+  removed exactly those three layers at once while the visible satellites
+  carried on being drawn. Bearings are now wrapped into the axis range, the
+  chart always creates all four layers instead of adding them conditionally,
+  and the beam no longer goes missing because a timed refresh had captured an
+  earlier reading.
+- **The dashboard remembered the selected collection period.** The range was
+  reset to the default on every start, so the view the user had chosen was
+  gone the next morning.
+- **Interruptions were no longer dropped because of an assumed timestamp
+  unit.** The unit of the device timestamps was inferred from their magnitude,
+  which silently misread a nanosecond clock as milliseconds and pushed every
+  event far into the future. The unit is now detected, the outage anomalies are
+  logged so a remote run can reveal what a terminal actually sends, and the
+  events reach the chart instead of vanishing.
+- **The interruptions a terminal reports are now read in the shape it reports
+  them.** A real terminal sends the start time and duration in nanoseconds
+  under different field names than the mock does, and it states outright
+  whether a satellite was handed over. The parser accepts both spellings, keeps
+  the nanosecond magnitude so the unit can be detected, and trusts the device
+  flag instead of guessing from the duration.
+- **A terminal with a wrong clock no longer hides its interruptions.** One
+  terminal reported timestamps from 2016 and an uptime counter where an epoch
+  was expected, so the correction landed on the wrong clock and pushed every
+  event into 2073. The clock is now only trusted when it is plausible, and
+  events are moved onto the wall clock against the device's own reading of the
+  present, with the derived offset pinned so the same event is not rewritten
+  on every poll.
+- **Interruptions that are really physical problems stay with the alerts.** The
+  device flags a satellite handover alongside every interruption, including
+  obstruction, which had swallowed all of them and left the obstruction alerts
+  with nothing to report. Physical causes now stay on the alert path.
+- **The handoff markers are no longer keyed by a timestamp the device can
+  make collide.** Rows are now keyed by the device's own clock reading, so
+  events with the same corrected instant cannot overwrite each other, and an
+  event without a usable clock identity is rejected with a warning instead of
+  being written and lost.
+- **The gateway latency is measured once.** The settings page and the history
+  store each ran their own silent probe, so one of them could fail while the
+  other looked healthy and the chart showed nothing. Both now read the same
+  probe result, and the gateway dimension explains that it is a local link and
+  therefore carries no satellite handover.
+- **The empty chart says when the last handover happened.** Previously it could
+  only report that the selected range held no records, which is
+  indistinguishable from a broken pipeline.
 
 ### Changed
 
