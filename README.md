@@ -164,6 +164,17 @@ Download the latest asset from the [releases page](https://github.com/arielxinzh
 | Windows x64 / arm64 | `DishyWarden-Setup-<version>.exe` (NSIS, per-machine) |
 | macOS arm64 / x64 | `DishyWarden-<version>-<os>-<arch>.dmg` |
 
+**Homebrew (macOS):**
+
+```bash
+brew tap arielxinzheng/cask
+brew trust arielxinzheng/cask
+brew install --cask dishywarden
+```
+
+The cask carries the checksum of the published disk image, so Homebrew
+verifies the download for you.
+
 > **The builds are not code-signed.** Windows will show a SmartScreen warning
 > ("Windows protected your PC") — click *More info → Run anyway*. macOS will
 > quarantine the app — right-click the `.dmg` and choose *Open*, or run

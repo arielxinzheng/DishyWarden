@@ -153,6 +153,16 @@ Tải bản mới nhất từ [trang phát hành](%REPO_URL%/releases):
 | Windows x64 / arm64 | `DishyWarden-Setup-<version>.exe` (NSIS, per-machine) |
 | macOS arm64 / x64 | `DishyWarden-<version>-<os>-<arch>.dmg` |
 
+**Homebrew (macOS):**
+
+```bash
+brew tap arielxinzheng/cask
+brew trust arielxinzheng/cask
+brew install --cask dishywarden
+```
+
+Cask chứa checksum của ảnh đĩa đã phát hành, nên Homebrew tự kiểm tra bản tải về.
+
 > **Bản build chưa được ký mã.** Windows sẽ hiện cảnh báo SmartScreen
 > (“Windows đã bảo vệ PC của bạn”) — bấm *Thêm thông tin → Vẫn chạy*.
 > macOS sẽ cách ly ứng dụng — nhấp chuột phải vào `.dmg` rồi chọn *Mở*, hoặc chạy

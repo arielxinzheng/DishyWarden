@@ -135,6 +135,16 @@ npm run lint
 | Windows x64 / arm64 | `DishyWarden-Setup-<version>.exe`（NSIS，per-machine） |
 | macOS arm64 / x64 | `DishyWarden-<version>-<os>-<arch>.dmg` |
 
+**Homebrew（macOS）：**
+
+```bash
+brew tap arielxinzheng/cask
+brew trust arielxinzheng/cask
+brew install --cask dishywarden
+```
+
+cask 里带的是已发布镜像的校验和，Homebrew 会自动核对下载。
+
 > **产物未做代码签名。** Windows 会弹出 SmartScreen 警告
 > （"Windows 已保护你的电脑"）—— 点"更多信息 → 仍要运行"；macOS 会隔离该应用
 > —— 右键点 `.dmg` 选"打开"，或执行
