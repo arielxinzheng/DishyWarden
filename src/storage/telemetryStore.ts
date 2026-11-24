@@ -30,6 +30,7 @@ import {
   HANDOFF_RETENTION_DAYS,
 } from './schema';
 import { ESTIMATED_BYTES_SQL } from './summarySql';
+import { splitIdentifiableHandoffs } from './handoffIdentity';
 import type {
   HistoryQuery,
   HistorySample,
@@ -741,10 +742,30 @@ export class TelemetryStore {
    * 不必维护「哪些写过了」的水位线 —— 那套水位线在锚点会平移的前提下
    * 无法正确工作（详见 `dishClock.ts` 开篇）。
    *
+   * ## 为什么在这里挡住 rtcMs 无效的事件
+   *
+   * `rtcMs` 取自设备的 `startTimestampNs`（经 `toEpochMs` 按数量级换算）。
+   * 固件换了字段名、或者单位判不出来时，`toEpochMs` 会给出 0 ——
+   * 于是整窗事件的身份全都一样，`INSERT OR REPLACE` 让它们**互相覆盖**，
+   * 库里只剩最后一条，而且没有任何报错。历史就这样静默消失。
+   *
+   * 现场日志出现过这条路径（`[outage] unit=null first_ts_magnitude=0.00e+0`）。
+   * 判据本身在 `handoffIdentity.ts`（纯函数，可单测），这里只负责拒绝并留下日志 ——
+   * 分析器只负责解释设备发来的数字，没有立场判断它能不能当主键。
+   *
    * @param handoffs 卫星切换事件（含未校准的 rtcMs 与换算后的 timestamp）
    */
   upsertHandoffs(handoffs: HandoffEvent[]): void {
     if (handoffs.length === 0) return;
+
+    const { identifiable, rejected } = splitIdentifiableHandoffs(handoffs);
+    if (rejected.length > 0) {
+      console.warn(
+        `[TelemetryStore] 本轮 ${handoffs.length} 条切换事件有 ${rejected.length} 条读不出设备时间戳` +
+          '（rtc_ms 无效，占位值会导致整窗事件互相覆盖），已跳过。设备 history 的时间字段可能改了名字',
+      );
+    }
+    if (identifiable.length === 0) return;
 
     const insert = this.db.prepare(`
       INSERT OR REPLACE INTO satellite_handoffs
@@ -765,7 +786,7 @@ export class TelemetryStore {
       }
     });
 
-    transaction(handoffs);
+    transaction(identifiable);
   }
 
   /**
