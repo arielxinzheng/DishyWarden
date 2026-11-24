@@ -158,6 +158,25 @@ export const IMPLICIT_HANDOFF_CAUSES = [
 export const HANDOFF_MAX_DURATION_MS = 10000; // 10 秒
 
 /**
+ * 物理原因：这些中断是**真实的环境/硬件问题**，不是卫星切换。
+ *
+ * ⚠️ 真机实测 `didSwitch` 在**每一条** outage 上都是 true（连 OBSTRUCTED 也是）——
+ * 它表达的是"这次中断之后终端换过星"，不是"这次中断的起因就是换星"。
+ * 如果直接用 `didSwitch` 判定切换，20 条遮挡中断会**全部**被搬进 handoffs，
+ * `otherOutages` 变成空的 ⇒ 遮挡/供电这类告警再也不会触发（实测这台机器
+ * obstructionStats.fractionObstructed = 0.41，遮挡告警是它的主要用途）。
+ */
+const PHYSICAL_OUTAGE_CAUSES: OutageCause[] = [
+  OutageCause.OBSTRUCTED,
+  OutageCause.NOT_ENOUGH_POWER,
+  OutageCause.THERMAL_SHUTDOWN,
+  OutageCause.STOWED,
+  OutageCause.BOOTING,
+  OutageCause.CABLE_UNPLUGGED,
+  OutageCause.SOFTWARE_UPDATE,
+];
+
+/**
  * 判断 outage 是否为卫星切换
  * 
  * @param outage - 中断记录
@@ -166,9 +185,11 @@ export const HANDOFF_MAX_DURATION_MS = 10000; // 10 秒
 export function isHandoffOutage(outage: Outage): boolean {
   const causeStr = outage.cause || outage.triggered || '';
   const { durationMs } = outage;
+  const parsed = parseOutageCause(causeStr);
 
-  // 0. 设备自己说这次中断换了卫星 —— 最可靠的判据，压过所有启发式
-  if (outage.didSwitch === true) {
+  // 0. 设备自报 didSwitch —— 但**物理原因除外**（见 PHYSICAL_OUTAGE_CAUSES）。
+  //    遮挡期间顺带换星仍是遮挡事件，必须留给告警系统。
+  if (outage.didSwitch === true && !PHYSICAL_OUTAGE_CAUSES.includes(parsed)) {
     return true;
   }
 

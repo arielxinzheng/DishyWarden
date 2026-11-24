@@ -65,6 +65,24 @@ describe('真机 outage 字段名与单位', () => {
     expect(handoffs[0].cause).toBe('NO_DOWNLINK');
   });
 
+  it('OBSTRUCTED + didSwitch:true 仍是遮挡事件，不能被吞成切换', () => {
+    // 真机每一条 outage 的 didSwitch 都是 true，连遮挡也是。
+    // 若据此判切换，otherOutages 会变空 ⇒ 遮挡告警再也不触发。
+    const { handoffs, otherOutages } = analyzeOutages(
+      [
+        {
+          cause: 'OBSTRUCTED',
+          startTimestampNs: '1479481378560372964',
+          durationNs: '1579831282',
+          didSwitch: true,
+        } as never,
+      ],
+      { hostNow: REAL_TS_MS },
+    );
+    expect(handoffs).toHaveLength(0);
+    expect(otherOutages).toHaveLength(1);
+  });
+
   it('didSwitch:false 的长中断不算切换', () => {
     const o = normalizeOutage({
       cause: 'OBSTRUCTED',
@@ -80,39 +98,64 @@ describe('真机 outage 字段名与单位', () => {
 describe('设备时钟偏差修正', () => {
   const hostNow = Date.UTC(2026, 10, 23, 10, 0, 0);
 
-  it('设备报 2016 年时，按 history.current 把事件搬回墙上时间', () => {
-    const deviceNow = '1479425000000000000'; // 设备自己认为的"现在"（ns）
-    const { handoffs } = analyzeOutages([REAL_OUTAGE as never], {
-      deviceNow,
+  it('history.current 是开机秒数时，绝不能当 epoch 用', () => {
+    // 真机：current = "398560"，deviceState.uptimeS = "398578" —— 就是 uptime。
+    // 当 epoch 用会把事件搬到 2073 年，比不修正更糟（真机踩过）。
+    const { handoffs, clockMode } = analyzeOutages([REAL_OUTAGE as never], {
+      deviceNow: '398560',
       hostNow,
     });
     expect(handoffs).toHaveLength(1);
+    // 应走「最新事件对齐现在」，而不是「current 当 epoch」
+    expect(clockMode).toBe('newest');
+    // 落点必须在这一代（而不是 1970 或 2073）
+    expect(handoffs[0].timestamp).toBeGreaterThan(hostNow - 60 * 1000);
+    expect(handoffs[0].timestamp).toBeLessThanOrEqual(hostNow);
+  });
 
-    // 事件比设备"现在"早 4280 秒 ⇒ 应该落在 hostNow 之前约 4280 秒
+  it('current 确实是 epoch 时按它修正', () => {
+    // 设备时钟慢 1 小时，但内部一致（事件时间戳和 current 同一基准）
+    const skewMs = 3600 * 1000;
+    const deviceNowMs = hostNow - skewMs;
+    const eventAtDeviceMs = deviceNowMs - 4280 * 1000;
+    const { handoffs, clockMode } = analyzeOutages(
+      [
+        {
+          cause: 'NO_DOWNLINK',
+          startTimestampNs: String(BigInt(eventAtDeviceMs) * 1000000n),
+          durationNs: '560167119',
+          didSwitch: true,
+        } as never,
+      ],
+      { deviceNow: String(BigInt(deviceNowMs) * 1000000n), hostNow },
+    );
+    expect(clockMode).toBe('current');
+    // 事件比设备"现在"早 4280 秒 ⇒ 修正后比 hostNow 早约 4280 秒
     const ageMs = hostNow - handoffs[0].timestamp;
-    expect(ageMs).toBeGreaterThan(4000 * 1000);
+    expect(ageMs).toBeGreaterThan(4200 * 1000);
     expect(ageMs).toBeLessThan(4400 * 1000);
   });
 
-  it('没有 current 时不搬动数据 —— 宁可显示在窗口外，也不伪造"刚刚发生"', () => {
-    const { handoffs } = analyzeOutages([REAL_OUTAGE as never], { hostNow });
-    expect(handoffs).toHaveLength(1);
-    // 保持设备原始时间（2016），不做静默对齐
-    expect(Math.abs(handoffs[0].timestamp - REAL_TS_MS)).toBeLessThan(100);
+  it('给定固定 offset 时不再自己算（避免同一事件每轮被重写）', () => {
+    const fixed = 316000000000;
+    const a = analyzeOutages([REAL_OUTAGE as never], { hostNow, clockOffsetMs: fixed });
+    const b = analyzeOutages([REAL_OUTAGE as never], { hostNow: hostNow + 30000, clockOffsetMs: fixed });
+    expect(a.handoffs[0].timestamp).toBe(b.handoffs[0].timestamp);
+    expect(a.clockMode).toBe('given');
   });
 
   it('设备时钟正常时不做任何修正', () => {
-    const normalNow = hostNow;
-    const { handoffs } = analyzeOutages(
+    const { handoffs, clockMode } = analyzeOutages(
       [
         {
           cause: 'HANDOFF',
-          startTimestamp: String(normalNow - 120000),
+          startTimestamp: String(hostNow - 120000),
           durationMs: '1500',
         } as never,
       ],
       { hostNow },
     );
-    expect(handoffs[0].timestamp).toBe(normalNow - 120000);
+    expect(clockMode).toBe('none');
+    expect(handoffs[0].timestamp).toBe(hostNow - 120000);
   });
 });

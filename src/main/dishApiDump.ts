@@ -350,7 +350,12 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     const history = await client.getHistory(timeoutMs);
     const outages = Array.isArray(history.outages) ? (history.outages as unknown[]) : [];
     line(`    history 顶层键: ${Object.keys(history).join(', ')}`);
-    line(`    current = ${JSON.stringify(history.current ?? null)}（设备自己的"现在"）`);
+    // ⚠️ 真机的 current 是**开机秒数**（与 deviceState.uptimeS 只差十几秒），不是 epoch。
+    // 这里把两个值并排打出来，一眼就能判断它能不能当时钟基准用。
+    line(
+      `    current = ${JSON.stringify(history.current ?? null)}` +
+        '（⚠️真机上这是开机秒数，不是 epoch；同一响应里 uptimeS 与它只差十几秒）'
+    );
     line(`    outages 事件数: ${outages.length}`);
     // 字段名是这次真机排查的关键：设备发的是 startTimestampNs/durationNs，
     // 不是 startTimestamp/durationMs。把这套名字打出来，下次不用再猜。

@@ -159,39 +159,68 @@ export interface OutageAnalysis {
   totalOutages: number;
   /** 卫星切换占比 */
   handoffRatio: number;
+  /** 本轮加到事件时间戳上的偏移（毫秒）。0 = 没修正 */
+  clockOffsetMs: number;
+  /** 偏移是怎么来的，用于日志定位 */
+  clockMode: 'given' | 'current' | 'newest' | 'none';
 }
 
 /**
- * 算出「设备时钟 - 本机时钟」的偏差（毫秒），用来把事件搬回墙上时间。
+ * 算出要加到设备时间戳上的偏移量（毫秒），把事件搬到墙上时间。
  *
  * ## 为什么必须修正
  *
- * 真机实测（192.168.100.1，2026-11）outage 的时间戳是**2016 年**：
- * `startTimestampNs = "1479420720000261589"` ⇒ 2016-11-18 —— 设备 RTC 明显是错的。
- * 这种事件无论单位解析得多准，都会落在"最近 1 小时"窗口之外，
+ * 真机实测（192.168.100.1，固件 2026.10.27）outage 的时间戳是 **2016 年**：
+ * `startTimestampNs = "1479481378560372964"` ⇒ 2016-11-18 —— 设备 RTC 是错的。
+ * 这种事件无论单位解析得多准，都落在"最近 1 小时"窗口之外，
  * 仪表盘的卫星切换永远是 0 条。
  *
- * ## 修正策略
+ * ## ⚠️ `history.current` 不是 epoch，是开机秒数
  *
- * 只用 **`history.current`（设备自己的"现在"）**：`offset = hostNow - deviceNow`。
- * 设备时钟的整体偏移是常数，这样搬回来的相对位置是准确的。
+ * 同一份响应里 `current = "398560"`，而 `deviceState.uptimeS = "398578"` ——
+ * 两者只差 18 秒，**current 就是 uptime**。把它当 epoch 用会算出
+ * 「1970 - 2026」这么大的偏移，事件被搬到 **2073 年**，比不修正更糟
+ * （这个坑真机踩过：修正后时间戳变成 3274568791974，依然一条都查不到）。
  *
- * ⚠️ 刻意**不**用"把最新一条事件对齐到当前时间"这种兜底：
- * 那会把正常设备的数据整体搬歪，而且静默 —— 正常设备的历史事件会被
- * 伪装成"刚刚发生"，仪表盘上出现假标记，比没有标记更糟。
- * 拿不到 current 时宁可不搬，让事件保持设备原始时间（真实但可能落在窗口外）。
+ * ⇒ 只有落在「最近 30 天 ~ 未来 1 天」内的值才当作 epoch 采用。
  *
- * 偏差小于一天 ⇒ 不修正（设备时钟正常，别乱动数据）。
+ * ## 修正策略（按可靠性）
  *
- * @returns 要加到时间戳上的偏移量（毫秒）；0 表示不修正
+ * 1. 调用方已经算好并固定了 offset（跨轮复用，见 historian）⇒ 直接用。
+ * 2. `deviceNow` 是合法 epoch ⇒ `offset = hostNow - deviceNow`。
+ * 3. 设备时间戳明显不在当代（> 30 天外）⇒ 把**最新一条事件**对齐到 hostNow。
+ *    误差上限 = 最新那条事件的真实年龄（分钟级到小时级），但相对间隔完全正确。
+ *    这是"能看见但可能偏一点" vs "永远看不见"之间的取舍，且会打日志说明。
+ * 4. 其它情况 ⇒ 不修正。
  */
-function resolveClockOffset(deviceNow: unknown, hostNow: number): number {
-  const DAY_MS = 24 * 60 * 60 * 1000;
+function resolveClockOffset(
+  prepared: Array<{ normalized: Outage }>,
+  deviceNow: unknown,
+  hostNow: number,
+): { offsetMs: number; mode: 'given' | 'current' | 'newest' | 'none' } {
+  const PLAUSIBLE_PAST_MS = 30 * 24 * 60 * 60 * 1000;
+  const PLAUSIBLE_FUTURE_MS = 24 * 60 * 60 * 1000;
+  const isPlausibleEpoch = (ms: number) =>
+    ms > hostNow - PLAUSIBLE_PAST_MS && ms < hostNow + PLAUSIBLE_FUTURE_MS;
+
+  // 2. 设备自报的"现在"——只有确实是 epoch 才用
   const deviceNowMs = toEpochMs(deviceNow);
-  if (deviceNowMs > 0 && Math.abs(deviceNowMs - hostNow) > DAY_MS) {
-    return hostNow - deviceNowMs;
+  if (deviceNowMs > 0 && isPlausibleEpoch(deviceNowMs)) {
+    return { offsetMs: hostNow - deviceNowMs, mode: 'current' };
   }
-  return 0;
+
+  // 3. 把最新一条事件对齐到当前时间
+  const timestamps = prepared
+    .map((p) => p.normalized.startTimestamp)
+    .filter((t) => Number.isFinite(t) && t > 0);
+  if (timestamps.length > 0) {
+    const newest = Math.max(...timestamps);
+    if (!isPlausibleEpoch(newest)) {
+      return { offsetMs: hostNow - newest, mode: 'newest' };
+    }
+  }
+
+  return { offsetMs: 0, mode: 'none' };
 }
 
 /**
@@ -199,13 +228,16 @@ function resolveClockOffset(deviceNow: unknown, hostNow: number): number {
  *
  * @param outages    - dishGetHistory 返回的 outages 数组
  * @param options.deviceNow - 设备自己的「现在」（history.current）。
- *   用来修正设备时钟偏差，见下面的 `resolveClockOffset`。
+ *   用来修正设备时钟偏差，见 `resolveClockOffset`。
  * @param options.hostNow   - 本机当前时间（默认 Date.now()），测试可注入
- * @returns 分析结果
+ * @param options.clockOffsetMs - 调用方已算出并固定的偏移（跨轮复用）。
+ *   传了就用它，不再自己算 —— 保证同一条事件每轮得到同一个时间戳，
+ *   否则「把最新事件对齐到 now」会每 30 秒把同一条事件重新写一遍。
+ * @returns 分析结果（含本轮使用的 clockOffsetMs，调用方可缓存）
  */
 export function analyzeOutages(
   outages: RawOutage[],
-  options: { deviceNow?: unknown; hostNow?: number } = {},
+  options: { deviceNow?: unknown; hostNow?: number; clockOffsetMs?: number } = {},
 ): OutageAnalysis {
   const hostNow = options.hostNow ?? Date.now();
   const handoffs: HandoffEvent[] = [];
@@ -226,10 +258,14 @@ export function analyzeOutages(
     };
   });
 
-  const clockOffsetMs = resolveClockOffset(options.deviceNow, hostNow);
+  const resolved =
+    options.clockOffsetMs !== undefined
+      ? { offsetMs: options.clockOffsetMs, mode: 'given' as const }
+      : resolveClockOffset(prepared, options.deviceNow, hostNow);
+  const clockOffsetMs = resolved.offsetMs;
 
   for (const { normalized } of prepared) {
-    // 设备时钟偏离本机超过一天时，用 offset 把事件搬回墙上时间。
+    // 设备时钟不对时，用 offset 把事件搬回墙上时间。
     // 只搬时间戳，不动时长 —— 时长是时长，跟时钟无关。
     const timestampMs =
       clockOffsetMs === 0 ? normalized.startTimestamp : normalized.startTimestamp + clockOffsetMs;
@@ -277,7 +313,7 @@ export function analyzeOutages(
         `[outage] outages=${outages.length} unit=${first.unit} ` +
           `first_ts_magnitude=${first.normalized.startTimestamp.toExponential(2)} ` +
           `first_duration_ms=${first.normalized.durationMs} ` +
-          `clock_offset_ms=${clockOffsetMs}`
+          `clock_offset_ms=${clockOffsetMs} clock_mode=${resolved.mode}`
       );
     }
   }
@@ -290,6 +326,8 @@ export function analyzeOutages(
     otherOutages,
     totalOutages,
     handoffRatio,
+    clockOffsetMs,
+    clockMode: resolved.mode,
   };
 }
 

@@ -63,6 +63,15 @@ export class DataCollector extends EventEmitter {
   private lastRouterProbe: RouterProbeResult | null = null;
   /** 最近一次 history 拉取的时间戳（秒），避免重复分析 */
   private lastHistoryTimestamp = 0;
+  /**
+   * 设备时钟偏差（毫秒），首次分析时算出后**固定复用**。
+   *
+   * 为什么要固定：真机 RTC 是错的（报 2016 年），修正方式是「把最新一条事件
+   * 对齐到当前时间」。如果每轮都重新对齐，同一条事件每 30 秒就会被写成
+   * 一个更晚的时间戳（INSERT OR REPLACE 的主键是 ts ⇒ 变成无限增长的行）。
+   * 固定下来之后同一事件永远得到同一个 ts，去重才生效。
+   */
+  private clockOffsetMs: number | null = null;
   /** 检测到的卫星切换事件（内存缓存） */
   private handoffEvents: HandoffEvent[] = [];
   
@@ -567,7 +576,19 @@ export class DataCollector extends EventEmitter {
       // 把 `history.current` 一起传进去：真机 RTC 可能是错的（实测发 2016 年的
       // 时间戳），分析器要用设备自己的"现在"把事件搬回墙上时间，
       // 否则切换事件永远落在查询窗口之外，仪表盘一条都显示不出来。
-      const analysis = analyzeOutages(outages, { deviceNow: history.current });
+      const analysis = analyzeOutages(outages, {
+        deviceNow: history.current,
+        // 只有「对齐最新事件」这种推断出来的偏移才复用：
+        // 它每轮重算会把同一条事件写成新的时间戳，去重失效。
+        // 设备若报了合法 epoch（mode=current），每轮重算反而能跟上时钟漂移。
+        clockOffsetMs: this.clockOffsetMs ?? undefined,
+      });
+      if (this.clockOffsetMs === null && analysis.clockMode === 'newest') {
+        this.clockOffsetMs = analysis.clockOffsetMs;
+        console.log(
+          `[Collector] 设备时钟不可信（mode=newest），已固定偏移 ${analysis.clockOffsetMs}ms 供后续事件复用`
+        );
+      }
 
       // 发出非切换类的 outage 事件（供告警系统使用）
       //
