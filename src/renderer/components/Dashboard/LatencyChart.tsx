@@ -26,6 +26,7 @@ import {
   type TimeRangeKey,
 } from './handoffVisibility';
 import { describeHandoffAge, handoffAgeKey } from './handoffAge';
+import { HintTip } from '../HintTip';
 import { buildTimeGrid, findNullRuns, gapMarkArea, type IndexRun } from './dataGaps';
 import { useEffect, useRef, useState } from 'react';
 
@@ -656,14 +657,24 @@ export function LatencyChart({
           第①层判据的**可见说明**。
 
           网关模式不是"这个功能坏了", 而是"这个维度没有卫星链路可标"。
-          没有这句话, 用户切到网关后发现 ★ 图例和标记一起消失了,
+          没有这处提示, 用户切到网关后发现 ★ 图例和标记一起消失了,
           第一反应是功能失效或 bug —— 而实际上是语义上就不该有。
-          说明必须和 `showsSatelliteHandoffs()` 用同一个判据, 否则两者会漂移。
+
+          ⚠️ 不能退回成常驻一行字:
+            这句话五语言长度差极大(英文一百多字符), 常驻会把图例行撑宽
+            甚至折行; 而它只回答"为什么这里没有东西", 属于按需解释。
+            ⇒ 用 ⓘ 悬浮(HintTip), 与设置页字段说明同一套交互。
+            ⇒ 图标本身**不受 `handoffsVisible` 影响**: 它就是用来解释
+              "这里为什么是空的", 用户关掉开关时更该看得到。
+
+          判据必须和 `showsSatelliteHandoffs()` 同源, 否则两者会漂移。
         */}
         {!showsSatelliteHandoffs(mode) && (
-          <span className="self-center text-[11px] text-muted-foreground/70 ml-1">
-            {t('dashboard:chart.handoff_not_applicable')}
-          </span>
+          <HintTip
+            text={t('dashboard:chart.handoff_not_applicable')}
+            label={t('dashboard:chart.handoff_not_applicable')}
+            className="w-3.5 h-3.5 ml-0.5 self-center"
+          />
         )}
         {/*
           开关打开但**一条记录都没有**时, 明说「是没数据」而不是「开关坏了」。
