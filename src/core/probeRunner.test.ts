@@ -10,7 +10,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { runProbe, classifyDnsError } from './probeRunner';
+import { runProbe, classifyDnsError, isProbeFresh } from './probeRunner';
+import type { ProbeResult } from './probeRunner';
 import type { ProbeNodeConfig } from '../config/manager';
 
 const node = (over: Partial<ProbeNodeConfig> = {}): ProbeNodeConfig => ({
@@ -128,5 +129,55 @@ describe('DNS 失败模式分类', () => {
     expect(classifyDnsError(null)).toBe('resolution');
     expect(classifyDnsError('')).toBe('resolution');
     expect(classifyDnsError('SOMETHING_NEW')).toBe('resolution');
+  });
+});
+
+/**
+ * 探针结果时效判定 —— 决定一份读数还能不能当「当前测量」写进历史库。
+ *
+ * 为什么必须测这段：它是「写 null」和「写入伪造的连续值」之间的唯一闸门。
+ * 探针被禁用 / 循环卡死时 `last` 会永久冻结，若门限失效，曲线会显示网关
+ * 延迟一路平稳正常，而实际上已经很久没有测量过 —— 这种污染比空缺更难发现。
+ */
+describe('isProbeFresh — 陈旧探针结果不得冒充新测量', () => {
+  const T0 = 1_800_000_000_000;
+  const probeAt = (ts: number): ProbeResult => ({
+    nodeId: 'local-gateway',
+    ok: true,
+    rttMs: 2,
+    ts,
+  });
+
+  it('刚测完的结果可用', () => {
+    expect(isProbeFresh(probeAt(T0), 90_000, T0)).toBe(true);
+  });
+
+  it('恰好等于门限仍可用（边界取闭区间）', () => {
+    expect(isProbeFresh(probeAt(T0 - 90_000), 90_000, T0)).toBe(true);
+  });
+
+  it('超过门限一毫秒即失效', () => {
+    expect(isProbeFresh(probeAt(T0 - 90_001), 90_000, T0)).toBe(false);
+  });
+
+  it('冻结的旧值（探针被禁用后的典型场景）失效', () => {
+    // 探针停摆 10 分钟后采集器仍在每 30 秒跑一次
+    expect(isProbeFresh(probeAt(T0 - 10 * 60_000), 90_000, T0)).toBe(false);
+  });
+
+  it('从未探测过（null / undefined）视为不可用', () => {
+    expect(isProbeFresh(null, 90_000, T0)).toBe(false);
+    expect(isProbeFresh(undefined, 90_000, T0)).toBe(false);
+  });
+
+  it('时间戳在未来的结果视为不可信（时钟回拨）', () => {
+    expect(isProbeFresh(probeAt(T0 + 1_000), 90_000, T0)).toBe(false);
+  });
+
+  it('失败结果只要新鲜仍可用 —— 失败本身是有意义的测量', () => {
+    // 门限只判断「新旧」，不判断「成功失败」：失败要如实写库，
+    // 由告警链路处理，不能被门限顺手吞掉。
+    const failed: ProbeResult = { nodeId: 'local-gateway', ok: false, rttMs: null, error: 'timeout', ts: T0 };
+    expect(isProbeFresh(failed, 90_000, T0)).toBe(true);
   });
 });

@@ -29,6 +29,7 @@ import tls from 'tls';
 import { EventEmitter } from 'events';
 import type { ProbeConfig, ProbeNodeConfig } from '../config/manager';
 import { parsePingStats as parsePingStatsFromHelper } from './pingParse';
+import { getDefaultGateway, LOCAL_GATEWAY_NODE_ID } from './defaultGateway';
 
 const parsePingRttFromStats = (output: string): number | null =>
   parsePingStatsFromHelper(output).rttMs;
@@ -127,6 +128,33 @@ export interface ProbeNodeState {
   reachable: boolean;
   /** 连续失败次数(需求文档: 故障确认次数, 默认 3 次才确认故障) */
   consecutiveFailures: number;
+}
+
+/**
+ * 判断一份探测结果是否还能当作「当前测量」使用。
+ *
+ * 为什么需要这个判定:
+ * 探针被禁用、崩溃或卡住时, `ProbeNodeState.last` 会**永久冻结**在最后一次。
+ * 消费方(如 historian 写历史库)若直接用 `last`, 就会把一份几分钟乃至几小时前的
+ * 读数反复当成新测量写进时序库 —— 这比写 null 更危险, 因为 null 能被识别为缺口,
+ * 而伪造的连续值会被当成真实网络状态, 污染统计与告警。
+ *
+ * 所以「测量」与「判定它还算不算数」必须由同一方定义: 本模块定义测量,
+ * 也由本模块定义多旧算旧。消费方只传门限。
+ *
+ * @param probe 待检查的结果, 可能为 null(节点从未探测过)
+ * @param maxAgeMs 允许的最大年龄, 超过即视为过期
+ * @param now 当前时刻, 默认取系统时间(单测注入)
+ */
+export function isProbeFresh(
+  probe: ProbeResult | null | undefined,
+  maxAgeMs: number,
+  now: number = Date.now(),
+): boolean {
+  if (!probe) return false;
+  // 负年龄(时钟回拨/结果来自未来)同样不可信, 一并拒绝
+  const age = now - probe.ts;
+  return age >= 0 && age <= maxAgeMs;
 }
 
 /**
@@ -500,23 +528,53 @@ async function probeTls(node: ProbeNodeConfig): Promise<ProbeResult> {
   });
 }
 
+/**
+ * `local-gateway` 节点的目标不是配置里那个地址, 而是**当前默认网关**。
+ *
+ * 理由: 配置里的 target 是写死的 IP, 换路由器 / 切热点 / VPN 接管之后
+ * 就失效了, 而路由表永远是最新的。原来「设置页绿灯但图表空」的根因之一
+ * 就是这边 ping 的是配置值、另一边读的是动态解析值, 两套各说各话。
+ *
+ * 解析失败时回落到配置 target(仍为空则交给 runProbe 报明确错误)。
+ */
+async function resolveProbeTarget(node: ProbeNodeConfig): Promise<ProbeNodeConfig> {
+  if (node.type !== 'icmp' || node.id !== LOCAL_GATEWAY_NODE_ID) return node;
+  const gateway = await getDefaultGateway();
+  return gateway ? { ...node, target: gateway } : node;
+}
+
 /** 按类型分发 */
 export async function runProbe(node: ProbeNodeConfig): Promise<ProbeResult> {
-  switch (node.type) {
+  const resolved = await resolveProbeTarget(node);
+
+  // 解析不出网关且没有配置兜底 —— 明确报错, 不要拿空 target 去 ping
+  // (那样得到的错误信息是 "ping: cannot resolve : Name or service not known",
+  //  在现场日志里看不出是网关解析的问题)
+  if (resolved.type === 'icmp' && !resolved.target) {
+    return {
+      nodeId: node.id,
+      ok: false,
+      rttMs: null,
+      error: '无法解析默认网关(路由表未给出可用网关, 且节点未配置目标地址)',
+      ts: Date.now(),
+    };
+  }
+
+  switch (resolved.type) {
     case 'icmp':
-      return probeIcmp(node);
+      return probeIcmp(resolved);
     case 'dns':
-      return probeDns(node);
+      return probeDns(resolved);
     case 'dns_dual':
-      return probeDnsDual(node);
+      return probeDnsDual(resolved);
     case 'tls':
-      return probeTls(node);
+      return probeTls(resolved);
     default:
       return {
         nodeId: node.id,
         ok: false,
         rttMs: null,
-        error: `未知探测类型: ${node.type}`,
+        error: `未知探测类型: ${resolved.type}`,
         ts: Date.now(),
       };
   }

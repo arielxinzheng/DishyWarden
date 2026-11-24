@@ -15,8 +15,8 @@ import { TelemetryStore } from '../storage/telemetryStore';
 import type { HistorySample, PruneResult, StorageStats } from '../storage/types';
 import { EventEmitter } from 'events';
 import path from 'path';
-import { runProbe } from '../core/probeRunner';
-import { pingDefaultGateway } from '../core/gatewayDetector';
+import { runProbe, isProbeFresh, type ProbeResult } from '../core/probeRunner';
+import { localGatewayNode, LOCAL_GATEWAY_NODE_ID } from '../core/defaultGateway';
 import type { ProbeNodeConfig } from '../config/manager';
 import { analyzeOutages, summarizeOutageAnalysis, toEpochMs, type HandoffEvent } from '../core/outageAnalyzer';
 import type { Outage } from '../core/outageTypes';
@@ -61,6 +61,30 @@ export class DataCollector extends EventEmitter {
   private store: TelemetryStore | null = null;
   /** 最近一次路由器探测结果 */
   private lastRouterProbe: RouterProbeResult | null = null;
+  /**
+   * 本地网关延迟的测量来源（由 `main` 注入 `ProbeRunner` 的实时状态）。
+   *
+   * 为什么不让 collector 自己测：同一件事两套实现时，
+   * 一边失败会被另一边掩盖 —— 设置页状态灯是绿的（ProbeRunner 有结果），
+   * 图表却是空的（collector 自己那条路径静默失败）。收敛成一条后
+   * 「UI 显示什么」和「库里存什么」必然一致。
+   */
+  private gatewayProbeSource: (() => ProbeResult | null) | null = null;
+  /**
+   * 注入的探针结果最多可以「旧」多久（毫秒）。
+   *
+   * 为什么必须校验时效：`local-gateway` 节点被用户禁用、或探针循环卡死时，
+   * `ProbeRunner.getState().last` 会永久停留在最后一次结果上。不校验就会
+   * 每轮把**同一个旧 RTT 当成新测量**写进库 —— 图表显示「网关延迟正常」，
+   * 实际早已不再测量。这比写 null 更有害：null 至少是诚实的空缺。
+   *
+   * 默认 90 秒 = 3 个探针周期（`local-gateway` intervalSec=30），
+   * 容忍一次丢拍加一轮调度偏移；采集周期与之相同，正常情况不会误判。
+   */
+  private readonly gatewayProbeMaxAgeMs = 90_000;
+  /** 网关探测失败日志限流: 同一原因 N 毫秒内只打一次, 避免每 30 秒刷屏 */
+  private lastGatewayWarnMs = 0;
+  private lastGatewayWarnReason = '';
   /** 最近一次 history 拉取的时间戳（秒），避免重复分析 */
   private lastHistoryTimestamp = 0;
   /**
@@ -196,7 +220,7 @@ export class DataCollector extends EventEmitter {
         this.client.getTelemetry(),
         this.routerProbe.probe(),
         this.probePublicLatency(),
-        pingDefaultGateway(5), // 5 秒超时
+        this.readLocalGatewayProbe(), // 探针模块的实时结果, 不可用时自己测
         this.analyzeHandoffs(),  // 分析卫星切换
       ]);
       
@@ -231,10 +255,21 @@ export class DataCollector extends EventEmitter {
       }
       
       // 补充本地网关延迟
-      if (localGatewayResult.status === 'fulfilled' && localGatewayResult.value?.ok) {
-        telemetry.localGatewayLatencyMs = localGatewayResult.value.rttMs ?? undefined;
-      } else if (localGatewayResult.status === 'rejected') {
-        console.warn('[Collector] 本地网关探测失败:', localGatewayResult.reason);
+      //
+      // ⚠️ 失败必须留下日志。旧实现只在 promise **reject** 时 warn,
+      //    而「探测完成了但没测到」走的是 fulfilled + ok:false ——
+      //    那条分支静默写 null。表现就是：探针日志一切正常、图表该列全空、
+      //    日志里一个字都没有。现场无法自证, 只能靠翻代码。
+      if (localGatewayResult.status === 'fulfilled') {
+        const probe = localGatewayResult.value;
+        if (probe?.ok && typeof probe.rttMs === 'number') {
+          telemetry.localGatewayLatencyMs = probe.rttMs;
+        } else {
+          this.warnGatewayProbe(probe?.error ?? '网关探测未返回结果');
+        }
+      } else {
+        const reason = localGatewayResult.reason;
+        this.warnGatewayProbe(reason instanceof Error ? reason.message : String(reason));
       }
       
       // 处理卫星切换分析结果
@@ -535,9 +570,9 @@ export class DataCollector extends EventEmitter {
       return null;
     }
     
-    // 找第一个启用的 ICMP 探针节点
+    // 找第一个启用的 ICMP 探针节点（排除网关节点：它不是公网目标）
     const publicNode = this.config.probeNodes.find(
-      n => n.type === 'icmp' && n.enabled && n.id !== 'local-gateway'
+      n => n.type === 'icmp' && n.enabled && n.id !== LOCAL_GATEWAY_NODE_ID
     );
     
     if (!publicNode) {
@@ -655,6 +690,57 @@ export class DataCollector extends EventEmitter {
       console.warn('[Collector] getHistory 失败:', error instanceof Error ? error.message : error);
       return [];
     }
+  }
+
+  /**
+   * 注入「本地网关延迟」的测量来源。
+   *
+   * 传入 `() => probeRunner.getState('local-gateway')?.last ?? null`。
+   * 探针模块是常规测量者（每 30 秒一次，独立于采集周期），
+   * collector 只负责把那份结果记进历史库。
+   *
+   * 注入的只是**读数**；时效校验走 `isProbeFresh`（定义在 probeRunner，
+   * 和「什么叫一次测量」放在一起），门限值由本类提供（见 `gatewayProbeMaxAgeMs`）：
+   * 采集节奏决定了多旧算旧，所以门限留在消费方，判定逻辑留在生产者。
+   */
+  setGatewayProbeSource(fn: (() => ProbeResult | null) | null): void {
+    this.gatewayProbeSource = fn;
+  }
+
+  /**
+   * 网关测不到时的告警日志（限流）。
+   *
+   * 5 分钟内同一原因只打一次：网关真挂了会每 30 秒失败一次，
+   * 不限流会把整份日志淹掉，反而让真正的问题看不见。
+   */
+  private warnGatewayProbe(reason?: string): void {
+    const text = reason?.trim() || '未知原因';
+    const now = Date.now();
+    if (text === this.lastGatewayWarnReason && now - this.lastGatewayWarnMs < 5 * 60 * 1000) {
+      return;
+    }
+    this.lastGatewayWarnMs = now;
+    this.lastGatewayWarnReason = text;
+    console.warn(`[Collector] 本地网关延迟不可用（${text}），该列将写入 null`);
+  }
+
+  /**
+   * 取一次本地网关探测结果。
+   *
+   * 三级取值，越靠前越优先：
+   * 1. 探针模块的实时状态（常规路径，与设置页状态灯同源）
+   * 2. 探针状态存在但**已过期** —— 丢弃，转 3
+   * 3. 自己测一次兜底（CLI / 单测 / 启动最早那一轮）
+   *
+   * 无论走哪条，失败都会经 `warnGatewayProbe` 留下限流日志。
+   */
+  private async readLocalGatewayProbe(): Promise<ProbeResult> {
+    const injected = this.gatewayProbeSource?.() ?? null;
+    if (isProbeFresh(injected, this.gatewayProbeMaxAgeMs)) {
+      // isProbeFresh 为真 ⇒ injected 非 null
+      return injected as ProbeResult;
+    }
+    return runProbe(localGatewayNode(5));
   }
 
   /**

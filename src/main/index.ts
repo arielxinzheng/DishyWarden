@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { createCollector, DataCollector } from '../collector/historian';
 import { createExporter, PrometheusExporter } from '../collector/exporter';
 import { ProbeRunner } from '../core/probeRunner';
+import { LOCAL_GATEWAY_NODE_ID } from '../core/defaultGateway';
 import { createPrometheusManager, PrometheusManager } from './prometheus';
 import { loadTLESeed, warmupTLESeed } from './tleSeed';
 import { AlertManager } from '../alerting/manager';
@@ -361,9 +362,6 @@ async function startBackgroundServices() {
       console.error('[Main] Collector error:', error);
     });
 
-    // 启动采集器
-    collector.start();
-
     // 启动探针节点管理(需求文档 2.1.3 网络连通性探测)
     probeRunner = new ProbeRunner(config.probe);
     probeRunner.on('result', (result, state) => {
@@ -384,7 +382,7 @@ async function startBackgroundServices() {
           alertManager.checkDnsProbe(result);
         }
         // ICMP 探针状态（供依赖压制逻辑使用）
-        if (state.nodeId === 'public-ping' || state.nodeId === 'local-gateway') {
+        if (state.nodeId === 'public-ping' || state.nodeId === LOCAL_GATEWAY_NODE_ID) {
           alertManager.updateIcmpProbeState(
             state.nodeId,
             state.reachable,
@@ -394,6 +392,17 @@ async function startBackgroundServices() {
       }
     });
     probeRunner.start();
+
+    // 采集器与探针共用同一个测量者 ——
+    // 「设置页显示什么」和「历史库存什么」必须同源。
+    // 旧实现两条路径各测各的: Windows 上采集器那条静默失败 ⇒ 图表该列全空,
+    // 而状态灯仍显示正常, 现场无从判断。
+    collector.setGatewayProbeSource(
+      () => probeRunner?.getState(LOCAL_GATEWAY_NODE_ID)?.last ?? null,
+    );
+
+    // 启动采集器（放在探针之后: 第一轮就能读到 local-gateway 的状态）
+    collector.start();
 
     // 历史库维护: 启动即清一次过期数据, 之后每 6 小时一次
     try {
