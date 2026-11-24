@@ -100,7 +100,7 @@ export function LatencyChart({
    *
    * 三层判据(见 handoffVisibility.ts):
    *   ① 延迟维度 —— Local(网关)模式**永远不显示**(本地链路不经卫星)
-   *   ② 时间范围 —— 15m 默认开, 1H/6H 默认关
+   *   ② 时间范围 —— 目前各范围默认都开
    *   ③ 用户手动 —— 该范围点过图例就以用户的选择为准
    */
   const handoffsVisible = resolveHandoffsVisible(timeRange, handoffOverrides);
@@ -651,6 +651,19 @@ export function LatencyChart({
           >
             {t('dashboard:chart.handoff_legend')}
           </button>
+        )}
+        {/*
+          第①层判据的**可见说明**。
+
+          网关模式不是"这个功能坏了", 而是"这个维度没有卫星链路可标"。
+          没有这句话, 用户切到网关后发现 ★ 图例和标记一起消失了,
+          第一反应是功能失效或 bug —— 而实际上是语义上就不该有。
+          说明必须和 `showsSatelliteHandoffs()` 用同一个判据, 否则两者会漂移。
+        */}
+        {!showsSatelliteHandoffs(mode) && (
+          <span className="self-center text-[11px] text-muted-foreground/70 ml-1">
+            {t('dashboard:chart.handoff_not_applicable')}
+          </span>
         )}
         {/*
           开关打开但**一条记录都没有**时, 明说「是没数据」而不是「开关坏了」。

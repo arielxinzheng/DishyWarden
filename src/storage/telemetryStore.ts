@@ -19,8 +19,11 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'node:module';
 import type { TelemetryData } from '../core/dishClient';
+import type { HandoffEvent } from '../core/outageAnalyzer';
+import type { OutageCause } from '../core/outageTypes';
 import {
   DDL,
+  SATELLITE_HANDOFFS_DDL,
   SAMPLE_INTERVAL_MS,
   SAMPLE_RETENTION_DAYS,
   HOURLY_RETENTION_DAYS,
@@ -338,6 +341,9 @@ export class TelemetryStore {
    *   v2: latest_obstruction_map.source —— 标记遮挡图是实测还是模拟
    *   v3: telemetry_hourly state 分布列 —— 时长加权在线率
    *   v4: telemetry_samples 性能索引 —— (state, ts) 和 (currently_obstructed, ts)
+   *   v5: telemetry_hourly public/local 延迟聚合列
+   *   v7: telemetry_samples 告警相关列 —— class_of_service / disablement_code / alerts_json
+   *   v8: satellite_handoffs 主键 ts → rtc_ms —— 整表重建
    */
   private migrate(): void {
     try {
@@ -414,6 +420,51 @@ export class TelemetryStore {
           ALTER TABLE telemetry_samples ADD COLUMN alerts_json TEXT;
         `);
         console.log('[TelemetryStore] 迁移 v7: telemetry_samples 增加 class_of_service, disablement_code, alerts_json 列');
+      }
+
+      // v8: satellite_handoffs 主键 ts → rtc_ms
+      //
+      // 旧表拿「换算后的 ts」当主键，而 ts 依赖「设备时钟 → host 时钟」的锚点。
+      // 锚点一变，同一条事件就算出新的 ts，于是同一件事在库里留下第二行 ——
+      // 错位的历史永远修不回来。改用设备时钟读数当主键后，重写只会覆盖原行。
+      //
+      // SQLite 不支持改主键，只能整表重建：改名 → 建新表 → 搬数据 → 删旧表。
+      // 建表语句复用 SATELLITE_HANDOFFS_DDL，保证和全新安装的结构完全一致。
+      const handoffCols = this.db
+        .prepare('PRAGMA table_info(satellite_handoffs)')
+        .all() as { name: string }[];
+      const handoffNames = handoffCols.map((c) => c.name);
+
+      if (!handoffNames.includes('rtc_ms')) {
+        const now = Date.now();
+        // 存量行没有设备时钟读数可还原，只能拿当时的 ts 顶替成身份。
+        // 但那个 ts 是拿旧算法算出来的 —— 真机上落在 2016 年或 2073 年。
+        // 未来时间戳永远等不到 prune 的 cutoff，会永久污染图表；
+        // 所以只搬落在保留窗口内的行，其余当垃圾数据丢弃。
+        // 丢弃是无损的：设备 history 窗口里的近期事件下一轮就会重新写入。
+        const minTs = now - HANDOFF_RETENTION_DAYS * DAY_MS;
+        const maxTs = now + DAY_MS;
+
+        const rebuild = this.db.transaction(() => {
+          // 上次迁移中断可能留下半成品，先清掉（正常情况下是 no-op）
+          this.db.exec('DROP TABLE IF EXISTS satellite_handoffs_legacy');
+          this.db.exec('ALTER TABLE satellite_handoffs RENAME TO satellite_handoffs_legacy');
+          // 索引跟着旧表一起改名了，等旧表删掉才能在新表上重建
+          this.db.exec(SATELLITE_HANDOFFS_DDL);
+          this.db
+            .prepare(`
+              INSERT INTO satellite_handoffs (rtc_ms, ts, duration_ms, cause, parsed_cause, is_explicit)
+              SELECT ts, ts, duration_ms, cause, parsed_cause, is_explicit
+              FROM satellite_handoffs_legacy
+              WHERE ts >= ? AND ts <= ?
+            `)
+            .run(minTs, maxTs);
+          this.db.exec('DROP TABLE satellite_handoffs_legacy');
+          this.db.exec('CREATE INDEX IF NOT EXISTS idx_handoffs_ts ON satellite_handoffs(ts)');
+        });
+
+        rebuild();
+        console.log('[TelemetryStore] 迁移 v8: satellite_handoffs 主键改为 rtc_ms(整表重建, 丢弃时钟错乱的存量行)');
       }
     } catch (error) {
       console.warn('[TelemetryStore] 迁移失败(不影响使用):', error);
@@ -682,85 +733,53 @@ export class TelemetryStore {
   }
 
   /**
-   * 写入卫星切换事件
-   * 
-   * @param handoff 卫星切换事件
+   * 写入一批卫星切换事件。
+   *
+   * 语义是**镜像**而不是追加：以 `rtcMs` 为身份做 `INSERT OR REPLACE`，
+   * 同一事件重复写、或锚点变准后用新 `ts` 重写，都只覆盖原来那一行。
+   * 因此调用方可以每轮把设备 history 窗口里的全部事件整体灌进来，
+   * 不必维护「哪些写过了」的水位线 —— 那套水位线在锚点会平移的前提下
+   * 无法正确工作（详见 `dishClock.ts` 开篇）。
+   *
+   * @param handoffs 卫星切换事件（含未校准的 rtcMs 与换算后的 timestamp）
    */
-  appendHandoff(handoff: {
-    timestamp: number;
-    durationMs: number;
-    cause: string;
-    parsedCause: string;
-    isExplicit: boolean;
-  }): void {
-    const insert = this.db.prepare(`
-      INSERT OR REPLACE INTO satellite_handoffs 
-      (ts, duration_ms, cause, parsed_cause, is_explicit)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    
-    insert.run(
-      handoff.timestamp,
-      handoff.durationMs,
-      handoff.cause,
-      handoff.parsedCause,
-      handoff.isExplicit ? 1 : 0
-    );
-  }
-
-  /**
-   * 批量写入卫星切换事件
-   * 
-   * @param handoffs 卫星切换事件数组
-   */
-  appendHandoffs(handoffs: Array<{
-    timestamp: number;
-    durationMs: number;
-    cause: string;
-    parsedCause: string;
-    isExplicit: boolean;
-  }>): void {
+  upsertHandoffs(handoffs: HandoffEvent[]): void {
     if (handoffs.length === 0) return;
-    
+
     const insert = this.db.prepare(`
-      INSERT OR REPLACE INTO satellite_handoffs 
-      (ts, duration_ms, cause, parsed_cause, is_explicit)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO satellite_handoffs
+      (rtc_ms, ts, duration_ms, cause, parsed_cause, is_explicit)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
-    
-    const transaction = this.db.transaction((events: typeof handoffs) => {
+
+    const transaction = this.db.transaction((events: HandoffEvent[]) => {
       for (const event of events) {
         insert.run(
+          event.rtcMs,
           event.timestamp,
           event.durationMs,
           event.cause,
           event.parsedCause,
-          event.isExplicit ? 1 : 0
+          event.isExplicit ? 1 : 0,
         );
       }
     });
-    
+
     transaction(handoffs);
   }
 
   /**
    * 查询卫星切换事件历史
-   * 
+   *
    * @param fromMs 起始时间 epoch ms
    * @param toMs 结束时间 epoch ms
    * @param limit 最多返回多少条事件（默认 100）
    * @returns 切换事件列表，按时间倒序（最新的在前）
    */
-  queryHandoffs(fromMs: number, toMs: number, limit: number = 100): Array<{
-    timestamp: number;
-    durationMs: number;
-    cause: string;
-    parsedCause: string;
-    isExplicit: boolean;
-  }> {
+  queryHandoffs(fromMs: number, toMs: number, limit: number = 100): HandoffEvent[] {
     const rows = this.db
       .prepare(`
-        SELECT ts, duration_ms, cause, parsed_cause, is_explicit
+        SELECT rtc_ms, ts, duration_ms, cause, parsed_cause, is_explicit
         FROM satellite_handoffs
         WHERE ts >= ? AND ts < ?
         ORDER BY ts DESC
@@ -769,10 +788,11 @@ export class TelemetryStore {
       .all(fromMs, toMs, limit);
 
     return rows.map((r: any) => ({
+      rtcMs: r.rtc_ms as number,
       timestamp: r.ts as number,
       durationMs: r.duration_ms as number,
       cause: r.cause as string,
-      parsedCause: r.parsed_cause as string,
+      parsedCause: r.parsed_cause as OutageCause,
       isExplicit: (r.is_explicit as number) === 1,
     }));
   }

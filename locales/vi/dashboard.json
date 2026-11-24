@@ -60,6 +60,7 @@
     "handoff_show": "Nhấn để hiện dấu chuyển vệ tinh",
     "handoff_hide": "Nhấn để ẩn dấu chuyển vệ tinh",
     "handoff_no_records": "Không có bản ghi chuyển vệ tinh trong khoảng thời gian này",
+    "handoff_not_applicable": "Cổng mạng là liên kết nội bộ không qua vệ tinh nên không đánh dấu chuyển vệ tinh",
     "handoff_last_seen_minutes": "Lần chuyển cuối: {{count}} phút trước",
     "handoff_last_seen_hours": "Lần chuyển cuối: {{count}} giờ trước",
     "handoff_last_seen_days": "Lần chuyển cuối: {{count}} ngày trước",

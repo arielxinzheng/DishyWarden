@@ -14,12 +14,21 @@ import {
   normalizeOutage,
   HANDOFF_MAX_DURATION_MS,
 } from './outageTypes';
+import { ClockAnchor, clockOffsetMs, deviceToHostMs } from './dishClock';
 
 /**
  * 卫星切换事件
  */
 export interface HandoffEvent {
-  /** 切换发生时间戳（毫秒级 epoch） */
+  /**
+   * 设备时钟值（毫秒，**未经校准**）—— 事件在库里的稳定身份。
+   *
+   * `timestamp` 只是「按当前锚点对 rtcMs 的解释」，锚点变化时它会平移；
+   * 而 rtcMs 永远不变。所以去重、覆盖写、水位线都必须基于这个字段，
+   * 否则每次校准都会在库里留下一条错位的重复事件。
+   */
+  rtcMs: number;
+  /** 切换发生时间戳（毫秒级 epoch，已按锚点换算到 host 时钟） */
   timestamp: number;
   /** 切换持续时长（毫秒） */
   durationMs: number;
@@ -159,116 +168,69 @@ export interface OutageAnalysis {
   totalOutages: number;
   /** 卫星切换占比 */
   handoffRatio: number;
-  /** 本轮加到事件时间戳上的偏移（毫秒）。0 = 没修正 */
-  clockOffsetMs: number;
-  /** 偏移是怎么来的，用于日志定位 */
-  clockMode: 'given' | 'current' | 'newest' | 'none';
-}
-
-/**
- * 算出要加到设备时间戳上的偏移量（毫秒），把事件搬到墙上时间。
- *
- * ## 为什么必须修正
- *
- * 真机实测（192.168.100.1，固件 2026.10.27）outage 的时间戳是 **2016 年**：
- * `startTimestampNs = "1479481378560372964"` ⇒ 2016-11-18 —— 设备 RTC 是错的。
- * 这种事件无论单位解析得多准，都落在"最近 1 小时"窗口之外，
- * 仪表盘的卫星切换永远是 0 条。
- *
- * ## ⚠️ `history.current` 不是 epoch，是开机秒数
- *
- * 同一份响应里 `current = "398560"`，而 `deviceState.uptimeS = "398578"` ——
- * 两者只差 18 秒，**current 就是 uptime**。把它当 epoch 用会算出
- * 「1970 - 2026」这么大的偏移，事件被搬到 **2073 年**，比不修正更糟
- * （这个坑真机踩过：修正后时间戳变成 3274568791974，依然一条都查不到）。
- *
- * ⇒ 只有落在「最近 30 天 ~ 未来 1 天」内的值才当作 epoch 采用。
- *
- * ## 修正策略（按可靠性）
- *
- * 1. 调用方已经算好并固定了 offset（跨轮复用，见 historian）⇒ 直接用。
- * 2. `deviceNow` 是合法 epoch ⇒ `offset = hostNow - deviceNow`。
- * 3. 设备时间戳明显不在当代（> 30 天外）⇒ 把**最新一条事件**对齐到 hostNow。
- *    误差上限 = 最新那条事件的真实年龄（分钟级到小时级），但相对间隔完全正确。
- *    这是"能看见但可能偏一点" vs "永远看不见"之间的取舍，且会打日志说明。
- * 4. 其它情况 ⇒ 不修正。
- */
-function resolveClockOffset(
-  prepared: Array<{ normalized: Outage }>,
-  deviceNow: unknown,
-  hostNow: number,
-): { offsetMs: number; mode: 'given' | 'current' | 'newest' | 'none' } {
-  const PLAUSIBLE_PAST_MS = 30 * 24 * 60 * 60 * 1000;
-  const PLAUSIBLE_FUTURE_MS = 24 * 60 * 60 * 1000;
-  const isPlausibleEpoch = (ms: number) =>
-    ms > hostNow - PLAUSIBLE_PAST_MS && ms < hostNow + PLAUSIBLE_FUTURE_MS;
-
-  // 2. 设备自报的"现在"——只有确实是 epoch 才用
-  const deviceNowMs = toEpochMs(deviceNow);
-  if (deviceNowMs > 0 && isPlausibleEpoch(deviceNowMs)) {
-    return { offsetMs: hostNow - deviceNowMs, mode: 'current' };
-  }
-
-  // 3. 把最新一条事件对齐到当前时间
-  const timestamps = prepared
-    .map((p) => p.normalized.startTimestamp)
-    .filter((t) => Number.isFinite(t) && t > 0);
-  if (timestamps.length > 0) {
-    const newest = Math.max(...timestamps);
-    if (!isPlausibleEpoch(newest)) {
-      return { offsetMs: hostNow - newest, mode: 'newest' };
-    }
-  }
-
-  return { offsetMs: 0, mode: 'none' };
+  /**
+   * 本轮把设备时钟搬到 host 时钟所用的锚。
+   * `null` = 设备时钟可信，没有做任何换算。
+   *
+   * 调用方负责保存它，下一轮连同 `newestRtcMs` 一起喂给
+   * `estimateClockAnchor` 推进（见 `dishClock.ts` 开篇）。
+   */
+  clockAnchor: ClockAnchor | null;
+  /**
+   * 本轮所有事件里最新的设备时钟值（毫秒，未校准）；没有事件时为 0。
+   *
+   * 水位线与锚点推进都必须基于它 —— 不能用 `timestamp`：锚点一变，
+   * 同一批事件的时间戳就整体平移，水位线跟着飘会漏事件或重复写。
+   */
+  newestRtcMs: number;
 }
 
 /**
  * 分析 outages 数组，识别卫星切换事件
  *
- * @param outages    - dishGetHistory 返回的 outages 数组
- * @param options.deviceNow - 设备自己的「现在」（history.current）。
- *   用来修正设备时钟偏差，见 `resolveClockOffset`。
- * @param options.hostNow   - 本机当前时间（默认 Date.now()），测试可注入
- * @param options.clockOffsetMs - 调用方已算出并固定的偏移（跨轮复用）。
- *   传了就用它，不再自己算 —— 保证同一条事件每轮得到同一个时间戳，
- *   否则「把最新事件对齐到 now」会每 30 秒把同一条事件重新写一遍。
- * @returns 分析结果（含本轮使用的 clockOffsetMs，调用方可缓存）
+ * ## 为什么时钟修正必须由调用方传入锚
+ *
+ * 设备的时钟偏差只能从「跨轮」比较里看出来：这一轮看到的最新事件是不是
+ * 上一轮之后出现的，决定它能不能被当作「现在」。跨轮状态不属于纯函数的
+ * 职责，所以这里只做换算，锚点由调用方持有并推进
+ * （`estimateClockAnchor`，见 `dishClock.ts`）。
+ *
+ * 不传锚点 = 不做任何修正，事件保留设备自己的时间轴。这比编一个假时间诚实：
+ * 错的时间轴至少在相对位置上是正确的，且能被诊断报告一眼看出来。
+ *
+ * @param outages - dishGetHistory 返回的 outages 数组
+ * @param options.anchor - 调用方持有的时钟锚；null/省略 = 设备时钟可信，不修正
  */
 export function analyzeOutages(
   outages: RawOutage[],
-  options: { deviceNow?: unknown; hostNow?: number; clockOffsetMs?: number } = {},
+  options: { anchor?: ClockAnchor | null } = {},
 ): OutageAnalysis {
-  const hostNow = options.hostNow ?? Date.now();
+  const anchor = options.anchor ?? null;
   const handoffs: HandoffEvent[] = [];
   const otherOutages: Outage[] = [];
 
-  // 先把所有事件的时间戳/时长规整成毫秒，再统一修正设备时钟偏差 ——
-  // 单条事件各自修正会得到不一致的结果，必须先算出整体 offset。
+  // 先把所有事件的时间戳/时长规整成毫秒，再统一换算时间基准 ——
+  // 单条事件各自处理会得到不一致的结果。
   const prepared = outages.map((raw) => {
     const normalized = normalizeOutage(raw);
     const unit = detectTimestampUnit(normalized.startTimestamp);
+    const rtcMs = toEpochMs(normalized.startTimestamp);
     return {
+      rtcMs,
       normalized: {
         ...normalized,
-        startTimestamp: toEpochMs(normalized.startTimestamp),
+        startTimestamp: rtcMs,
         durationMs: toDurationMs(normalized.durationMs, unit),
       },
       unit,
     };
   });
 
-  const resolved =
-    options.clockOffsetMs !== undefined
-      ? { offsetMs: options.clockOffsetMs, mode: 'given' as const }
-      : resolveClockOffset(prepared, options.deviceNow, hostNow);
-  const clockOffsetMs = resolved.offsetMs;
+  const newestRtcMs = prepared.reduce((max, p) => (p.rtcMs > max ? p.rtcMs : max), 0);
 
-  for (const { normalized } of prepared) {
-    // 设备时钟不对时，用 offset 把事件搬回墙上时间。
-    // 只搬时间戳，不动时长 —— 时长是时长，跟时钟无关。
-    const timestampMs =
-      clockOffsetMs === 0 ? normalized.startTimestamp : normalized.startTimestamp + clockOffsetMs;
+  for (const { rtcMs, normalized } of prepared) {
+    // 只搬时间戳，不动时长 —— 时长是时长，跟时钟基准无关
+    const timestampMs = deviceToHostMs(rtcMs, anchor);
 
     const normalizedOutage: Outage = {
       ...normalized,
@@ -289,6 +251,7 @@ export function analyzeOutages(
         causeUpper.includes('HANDOVER');
 
       handoffs.push({
+        rtcMs,
         timestamp: timestampMs,
         durationMs: normalized.durationMs,
         cause: causeStr,
@@ -301,19 +264,20 @@ export function analyzeOutages(
   }
 
   // 诊断日志: 真机 outages 的单位没有权威文档, 这行日志能让远程实测机上
-  // 一眼看出设备发的是秒/毫秒/微秒/纳秒、有没有带 outages、时钟偏了多少。
+  // 一眼看出设备发的是秒/毫秒/微秒/纳秒、时钟偏了多少。
   // 只打印数量级与计数, 不打印原始条目(避免把设备标识带进日志)。
-  // 只在异常时打印: 数量为 0, 或单位不是毫秒, 或做了时钟修正 —— 正常情况不刷屏。
+  // 只在异常时打印: 数量为 0, 或单位不是毫秒, 或做了时钟校准 —— 正常情况不刷屏。
   if (outages.length === 0) {
     console.log('[outage] outages=0 设备没有返回任何中断记录');
   } else {
     const first = prepared[0];
-    if (first.unit !== 'ms' || clockOffsetMs !== 0) {
+    const offset = clockOffsetMs(anchor);
+    if (first.unit !== 'ms' || offset !== 0) {
       console.log(
         `[outage] outages=${outages.length} unit=${first.unit} ` +
-          `first_ts_magnitude=${first.normalized.startTimestamp.toExponential(2)} ` +
+          `first_rtc_magnitude=${first.rtcMs.toExponential(2)} ` +
           `first_duration_ms=${first.normalized.durationMs} ` +
-          `clock_offset_ms=${clockOffsetMs} clock_mode=${resolved.mode}`
+          `clock_offset_ms=${offset} clock_source=${anchor?.source ?? 'trusted'}`
       );
     }
   }
@@ -326,8 +290,8 @@ export function analyzeOutages(
     otherOutages,
     totalOutages,
     handoffRatio,
-    clockOffsetMs,
-    clockMode: resolved.mode,
+    clockAnchor: anchor,
+    newestRtcMs,
   };
 }
 

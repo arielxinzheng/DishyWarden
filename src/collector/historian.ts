@@ -18,7 +18,8 @@ import path from 'path';
 import { runProbe, isProbeFresh, type ProbeResult } from '../core/probeRunner';
 import { localGatewayNode, LOCAL_GATEWAY_NODE_ID } from '../core/defaultGateway';
 import type { ProbeNodeConfig } from '../config/manager';
-import { analyzeOutages, summarizeOutageAnalysis, toEpochMs, type HandoffEvent } from '../core/outageAnalyzer';
+import { analyzeOutages, summarizeOutageAnalysis, type HandoffEvent } from '../core/outageAnalyzer';
+import { estimateClockAnchor, isRtcReset, type ClockAnchor } from '../core/dishClock';
 import type { Outage } from '../core/outageTypes';
 
 export interface CollectorConfig {
@@ -85,17 +86,27 @@ export class DataCollector extends EventEmitter {
   /** 网关探测失败日志限流: 同一原因 N 毫秒内只打一次, 避免每 30 秒刷屏 */
   private lastGatewayWarnMs = 0;
   private lastGatewayWarnReason = '';
-  /** 最近一次 history 拉取的时间戳（秒），避免重复分析 */
-  private lastHistoryTimestamp = 0;
   /**
-   * 设备时钟偏差（毫秒），首次分析时算出后**固定复用**。
+   * 已处理过的最大设备时钟读数（rtc_ms），用于挑出「本轮新增」的切换事件。
    *
-   * 为什么要固定：真机 RTC 是错的（报 2016 年），修正方式是「把最新一条事件
-   * 对齐到当前时间」。如果每轮都重新对齐，同一条事件每 30 秒就会被写成
-   * 一个更晚的时间戳（INSERT OR REPLACE 的主键是 ts ⇒ 变成无限增长的行）。
-   * 固定下来之后同一事件永远得到同一个 ts，去重才生效。
+   * ⚠️ 水位线必须建在 **rtc** 上，不能建在换算后的 ts 上：ts 会随着锚点
+   * 校准整体平移，拿它当水位线会漏事件或重复计数。rtc 是设备自己的读数，
+   * 单调递增，与锚点无关。
+   *
+   * ⚠️ 设备重启会让 rtc 跳回更早的基准，此时水位线必须归零（判据与锚点
+   * 重置共用 `isRtcReset`）—— 否则重启后的事件全都小于旧水位线，会被
+   * 当成「早就处理过」永久吞掉：库里一行没有，仪表盘上一条标记都不出现，
+   * 而且没有任何报错。
    */
-  private clockOffsetMs: number | null = null;
+  private lastRtcMs = 0;
+  /**
+   * 设备时钟锚点（`null` = 设备时钟可信，不做换算）。
+   *
+   * 每轮由 `estimateClockAnchor` 推进：设备报的是错的时间戳（真机落后约 10 年），
+   * 必须把它搬回 host 时间轴，否则事件永远落在查询窗口之外，仪表盘一条都不显示。
+   * 锚点的推进规则与理由见 `src/core/dishClock.ts` 开篇。
+   */
+  private clockAnchor: ClockAnchor | null = null;
   /** 检测到的卫星切换事件（内存缓存） */
   private handoffEvents: HandoffEvent[] = [];
   
@@ -273,34 +284,19 @@ export class DataCollector extends EventEmitter {
       }
       
       // 处理卫星切换分析结果
+      //
+      // 落库与内存镜像已在 `analyzeHandoffs()` 内部完成（见其注释），
+      // 这里只负责统计、事件推送与日志 —— 职责分开，避免两处都以为对方在写。
       if (handoffResult.status === 'fulfilled' && handoffResult.value) {
         const newHandoffs = handoffResult.value;
         if (newHandoffs.length > 0) {
-          this.handoffEvents.push(...newHandoffs);
           this.stats.handoffCount += newHandoffs.length;
           this.stats.lastHandoffTime = new Date(newHandoffs[newHandoffs.length - 1].timestamp);
-          
+
           // 发送卫星切换事件
           this.emit('handoffs', newHandoffs);
-          
+
           console.log(`[Collector] 检测到 ${newHandoffs.length} 次卫星切换`);
-          
-          // 写入数据库
-          if (this.store) {
-            try {
-              this.store.appendHandoffs(
-                newHandoffs.map(h => ({
-                  timestamp: h.timestamp,
-                  durationMs: h.durationMs,
-                  cause: h.cause,
-                  parsedCause: h.parsedCause,
-                  isExplicit: h.isExplicit,
-                }))
-              );
-            } catch (error) {
-              console.error('[Collector] 写入卫星切换事件失败:', error);
-            }
-          }
         }
       } else if (handoffResult.status === 'rejected') {
         console.warn('[Collector] 卫星切换分析失败:', handoffResult.reason);
@@ -403,13 +399,7 @@ export class DataCollector extends EventEmitter {
    *
    * @param seconds 时间窗口(秒)
    */
-  getHandoffs(seconds: number): Array<{
-    timestamp: number;
-    durationMs: number;
-    cause: string;
-    parsedCause: string;
-    isExplicit: boolean;
-  }> {
+  getHandoffs(seconds: number): HandoffEvent[] {
     const now = Date.now();
     const fromMs = now - seconds * 1000;
 
@@ -425,6 +415,7 @@ export class DataCollector extends EventEmitter {
     return this.handoffEvents
       .filter((h) => h.timestamp >= fromMs)
       .map((h) => ({
+        rtcMs: h.rtcMs,
         timestamp: h.timestamp,
         durationMs: h.durationMs,
         cause: h.cause,
@@ -589,9 +580,15 @@ export class DataCollector extends EventEmitter {
   }
 
   /**
-   * 分析卫星切换事件（从 dishGetHistory 的 outages 中提取）
-   * 
-   * 返回自上次分析以来新增的切换事件，避免重复计数
+   * 分析卫星切换事件（从 dishGetHistory 的 outages 中提取）。
+   *
+   * 这个方法干了三件事，顺序不能换：
+   *   1. 用当前锚点把设备时钟换算成 host 时间（`analyzeOutages`）
+   *   2. 把整窗事件镜像写库（rtc 作主键 ⇒ 幂等，锚点变准后重写即纠偏）
+   *   3. 推进时钟锚点（本轮最新事件 = 一个新的时钟观测）
+   *
+   * 返回值只含**本轮新增**的事件（rtc 水位线），供统计与事件推送用；
+   * 落库与内存镜像都在方法内部完成，调用方不需要再管。
    */
   private async analyzeHandoffs(): Promise<HandoffEvent[]> {
     try {
@@ -608,22 +605,14 @@ export class DataCollector extends EventEmitter {
 
       // 分析所有 outages
       //
-      // 把 `history.current` 一起传进去：真机 RTC 可能是错的（实测发 2016 年的
-      // 时间戳），分析器要用设备自己的"现在"把事件搬回墙上时间，
-      // 否则切换事件永远落在查询窗口之外，仪表盘一条都显示不出来。
-      const analysis = analyzeOutages(outages, {
-        deviceNow: history.current,
-        // 只有「对齐最新事件」这种推断出来的偏移才复用：
-        // 它每轮重算会把同一条事件写成新的时间戳，去重失效。
-        // 设备若报了合法 epoch（mode=current），每轮重算反而能跟上时钟漂移。
-        clockOffsetMs: this.clockOffsetMs ?? undefined,
-      });
-      if (this.clockOffsetMs === null && analysis.clockMode === 'newest') {
-        this.clockOffsetMs = analysis.clockOffsetMs;
-        console.log(
-          `[Collector] 设备时钟不可信（mode=newest），已固定偏移 ${analysis.clockOffsetMs}ms 供后续事件复用`
-        );
-      }
+      // 用**上一轮**留下的锚点做换算。真机 RTC 可能是错的（实测报 2016 年），
+      // 不换算的话事件永远落在查询窗口之外，仪表盘一条都显示不出来。
+      //
+      // 本轮观测到的最新事件其实可以立刻用来重算锚点，但那样要先算出最新
+      // 事件再回头转换，等于分析两遍。这里选择「先转换、后推进」：代价是
+      // 锚点改进后要下一轮才生效（晚 30 秒），而写入是幂等的（rtc 为身份），
+      // 下一轮重写同一批行时 ts 自然就纠正了。锚点规则见 `dishClock.ts`。
+      const analysis = analyzeOutages(outages, { anchor: this.clockAnchor });
 
       // 发出非切换类的 outage 事件（供告警系统使用）
       //
@@ -648,35 +637,62 @@ export class DataCollector extends EventEmitter {
       //   告警侧自己按 alert_key 去重, 不依赖这里。
       this.emit('outages', analysis.otherOutages);
 
-      if (analysis.handoffs.length === 0) {
-        return [];
+      // 推进设备时钟锚点。
+      //
+      // 本轮的最新事件（不限切换，任何 outage 都是一个时钟观测）发生在上一次
+      // 采集之后、这次采集之前 ⇒ 它对应的 host 时刻就是「现在」，误差一个采集周期。
+      // 这是唯一能给出真实时刻的观测，`estimateClockAnchor` 会把它标成 observed。
+      //
+      // 没有事件时 newestRtcMs = 0，估计器会沿用旧锚（不会退回「设备时钟可信」，
+      // 否则下一轮会重新用 assumed 把已经测准的锚点覆盖掉）。
+      const nextAnchor = estimateClockAnchor(
+        this.clockAnchor,
+        analysis.newestRtcMs || null,
+        Date.now(),
+      );
+      if (nextAnchor !== this.clockAnchor) {
+        this.clockAnchor = nextAnchor;
+        console.log(
+          nextAnchor
+            ? `[Collector] 设备时钟锚点更新: source=${nextAnchor.source} ` +
+                `offset=${nextAnchor.hostMs - nextAnchor.deviceMs}ms ` +
+                `精度±${Math.round(nextAnchor.uncertaintyMs)}ms`
+            : '[Collector] 设备时钟可信，取消偏移修正',
+        );
       }
 
-      // 只返回新增的切换事件。
+      // 整窗镜像写入。
       //
-      // ⚠️ 原来靠 `history.currentTimestamp` 做水位线, 但 DishyMock 的
-      // `buildHistory()` **根本不返回这个字段** ⇒ currentTimestamp 恒为 undefined
-      // ⇒ 这里每次都直接 return [] ⇒ 一条都检测不到。
-      //
-      // 改成**从 outage 数据自身推导水位线**: 取最新的那条 outage 的开始时间。
-      // 设备的历史窗口是滑动的, 新事件会出现在更靠前的位置;
-      // 用「已处理过的最新 outage 时间戳」当水位线, 只取比它更新的。
-      const latestOutageTs = Math.max(
-        ...analysis.handoffs.map((h) => h.timestamp),
-        ...analysis.otherOutages.map((o) => toEpochMs(o.startTimestamp))
-      );
-
-      // 水位线没推进 ⇒ 没有新事件(避免重复写同一条)
-      if (latestOutageTs <= this.lastHistoryTimestamp) {
-        return [];
+      // 灌进去的是**本轮设备 history 窗口里的全部切换事件**，不是只有新增的：
+      // rtc_ms 是主键，重复写只覆盖同一行，所以幂等；而锚点变准之后，
+      // 同一条事件的 ts 会算出新值，只有整体重写才能把库里已存的行纠正过来。
+      // 事件滚出设备窗口后就不再被重写 —— 那时它的 ts 已经稳定，无需再纠。
+      if (this.store && analysis.handoffs.length > 0) {
+        try {
+          this.store.upsertHandoffs(analysis.handoffs);
+        } catch (error) {
+          console.error('[Collector] 写入卫星切换事件失败:', error);
+        }
       }
 
-      const newHandoffs = analysis.handoffs.filter(
-        (h) => h.timestamp > this.lastHistoryTimestamp
-      );
+      // 内存缓存也整窗替换，与库保持一致（原来的写法是无限 append，
+      // 内存里会一直攒着重启以来的全部事件）。
+      this.handoffEvents = analysis.handoffs;
 
-      // 更新时间戳(毫秒级 epoch, 与 h.timestamp 同单位)
-      this.lastHistoryTimestamp = latestOutageTs;
+      // 挑出「本轮新增」的切换事件，只用于统计与事件推送。
+      //
+      // ⚠️ 水位线必须建在 rtc 上，不能建在换算后的 ts 上：ts 会随着锚点
+      // 校准整体平移，拿它当水位线会漏事件（锚点往前挪）或重复计数（往后挪）。
+      //
+      // 设备重启后 rtc 从另一个基准重新计时，旧水位线作废 ⇒ 下界归零，
+      // 整窗事件都算新增（重启后设备 history 也是空的，它们确实都是新的）。
+      // 判据与时钟锚点共用 `isRtcReset`，两边不会各自漂移。
+      const rtcReset = isRtcReset(this.lastRtcMs || null, analysis.newestRtcMs);
+      const watermarkFloor = rtcReset ? 0 : this.lastRtcMs;
+      const newHandoffs = analysis.handoffs.filter((h) => h.rtcMs > watermarkFloor);
+      if (analysis.newestRtcMs > this.lastRtcMs || rtcReset) {
+        this.lastRtcMs = analysis.newestRtcMs;
+      }
 
       // 输出分析摘要
       if (newHandoffs.length > 0) {
@@ -753,26 +769,6 @@ export class DataCollector extends EventEmitter {
   /** 读 dish 自带 GPS 的位置（设置页用；失败直接抛，原因交给界面） */
   getDishLocation(): ReturnType<DishClient['getDishLocation']> {
     return this.client.getDishLocation();
-  }
-  
-  /**
-   * 获取检测到的卫星切换事件
-   * 
-   * @param seconds 时间范围（秒），默认 3600（1小时）
-   * @returns 时间范围内的切换事件
-   */
-  getHandoffEvents(seconds = 3600): HandoffEvent[] {
-    const cutoff = Date.now() - seconds * 1000;
-    return this.handoffEvents.filter(h => h.timestamp >= cutoff);
-  }
-  
-  /**
-   * 清空卫星切换事件缓存
-   */
-  clearHandoffEvents(): void {
-    this.handoffEvents = [];
-    this.stats.handoffCount = 0;
-    this.stats.lastHandoffTime = null;
   }
 }
 

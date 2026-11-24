@@ -1,5 +1,5 @@
 /**
- * 真机 outage 字段名的回归测试
+ * 真机 outage 字段名与时间基准的回归测试
  *
  * ## 为什么需要
  *
@@ -20,11 +20,19 @@
  * 3. 设备带 `didSwitch:true`，明确告诉我们"这次换了卫星"
  *    ⇒ 比按持续时长猜可靠得多。
  *
- * 另外设备 RTC 报的是 **2016 年**，需要按 `history.current` 做整体时钟修正。
+ * ## 时间基准
+ *
+ * 设备 RTC 报的是 2016 年（落后约 10 年），换算成 host 时间需要一个**锚点**。
+ * 锚点由调用方跨轮推进（见 `dishClock.ts` 与 `dishClock.test.ts`），
+ * 这里只验证两件事：
+ *
+ * - 没有锚点时事件保留设备自己的时间轴（不编假时间）
+ * - 有锚点时 `rtcMs` 不变、`timestamp` 整体平移 —— 这正是「rtc 作身份」的含义
  */
 import { describe, it, expect } from 'vitest';
 import { normalizeOutage, isHandoffOutage } from './outageTypes';
 import { analyzeOutages, toEpochMs, detectTimestampUnit } from './outageAnalyzer';
+import type { ClockAnchor } from './dishClock';
 
 /** 真机原始条目（原样照抄） */
 const REAL_OUTAGE = {
@@ -36,6 +44,15 @@ const REAL_OUTAGE = {
 
 /** 真机时间戳解析出来的墙钟时间：2016-11-18 */
 const REAL_TS_MS = 1479420720000;
+/** 真机报告生成时刻（2026-11-24） */
+const HOST_NOW_MS = Date.UTC(2026, 10, 24, 2, 6, 0);
+
+const anchorAt = (deviceMs: number, hostMs: number): ClockAnchor => ({
+  deviceMs,
+  hostMs,
+  uncertaintyMs: 30_000,
+  source: 'observed',
+});
 
 describe('真机 outage 字段名与单位', () => {
   it('认 startTimestampNs / durationNs', () => {
@@ -54,13 +71,13 @@ describe('真机 outage 字段名与单位', () => {
   });
 
   it('纳秒时长换算成毫秒是 560ms 量级，不是天文数字', () => {
-    const { handoffs } = analyzeOutages([REAL_OUTAGE as never], { hostNow: REAL_TS_MS });
+    const { handoffs } = analyzeOutages([REAL_OUTAGE as never]);
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0].durationMs).toBeCloseTo(560.17, 1);
   });
 
   it('didSwitch:true 直接判成卫星切换，且标为明确标识', () => {
-    const { handoffs } = analyzeOutages([REAL_OUTAGE as never], { hostNow: REAL_TS_MS });
+    const { handoffs } = analyzeOutages([REAL_OUTAGE as never]);
     expect(handoffs[0].isExplicit).toBe(true);
     expect(handoffs[0].cause).toBe('NO_DOWNLINK');
   });
@@ -68,17 +85,14 @@ describe('真机 outage 字段名与单位', () => {
   it('OBSTRUCTED + didSwitch:true 仍是遮挡事件，不能被吞成切换', () => {
     // 真机每一条 outage 的 didSwitch 都是 true，连遮挡也是。
     // 若据此判切换，otherOutages 会变空 ⇒ 遮挡告警再也不触发。
-    const { handoffs, otherOutages } = analyzeOutages(
-      [
-        {
-          cause: 'OBSTRUCTED',
-          startTimestampNs: '1479481378560372964',
-          durationNs: '1579831282',
-          didSwitch: true,
-        } as never,
-      ],
-      { hostNow: REAL_TS_MS },
-    );
+    const { handoffs, otherOutages } = analyzeOutages([
+      {
+        cause: 'OBSTRUCTED',
+        startTimestampNs: '1479481378560372964',
+        durationNs: '1579831282',
+        didSwitch: true,
+      } as never,
+    ]);
     expect(handoffs).toHaveLength(0);
     expect(otherOutages).toHaveLength(1);
   });
@@ -95,67 +109,56 @@ describe('真机 outage 字段名与单位', () => {
   });
 });
 
-describe('设备时钟偏差修正', () => {
-  const hostNow = Date.UTC(2026, 10, 23, 10, 0, 0);
+describe('时间基准：rtc 是身份，timestamp 是解释', () => {
+  it('没有锚点时保留设备自己的时间轴，不编假时间', () => {
+    const { handoffs, clockAnchor } = analyzeOutages([REAL_OUTAGE as never]);
+    expect(clockAnchor).toBeNull();
+    expect(handoffs[0].rtcMs).toBeCloseTo(REAL_TS_MS, -1);
+    // 未校准 ⇒ timestamp 就是 rtc
+    expect(handoffs[0].timestamp).toBe(handoffs[0].rtcMs);
+  });
 
-  it('history.current 是开机秒数时，绝不能当 epoch 用', () => {
-    // 真机：current = "398560"，deviceState.uptimeS = "398578" —— 就是 uptime。
-    // 当 epoch 用会把事件搬到 2073 年，比不修正更糟（真机踩过）。
-    const { handoffs, clockMode } = analyzeOutages([REAL_OUTAGE as never], {
-      deviceNow: '398560',
-      hostNow,
+  it('有锚点时 timestamp 被搬到 host 时间轴，rtcMs 一动不动', () => {
+    // 真机形状：outages 窗口里最新一条 ≈ 现在，设备读数落在 2016 年
+    const deviceNewest = 1479484860000;
+    const { handoffs } = analyzeOutages([REAL_OUTAGE as never], {
+      anchor: anchorAt(deviceNewest, HOST_NOW_MS),
     });
-    expect(handoffs).toHaveLength(1);
-    // 应走「最新事件对齐现在」，而不是「current 当 epoch」
-    expect(clockMode).toBe('newest');
-    // 落点必须在这一代（而不是 1970 或 2073）
-    expect(handoffs[0].timestamp).toBeGreaterThan(hostNow - 60 * 1000);
-    expect(handoffs[0].timestamp).toBeLessThanOrEqual(hostNow);
+
+    // 身份不变
+    expect(handoffs[0].rtcMs).toBeCloseTo(REAL_TS_MS, -1);
+    // 解释被平移了约 10 年，落到 2026-11 附近
+    const year = new Date(handoffs[0].timestamp).getUTCFullYear();
+    expect(year).toBe(2026);
+    expect(handoffs[0].timestamp).toBeLessThan(HOST_NOW_MS);
   });
 
-  it('current 确实是 epoch 时按它修正', () => {
-    // 设备时钟慢 1 小时，但内部一致（事件时间戳和 current 同一基准）
-    const skewMs = 3600 * 1000;
-    const deviceNowMs = hostNow - skewMs;
-    const eventAtDeviceMs = deviceNowMs - 4280 * 1000;
-    const { handoffs, clockMode } = analyzeOutages(
-      [
-        {
-          cause: 'NO_DOWNLINK',
-          startTimestampNs: String(BigInt(eventAtDeviceMs) * 1000000n),
-          durationNs: '560167119',
-          didSwitch: true,
-        } as never,
-      ],
-      { deviceNow: String(BigInt(deviceNowMs) * 1000000n), hostNow },
-    );
-    expect(clockMode).toBe('current');
-    // 事件比设备"现在"早 4280 秒 ⇒ 修正后比 hostNow 早约 4280 秒
-    const ageMs = hostNow - handoffs[0].timestamp;
-    expect(ageMs).toBeGreaterThan(4200 * 1000);
-    expect(ageMs).toBeLessThan(4400 * 1000);
+  it('换一个锚点只让 timestamp 平移，rtcMs 保持稳定（锚点校准不产生新事件）', () => {
+    const a = analyzeOutages([REAL_OUTAGE as never], {
+      anchor: anchorAt(1479484860000, HOST_NOW_MS),
+    });
+    // 精度提升：同一设备读数，host 时刻往后挪 500ms
+    const b = analyzeOutages([REAL_OUTAGE as never], {
+      anchor: anchorAt(1479484860000, HOST_NOW_MS + 500),
+    });
+
+    expect(b.handoffs[0].rtcMs).toBe(a.handoffs[0].rtcMs);
+    expect(b.handoffs[0].timestamp - a.handoffs[0].timestamp).toBe(500);
   });
 
-  it('给定固定 offset 时不再自己算（避免同一事件每轮被重写）', () => {
-    const fixed = 316000000000;
-    const a = analyzeOutages([REAL_OUTAGE as never], { hostNow, clockOffsetMs: fixed });
-    const b = analyzeOutages([REAL_OUTAGE as never], { hostNow: hostNow + 30000, clockOffsetMs: fixed });
-    expect(a.handoffs[0].timestamp).toBe(b.handoffs[0].timestamp);
-    expect(a.clockMode).toBe('given');
-  });
+  it('newestRtcMs 取本轮所有事件的最大 rtc，与锚点无关', () => {
+    const events = [
+      { cause: 'NO_DOWNLINK', startTimestampNs: '1479481378560372964', durationNs: '1579831282', didSwitch: true },
+      { cause: 'NO_DOWNLINK', startTimestampNs: '1479484860000208567', durationNs: '540032558', didSwitch: true },
+    ] as never;
 
-  it('设备时钟正常时不做任何修正', () => {
-    const { handoffs, clockMode } = analyzeOutages(
-      [
-        {
-          cause: 'HANDOFF',
-          startTimestamp: String(hostNow - 120000),
-          durationMs: '1500',
-        } as never,
-      ],
-      { hostNow },
-    );
-    expect(clockMode).toBe('none');
-    expect(handoffs[0].timestamp).toBe(hostNow - 120000);
+    const plain = analyzeOutages(events);
+    const anchored = analyzeOutages(events, {
+      anchor: anchorAt(1479484860000, HOST_NOW_MS),
+    });
+
+    expect(plain.newestRtcMs).toBeCloseTo(1479484860000, -1);
+    // 锚点平移不改 newestRtcMs —— 水位线建在这个值上才不会漏事件
+    expect(anchored.newestRtcMs).toBe(plain.newestRtcMs);
   });
 });

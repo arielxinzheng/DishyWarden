@@ -25,8 +25,9 @@
  * v5: telemetry_samples 增加 public_ping_ms 和 local_gateway_ms 列
  * v6: 增加 satellite_handoffs 表，记录卫星切换事件
  * v7: telemetry_samples 增加 class_of_service, disablement_code, alerts_json 列
+ * v8: satellite_handoffs 主键由 ts 改成 rtc_ms（设备时钟值是事件的身份）
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** 原始采样保留天数 */
 export const SAMPLE_RETENTION_DAYS = 7;
@@ -39,6 +40,38 @@ export const HANDOFF_RETENTION_DAYS = 30;
 
 /** 采样间隔假设(毫秒), 用于估算流量与判断是否需要分桶 */
 export const SAMPLE_INTERVAL_MS = 30_000;
+
+/**
+ * satellite_handoffs 的建表语句。
+ *
+ * 单独拎出来是因为 v8 迁移要整表重建（SQLite 不支持改主键），
+ * 而重建出来的表必须和全新安装的结构一模一样。两处各写一遍 DDL
+ * 迟早会走样，所以只留一份。
+ *
+ * ## 为什么主键是 rtc_ms 而不是 ts
+ *
+ * 设备 RTC 的基准可能是错的（真机实测早约 10 年，见 `dishClock.ts` 开篇）。
+ * 把 rtc 换算成 ts 需要一个「锚点」，而锚点会随着观测逐渐变准。事件的身份
+ * 必须是设备自己的读数 —— 这样锚点变准后重写的是同一行，而不是在库里
+ * 留下一条错位的历史。旧表用 ts 当主键，每校准一次就多出一行重复事件。
+ *
+ * ## 为什么 still 存 ts
+ *
+ * ts 是派生列（= rtc_ms + 当前锚点偏移）。存在库里的理由是锚点只活在
+ * 进程内存中，重启后无从还原，查询窗口只能按已存下来的值算。
+ * 代价是它可能与当前锚点不一致 —— 采集器每轮按最新锚点整体重写窗口内的行
+ * （写入是 `INSERT OR REPLACE`，以 rtc_ms 为身份，天然幂等）。
+ */
+export const SATELLITE_HANDOFFS_DDL = `
+  CREATE TABLE IF NOT EXISTS satellite_handoffs (
+    rtc_ms      INTEGER PRIMARY KEY,  -- 设备时钟值 (epoch ms, 基准可能不准)
+    ts          INTEGER NOT NULL,     -- 按当前锚点换算出的 host 时间戳
+    duration_ms INTEGER NOT NULL,     -- 切换持续时长（毫秒）
+    cause       TEXT    NOT NULL,     -- 原始 outage cause 字符串
+    parsed_cause TEXT   NOT NULL,     -- 解析后的 OutageCause 枚举值
+    is_explicit INTEGER NOT NULL      -- 是否为明确的切换标识（1=是，0=否）
+  );
+`;
 
 export const DDL = `
   CREATE TABLE IF NOT EXISTS telemetry_samples (
@@ -111,15 +144,9 @@ export const DDL = `
     source TEXT NOT NULL DEFAULT 'real'
   );
 
-  -- 卫星切换事件表（保留 30 天）
-  CREATE TABLE IF NOT EXISTS satellite_handoffs (
-    ts          INTEGER PRIMARY KEY,  -- 切换发生时间戳 (epoch ms)
-    duration_ms INTEGER NOT NULL,     -- 切换持续时长（毫秒）
-    cause       TEXT    NOT NULL,     -- 原始 outage cause 字符串
-    parsed_cause TEXT   NOT NULL,     -- 解析后的 OutageCause 枚举值
-    is_explicit INTEGER NOT NULL      -- 是否为明确的切换标识（1=是，0=否）
-  );
+  -- 卫星切换事件表（保留 30 天），结构定义见 SATELLITE_HANDOFFS_DDL
+  ${SATELLITE_HANDOFFS_DDL}
 
-  -- 索引: 时间范围查询（图表标记点、频率统计）
+  -- 索引: 时间范围查询（图表标记点、频率统计）；ts 不再是主键，需要独立索引
   CREATE INDEX IF NOT EXISTS idx_handoffs_ts ON satellite_handoffs(ts);
 `;

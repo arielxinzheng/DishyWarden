@@ -60,6 +60,7 @@
     "handoff_show": "点击显示卫星切换标记",
     "handoff_hide": "点击隐藏卫星切换标记",
     "handoff_no_records": "该时间范围内没有卫星切换记录",
+    "handoff_not_applicable": "网关是本地链路，不经卫星，因此不标注卫星切换",
     "handoff_last_seen_minutes": "最近一次切换：{{count}} 分钟前",
     "handoff_last_seen_hours": "最近一次切换：{{count}} 小时前",
     "handoff_last_seen_days": "最近一次切换：{{count}} 天前",

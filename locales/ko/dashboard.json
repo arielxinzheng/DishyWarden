@@ -60,6 +60,7 @@
     "handoff_show": "클릭하면 위성 전환 마커가 표시됩니다",
     "handoff_hide": "클릭하면 위성 전환 마커가 숨겨집니다",
     "handoff_no_records": "이 시간 범위에는 위성 인계 기록이 없습니다",
+    "handoff_not_applicable": "게이트웨이는 위성을 거치지 않는 로컬 회선이므로 위성 전환을 표시하지 않습니다",
     "handoff_last_seen_minutes": "마지막 핸드오프: {{count}}분 전",
     "handoff_last_seen_hours": "마지막 핸드오프: {{count}}시간 전",
     "handoff_last_seen_days": "마지막 핸드오프: {{count}}일 전",

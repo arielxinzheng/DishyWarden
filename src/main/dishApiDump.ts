@@ -24,6 +24,7 @@ import path from 'node:path';
 import { DishGrpcClient } from '../core/dishGrpc';
 import { DishClient } from '../core/dishClient';
 import { analyzeOutages } from '../core/outageAnalyzer';
+import { estimateClockAnchor } from '../core/dishClock';
 import { dualLine, getLogFilePath } from './logger';
 
 /** 常见分支名候选（覆盖 get* / dishGet* 两种命名风格） */
@@ -54,6 +55,18 @@ const CANDIDATES = [
 function line(s = ''): void {
   collected.push(s);
   dualLine(s);
+}
+
+/**
+ * 时间戳的可读形式（UTC ISO）。
+ *
+ * 报告是给现场的人看的：`@1795454685408.0166` 这种毫秒浮点数核对不了，
+ * 一眼能对上是哪一天才有意义。非法的值退回原样 + 标记。
+ */
+function isoOrRaw(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return `${ms} (无效)`;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? `${ms} (无效)` : d.toISOString();
 }
 
 /**
@@ -421,14 +434,28 @@ export async function runDishApiDump(opts: DishApiDumpOptions): Promise<void> {
     }
     if (outages.length > 0) {
       // 用应用同一套判定跑一遍, 直接看出「有没有被认成卫星切换」
+      //
+      // 诊断报告是单次运行，没有跨轮锚点可复用，只能就地建一个：
+      // 先把不修正的结果跑一遍拿到「最新事件」的设备时钟值，再据此推定锚点。
+      // 这样落在 2016 / 2073 的时间戳会被搬回今天，而设备时钟本来就对的情况下
+      // estimateClockAnchor 会返回 null（= 不修正），原样保留。
       try {
-        const analysis = analyzeOutages(outages as never, { deviceNow: history.current });
+        const dryRun = analyzeOutages(outages as never);
+        const anchor = estimateClockAnchor(null, dryRun.newestRtcMs || null, Date.now());
+        const analysis = anchor === null ? dryRun : analyzeOutages(outages as never, { anchor });
+        line(
+          '    时钟基准: ' +
+            (anchor
+              ? `设备 RTC 不可信, 偏移 ${anchor.hostMs - anchor.deviceMs}ms ` +
+                `(精度 ±${Math.round(anchor.uncertaintyMs)}ms, 来源 ${anchor.source})`
+              : '设备 RTC 可信, 未做修正'),
+        );
         line(`    判定结果: 切换 ${analysis.handoffs.length} 条 / 其他中断 ${analysis.otherOutages.length} 条`);
         for (const h of analysis.handoffs.slice(0, 5)) {
-          line(`      切换 @${h.timestamp} 时长 ${h.durationMs}ms 原因 ${h.cause}`);
+          line(`      切换 @${isoOrRaw(h.timestamp)} 时长 ${h.durationMs}ms 原因 ${h.cause}`);
         }
         for (const o of analysis.otherOutages.slice(0, 3)) {
-          line(`      其他中断 @${o.startTimestamp} (${o.cause})`);
+          line(`      其他中断 @${isoOrRaw(o.startTimestamp)} (${o.cause})`);
         }
         if (analysis.handoffs.length === 0) {
           line('    ⇒ 没有一条被认成卫星切换 —— 上面的「原始」行里就是原因。');
