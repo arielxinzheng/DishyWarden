@@ -105,13 +105,19 @@ DishyWarden talks to the terminal's **local gRPC API**:
 
 | Port | Transport | Role |
 |---|---|---|
-| `9200` | native gRPC | primary |
-| `9201` | grpc-web | fallback — some firmware answers `UNIMPLEMENTED` on 9200 |
+| `9201` | grpc-web | **primary transport** — this is what the app actually uses to talk to the terminal |
+| `9200` | native gRPC | used for reflection (the proto descriptors live here); also the fallback when 9201 is unreachable |
 
-The dish does not expose this API to the LAN, so you normally point the app at a
-**local bridge** that proxies to the terminal (for example a `dishylink`-style
-tool running on the same machine). Configure the address and ports in
-**Settings → Terminal connection**.
+As long as your computer is on the same network as the Starlink router, just enter
+the terminal's LAN address (default `192.168.100.1`) — **no third-party tooling is
+required**.
+
+A proxy is only needed when your computer cannot reach the terminal's subnet at all
+(for example a laptop joined through a Wi-Fi repeater that cannot route to
+`192.168.100.0/24`).
+
+Set the address in **Settings → Data collection** under "Dish address", and
+**leave the port at its default** — the app picks a working transport on its own.
 
 ---
 

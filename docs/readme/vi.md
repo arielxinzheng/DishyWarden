@@ -111,12 +111,17 @@ DishyWarden nói chuyện với **API gRPC cục bộ** của đầu cuối:
 
 | Cổng | Kiểu truyền | Vai trò |
 |---|---|---|
-| `9200` | gRPC gốc | đường chính |
-| `9201` | grpc-web | dự phòng — một số firmware trả về `UNIMPLEMENTED` ở 9200 |
+| `9201` | grpc-web | **đường chính** — kênh mà ứng dụng thực sự dùng để nói chuyện với đầu cuối |
+| `9200` | gRPC gốc | dùng cho reflection (nơi chứa proto descriptor); cũng là đường dự phòng khi 9201 không truy cập được |
 
-Đầu cuối không công bố API này ra mạng nội bộ, nên thường bạn cần chạy một
-**cầu nối cục bộ** trên cùng máy để chuyển tiếp tới đầu cuối (ví dụ công cụ kiểu
-`dishylink`), rồi điền địa chỉ và cổng trong **Cài đặt → Kết nối đầu cuối**.
+Miễn là máy tính của bạn nằm trong cùng mạng với bộ định tuyến Starlink, chỉ cần
+nhập **địa chỉ LAN của đầu cuối** (mặc định `192.168.100.1`) — **không cần công cụ bên thứ ba nào**.
+
+Chỉ cần một proxy khi máy tính không thể tới mạng con của đầu cuối (ví dụ laptop đi qua
+bộ lặp Wi-Fi và không định tuyến được tới `192.168.100.0/24`).
+
+Đặt địa chỉ trong **Cài đặt → Thu thập dữ liệu** ở mục "Địa chỉ Dish" và **để nguyên cổng mặc định** —
+ứng dụng tự chọn kênh khả dụng.
 
 ---
 
